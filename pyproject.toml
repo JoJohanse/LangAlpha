@@ -85,6 +85,9 @@ required-version = ">=0.6.15"
 [tool.ruff.lint]
 ignore = ["E741"]  # allow short names like l, O, I (common in OHLCV code)
 
+[tool.ruff.lint.per-file-ignores]
+"src/server/app/setup.py" = ["E402"]  # router imports intentionally placed after app creation
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.1",

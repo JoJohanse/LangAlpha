@@ -18,6 +18,10 @@ class FMPDataSource:
     # so the chain can fall through to a provider that does support it.
     _SUPPORTED_INTERVALS = frozenset({"1min", "5min", "15min", "30min", "1hour", "4hour"})
 
+    @staticmethod
+    def _api_symbol(symbol: str, is_index: bool) -> str:
+        return f"^{symbol}" if is_index and not symbol.startswith("^") else symbol
+
     async def get_intraday(
         self,
         symbol: str,
@@ -31,7 +35,7 @@ class FMPDataSource:
             raise ValueError(
                 f"Interval '{interval}' is not supported by this data source"
             )
-        api_symbol = f"^{symbol}" if is_index and not symbol.startswith("^") else symbol
+        api_symbol = self._api_symbol(symbol, is_index)
         async with FMPClient() as client:
             data = await client.get_intraday_chart(
                 symbol=api_symbol,
@@ -46,11 +50,13 @@ class FMPDataSource:
         symbol: str,
         from_date: str | None = None,
         to_date: str | None = None,
+        is_index: bool = False,
         user_id: str | None = None,
     ) -> list[dict[str, Any]]:
+        api_symbol = self._api_symbol(symbol, is_index)
         async with FMPClient() as client:
             data = await client.get_stock_price(
-                symbol=symbol,
+                symbol=api_symbol,
                 from_date=from_date,
                 to_date=to_date,
             )

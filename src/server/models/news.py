@@ -44,6 +44,7 @@ class NewsArticleCompact(BaseModel):
     published_at: str
     image_url: str | None = None
     source: NewsPublisher
+    tickers: list[str] = []
     has_sentiment: bool = False
 
 

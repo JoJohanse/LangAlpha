@@ -59,6 +59,29 @@ def _convert_data_points(raw_data: list) -> list[IntradayDataPoint]:
     ]
 
 
+async def _get_daily(
+    symbol: str, user_id: str, from_date, to_date, *, is_index: bool = False,
+) -> DailyResponse:
+    service = DailyCacheService.get_instance()
+    result = await service.get_stock_daily(
+        symbol=symbol, from_date=from_date, to_date=to_date,
+        is_index=is_index, user_id=user_id,
+    )
+    if result.error:
+        raise HTTPException(status_code=500, detail=result.error)
+    data_points = _convert_data_points(result.data)
+    return DailyResponse(
+        symbol=result.symbol, data=data_points, count=len(data_points),
+        cache=CacheMetadata(
+            cached=result.cached, cache_key=result.cache_key,
+            ttl_remaining=result.ttl_remaining,
+            refreshed_in_background=result.background_refresh_triggered,
+            watermark=result.watermark, complete=result.complete,
+            market_phase=result.market_phase,
+        ),
+    )
+
+
 # =============================================================================
 # Single Stock Endpoints
 # =============================================================================
@@ -142,38 +165,33 @@ async def get_stock_daily(
 ) -> DailyResponse:
     """Get daily historical data for a single stock."""
     try:
-        service = DailyCacheService.get_instance()
-        result = await service.get_stock_daily(
-            symbol=symbol,
-            from_date=from_date,
-            to_date=to_date,
-            user_id=user_id,
-        )
-
-        if result.error:
-            raise HTTPException(status_code=500, detail=result.error)
-
-        data_points = _convert_data_points(result.data)
-
-        return DailyResponse(
-            symbol=result.symbol,
-            data=data_points,
-            count=len(data_points),
-            cache=CacheMetadata(
-                cached=result.cached,
-                cache_key=result.cache_key,
-                ttl_remaining=result.ttl_remaining,
-                refreshed_in_background=result.background_refresh_triggered,
-                watermark=result.watermark,
-                complete=result.complete,
-                market_phase=result.market_phase,
-            ),
-        )
-
+        return await _get_daily(symbol, user_id, from_date, to_date)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error fetching daily stock data for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/daily/indexes/{symbol}",
+    response_model=DailyResponse,
+    summary="Get index daily historical data",
+    description="Retrieve daily EOD OHLCV data for a single index symbol (~500 days by default).",
+)
+async def get_index_daily(
+    symbol: str,
+    user_id: CurrentUserId,
+    from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
+) -> DailyResponse:
+    """Get daily historical data for a single index."""
+    try:
+        return await _get_daily(symbol, user_id, from_date, to_date, is_index=True)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching daily index data for {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

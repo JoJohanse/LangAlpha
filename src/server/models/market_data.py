@@ -10,10 +10,10 @@ from pydantic import BaseModel, Field, field_validator
 
 # Supported intervals for intraday data
 STOCK_INTERVALS = ("1s", "1min", "5min", "15min", "30min", "1hour", "4hour")
-INDEX_INTERVALS = ("1s", "1min", "5min", "1hour")
+INDEX_INTERVALS = ("1s", "1min", "5min", "15min", "30min", "1hour", "4hour")
 
 StockInterval = Literal["1s", "1min", "5min", "15min", "30min", "1hour", "4hour"]
-IndexInterval = Literal["1s", "1min", "5min", "1hour"]
+IndexInterval = Literal["1s", "1min", "5min", "15min", "30min", "1hour", "4hour"]
 
 
 class IntradayDataPoint(BaseModel):

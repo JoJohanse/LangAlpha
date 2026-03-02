@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class DailyCacheKeyBuilder:
-    """Build cache keys for daily stock data."""
+    """Build cache keys for daily OHLCV data."""
 
     PREFIX = "ohlcv"
 
@@ -47,18 +47,20 @@ class DailyCacheKeyBuilder:
             return True
 
     @classmethod
-    def stock_key(
+    def daily_key(
         cls,
         symbol: str,
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
         source: Optional[str] = None,
+        is_index: bool = False,
     ) -> str:
         symbol = symbol.upper()
         src = f"{source}:" if source else ""
+        market = "index" if is_index else "stock"
         if cls._is_live(to_date):
-            return f"{cls.PREFIX}:{src}stock:{symbol}:1day"
-        return f"{cls.PREFIX}:{src}stock:{symbol}:1day:{from_date}:{to_date}"
+            return f"{cls.PREFIX}:{src}{market}:{symbol}:1day"
+        return f"{cls.PREFIX}:{src}{market}:{symbol}:1day:{from_date}:{to_date}"
 
 
 # ---------------------------------------------------------------------------
@@ -124,17 +126,20 @@ class DailyCacheService:
         symbol: str,
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
+        is_index: bool = False,
         user_id: Optional[str] = None,
     ) -> tuple:
         """Fetch daily data and return ``(bars, source_name)``."""
         provider = await get_market_data_provider()
         data, source = await provider.get_daily_with_source(
-            symbol=symbol, from_date=from_date, to_date=to_date, user_id=user_id,
+            symbol=symbol, from_date=from_date, to_date=to_date,
+            is_index=is_index, user_id=user_id,
         )
         return data, source
 
     async def _find_cached(
         self, symbol: str, from_date: Optional[str], to_date: Optional[str],
+        is_index: bool = False,
     ) -> tuple:
         """Try cache lookup across all known data sources.
 
@@ -143,7 +148,7 @@ class DailyCacheService:
         cache = get_cache_client()
         provider = await get_market_data_provider()
         for source in provider.source_names:
-            key = DailyCacheKeyBuilder.stock_key(symbol, from_date, to_date, source=source)
+            key = DailyCacheKeyBuilder.daily_key(symbol, from_date, to_date, source=source, is_index=is_index)
             raw = await cache.get(key)
             envelope = _parse_envelope(raw) if raw else None
             if envelope is not None:
@@ -156,6 +161,7 @@ class DailyCacheService:
         self,
         cache_key: str,
         symbol: str,
+        is_index: bool = False,
         user_id: Optional[str] = None,
     ) -> None:
         lock = self._get_refresh_lock(cache_key)
@@ -180,7 +186,7 @@ class DailyCacheService:
                 # For daily data, watermark IS a date — use it directly
                 delta_from = watermark[:10] if watermark and len(watermark) >= 10 else None
 
-                delta, _source = await self._fetch_data(symbol, from_date=delta_from, to_date=None, user_id=user_id)
+                delta, _source = await self._fetch_data(symbol, from_date=delta_from, to_date=None, is_index=is_index, user_id=user_id)
 
                 if watermark and existing_bars:
                     merged = _merge_bars(existing_bars, delta, watermark)
@@ -209,16 +215,17 @@ class DailyCacheService:
         symbol: str,
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
+        is_index: bool = False,
         user_id: Optional[str] = None,
     ) -> DailyFetchResult:
-        normalized = symbol.upper()
+        normalized = symbol.lstrip("^").upper()
 
         base_ttl = self._base_ttl()
         cache = get_cache_client()
         phase = current_market_phase()
 
         # --- Try cache (across all known sources) ---
-        cache_key, envelope = await self._find_cached(normalized, from_date, to_date)
+        cache_key, envelope = await self._find_cached(normalized, from_date, to_date, is_index=is_index)
 
         if envelope is not None:
             bars = envelope["bars"]
@@ -232,7 +239,7 @@ class DailyCacheService:
             if _needs_refresh(envelope, base_ttl):
                 bg_triggered = True
                 asyncio.create_task(
-                    self._delta_refresh(cache_key, normalized, user_id)
+                    self._delta_refresh(cache_key, normalized, is_index=is_index, user_id=user_id)
                 )
 
             return DailyFetchResult(
@@ -249,8 +256,8 @@ class DailyCacheService:
 
         # --- Cache miss: full fetch ---
         try:
-            data, source = await self._fetch_data(normalized, from_date, to_date, user_id=user_id)
-            cache_key = DailyCacheKeyBuilder.stock_key(normalized, from_date, to_date, source=source)
+            data, source = await self._fetch_data(normalized, from_date, to_date, is_index=is_index, user_id=user_id)
+            cache_key = DailyCacheKeyBuilder.daily_key(normalized, from_date, to_date, source=source, is_index=is_index)
 
             closed = phase == "closed"
             complete = closed and len(data) > 0

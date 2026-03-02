@@ -146,6 +146,7 @@ class MarketDataProvider:
         symbol: str,
         from_date: str | None = None,
         to_date: str | None = None,
+        is_index: bool = False,
         user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         return await self._try_chain(
@@ -153,6 +154,7 @@ class MarketDataProvider:
             symbol,
             from_date=from_date,
             to_date=to_date,
+            is_index=is_index,
             user_id=user_id,
         )
 
@@ -161,6 +163,7 @@ class MarketDataProvider:
         symbol: str,
         from_date: str | None = None,
         to_date: str | None = None,
+        is_index: bool = False,
         user_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], str]:
         """Like ``get_daily`` but also returns the source name."""
@@ -169,6 +172,7 @@ class MarketDataProvider:
             symbol,
             from_date=from_date,
             to_date=to_date,
+            is_index=is_index,
             user_id=user_id,
         )
 

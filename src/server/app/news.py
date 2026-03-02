@@ -31,6 +31,7 @@ def _compact(article: dict) -> NewsArticleCompact:
         published_at=article["published_at"],
         image_url=article.get("image_url"),
         source=NewsPublisher(**article["source"]),
+        tickers=article.get("tickers", []),
         has_sentiment=bool(sentiments and len(sentiments) > 0),
     )
 

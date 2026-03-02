@@ -115,14 +115,17 @@ class GinlixDataSource:
         symbol: str,
         from_date: str | None = None,
         to_date: str | None = None,
+        is_index: bool = False,
         user_id: str | None = None,
     ) -> list[dict[str, Any]]:
+        market = "index" if is_index else "stock"
+        api_symbol = self._index_symbol(symbol) if is_index else symbol
         from_date, to_date = self._default_dates(
             from_date, to_date, self._DAILY_LOOKBACK_DAYS
         )
         raw = await self.client.get_aggregates(
-            market="stock",
-            symbol=symbol,
+            market=market,
+            symbol=api_symbol,
             timespan="day",
             multiplier=1,
             from_date=from_date,

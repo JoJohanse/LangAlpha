@@ -35,6 +35,7 @@ class MarketDataSource(Protocol):
         symbol: str,
         from_date: str | None = None,
         to_date: str | None = None,
+        is_index: bool = False,
         user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return daily OHLCV bars.
