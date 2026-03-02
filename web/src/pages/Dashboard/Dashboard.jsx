@@ -22,6 +22,7 @@ import ChatInputCard from './components/ChatInputCard';
 import EarningsCalendarCard from './components/EarningsCalendarCard';
 import PortfolioWatchlistCard from './components/PortfolioWatchlistCard';
 import NewsDetailModal from './components/NewsDetailModal';
+import InsightDetailModal from './components/InsightDetailModal';
 import AddWatchlistItemDialog from './components/AddWatchlistItemDialog';
 import AddPortfolioHoldingDialog from './components/AddPortfolioHoldingDialog';
 import { useWatchlistData } from './hooks/useWatchlistData';
@@ -93,6 +94,9 @@ function Dashboard() {
 
   // News modal state
   const [selectedNewsId, setSelectedNewsId] = useState(null);
+
+  // Insight modal state
+  const [selectedMarketInsightId, setSelectedMarketInsightId] = useState(null);
 
   const [indices, setIndices] = useState(() =>
     indicesCache || INDEX_SYMBOLS.map((s) => fallbackIndex(normalizeIndexSymbol(s)))
@@ -274,7 +278,7 @@ function Dashboard() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Left 2/3 */}
             <div className="lg:col-span-2 space-y-8">
-              <AIDailyBriefCard />
+              <AIDailyBriefCard onReadFull={setSelectedMarketInsightId} />
               <NewsFeedCard
                 marketItems={newsItems}
                 marketLoading={newsLoading}
@@ -315,6 +319,14 @@ function Dashboard() {
 
       {/* News Detail Modal */}
       <NewsDetailModal newsId={selectedNewsId} onClose={() => setSelectedNewsId(null)} />
+
+      {/* Insight Detail Modal */}
+      {selectedMarketInsightId && (
+        <InsightDetailModal
+          marketInsightId={selectedMarketInsightId}
+          onClose={() => setSelectedMarketInsightId(null)}
+        />
+      )}
 
       {/* Dialogs */}
       <ConfirmDialog

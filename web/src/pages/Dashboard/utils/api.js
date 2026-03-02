@@ -408,6 +408,23 @@ export async function getNewsArticle(articleId) {
   return data;
 }
 
+// --- AI Insights ---
+
+export async function getTodayInsights() {
+  try {
+    const { data } = await api.get('/api/v1/insights/today');
+    return data?.insights || [];
+  } catch (e) {
+    console.error('[API] getTodayInsights failed:', e?.message);
+    return [];
+  }
+}
+
+export async function getInsightDetail(marketInsightId) {
+  const { data } = await api.get(`/api/v1/insights/${encodeURIComponent(marketInsightId)}`);
+  return data;
+}
+
 // --- InfoFlow (content feed — kept for PopularCard) ---
 
 /**
