@@ -8,6 +8,7 @@ from .tavily_research_tool import (
     configure as configure_research,
     deep_research,
 )
+from .stream_parser import parse_research_stream
 
 __all__ = [
     "TavilySearchWrapper",
@@ -16,4 +17,5 @@ __all__ = [
     "web_search",
     "configure_research",
     "deep_research",
+    "parse_research_stream",
 ]

@@ -215,10 +215,28 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Failed to start AutomationScheduler: {e}")
         logger.warning("Scheduled automations will not run")
 
+    # Start MarketInsightService (schedule-based market news gathering)
+    try:
+        from src.server.services.insight_service import InsightService
+
+        insight_service_inst = InsightService.get_instance()
+        await insight_service_inst.start()
+    except Exception as e:
+        logger.warning(f"Failed to start MarketInsightService: {e}")
+
     yield  # Server is running
 
     # Shutdown
     logger.info("Application shutdown started...")
+
+    # 0. Shutdown MarketInsightService
+    try:
+        from src.server.services.insight_service import InsightService
+
+        insight_svc = InsightService.get_instance()
+        await insight_svc.shutdown()
+    except Exception as e:
+        logger.warning(f"Error shutting down MarketInsightService: {e}")
 
     # 1. Shutdown AutomationScheduler
     try:
@@ -396,6 +414,7 @@ from src.server.app.calendar import router as calendar_router
 from src.server.app.sec_proxy import router as sec_proxy_router
 from src.server.app.api_keys import router as api_keys_router
 from src.server.app.automations import router as automations_router
+from src.server.app.insights import router as insights_router
 from src.server.app.oauth import router as oauth_router
 from src.server.app.public import router as public_router
 from src.server.app.skills import router as skills_router
@@ -441,6 +460,7 @@ app.include_router(
 app.include_router(
     automations_router
 )  # /api/v1/automations/* - Scheduled automation triggers
+app.include_router(insights_router)  # /api/v1/insights/* - AI market insights
 app.include_router(oauth_router)  # /api/v1/oauth/* - OAuth provider connections (Codex)
 app.include_router(
     public_router

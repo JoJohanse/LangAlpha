@@ -1,6 +1,5 @@
 """Tavily research tool for deep research via LangChain integration."""
 
-import json
 import logging
 from typing import Any, Dict, Optional, Tuple
 
@@ -72,36 +71,12 @@ async def deep_research(
         # handles waiting internally and yields SSE chunks as they arrive.
         stream = await client.research(input=instruction, model=_model, stream=True)
 
-        content_parts = []
-        sources = []
-        actual_model = _model
+        from src.tools.search_services.tavily.stream_parser import (
+            parse_research_stream,
+        )
 
-        async for chunk in stream:
-            text = chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk)
-
-            for line in text.strip().split("\n"):
-                if not line.startswith("data: "):
-                    continue
-                try:
-                    data = json.loads(line[6:])
-                except json.JSONDecodeError:
-                    continue
-
-                # Capture model from first event (resolves 'auto')
-                if event_model := data.get("model"):
-                    actual_model = event_model
-
-                choices = data.get("choices")
-                if not choices:
-                    continue
-                delta = choices[0].get("delta", {})
-
-                if "content" in delta:
-                    content_parts.append(delta["content"])
-                if "sources" in delta:
-                    sources = delta["sources"]
-
-        content = "".join(content_parts)
+        content, sources, actual_model = await parse_research_stream(stream)
+        actual_model = actual_model or _model
         logger.info(
             f"Tavily research completed: model={actual_model}, "
             f"content_len={len(content)}, sources={len(sources)}"
