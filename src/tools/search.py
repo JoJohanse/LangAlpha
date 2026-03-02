@@ -60,3 +60,17 @@ def get_web_search_tool(
             f"Unsupported search engine: {SELECTED_SEARCH_ENGINE}. "
             f"Supported engines: {[e.value for e in SearchEngine]}"
         )
+
+
+def get_research_tool():
+    """Get deep research tool (Tavily Research API).
+
+    Always available regardless of SELECTED_SEARCH_ENGINE since research
+    is a distinct capability from web search. The tool tracks credits
+    dynamically inside based on the model used (mini vs pro).
+    """
+    from src.tools.search_services.tavily import configure_research, deep_research
+
+    configure_research()
+    # Don't use create_logged_tool — the tool tracks credits dynamically inside
+    return deep_research

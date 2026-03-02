@@ -82,7 +82,9 @@ TOOL_TO_SERVICE_MAPPING = {
     "TavilySearchTool": "tavily_search",
     "TavilySearchImages": "tavily_images",
     "BochaSearchTool": "bocha_search",
-    "SerperSearchTool": "serper_search"
+    "SerperSearchTool": "serper_search",
+    "TavilyResearchMini": "tavily_research_mini",
+    "TavilyResearchPro": "tavily_research_pro",
 }
 
 
