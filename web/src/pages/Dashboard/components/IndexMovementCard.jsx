@@ -10,7 +10,9 @@ function IndexCard({ index, delay }) {
   const pct = Number(index.changePercent);
   const changeStr = ch.toFixed(2);
   const pctStr = '(' + (pos ? '+' : '') + pct.toFixed(2) + '%)';
-  const chartData = (index.sparklineData || []).map((val, i) => ({ val, i }));
+  const chartData = (index.sparklineData || []).map((pt, i) =>
+    typeof pt === 'object' ? { ...pt, i } : { val: pt, i },
+  );
 
   const today = new Date();
   const dateStr = `${today.getMonth() + 1}/${today.getDate()}`;
@@ -81,7 +83,33 @@ function IndexCard({ index, delay }) {
                 dot={false}
                 isAnimationActive={false}
               />
-              <Tooltip content={() => null} cursor={false} />
+              <Tooltip
+                content={({ active, payload }) => {
+                  if (!active || !payload?.[0]) return null;
+                  const d = payload[0].payload;
+                  return (
+                    <div
+                      className="rounded-lg px-2.5 py-1.5 text-xs shadow-lg border"
+                      style={{
+                        backgroundColor: 'var(--color-bg-card)',
+                        borderColor: 'var(--color-border-muted)',
+                        color: 'var(--color-text-primary)',
+                      }}
+                    >
+                      {d.time && (
+                        <div style={{ color: 'var(--color-text-secondary)' }}>{d.time}</div>
+                      )}
+                      <div className="font-semibold dashboard-mono">
+                        {Number(d.val).toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </div>
+                    </div>
+                  );
+                }}
+                cursor={{ stroke: 'var(--color-border-default)', strokeWidth: 1 }}
+              />
               <YAxis domain={['dataMin', 'dataMax']} hide />
             </LineChart>
           </ResponsiveContainer>

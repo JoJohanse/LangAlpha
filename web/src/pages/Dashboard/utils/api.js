@@ -11,7 +11,7 @@ import * as watchlistItemsApi from './watchlistItems';
 
 /** Index symbols: normalized (GSPC, IXIC, DJI, RUT). Index.yml / Index Batch.yml use these. */
 const INDEX_SYMBOLS = ['GSPC', 'IXIC', 'DJI', 'RUT', 'VIX'];
-const INDEX_NAMES = { GSPC: 'S&P 500', IXIC: 'NASDAQ 100', DJI: 'Dow Jones', RUT: 'Russell 2000', VIX: 'VIX' };
+const INDEX_NAMES = { GSPC: 'S&P 500', IXIC: 'NASDAQ', DJI: 'Dow Jones', RUT: 'Russell 2000', VIX: 'VIX' };
 
 function normalizeIndexSymbol(s) {
   return String(s).replace(/^\^/, '').toUpperCase();
@@ -41,16 +41,24 @@ export async function getIndex(symbol, opts = {}) {
 
     const pts = data?.data ?? [];
 
-    // Use the most recent data point (first item in array, as backend returns newest first)
     if (!Array.isArray(pts) || !pts.length) {
       throw new Error(`No intraday data for ${norm}`);
     }
 
-    // Most recent data point is the first one
-    const mostRecent = pts[0];
-    const oldest = pts[pts.length - 1];
+    // Sort ascending by date (backend may return in either order depending on index)
+    const sorted = [...pts].sort((a, b) => a.date.localeCompare(b.date));
 
-    // Calculate change from oldest to newest (most recent)
+    // Isolate the most recent trading day, regular hours only (9:30–16:00)
+    const latestDate = sorted[sorted.length - 1].date.split(' ')[0];
+    const todayPoints = sorted.filter((p) => {
+      if (!p.date.startsWith(latestDate)) return false;
+      const time = p.date.split(' ')[1];
+      return time >= '09:30' && time <= '16:00';
+    });
+
+    const oldest = todayPoints[0];
+    const mostRecent = todayPoints[todayPoints.length - 1];
+
     const open = Number(oldest?.open ?? 0);
     const close = Number(mostRecent?.close ?? 0);
     const change = close - open;
@@ -63,7 +71,9 @@ export async function getIndex(symbol, opts = {}) {
       change: Math.round(change * 100) / 100,
       changePercent: Math.round(changePercent * 100) / 100,
       isPositive: change >= 0,
-      sparklineData: pts.map((p) => Number(p.close)).reverse(),
+      sparklineData: todayPoints
+        .filter((p) => Number(p.close) > 0)
+        .map((p) => ({ time: p.date.split(' ')[1]?.slice(0, 5), val: Number(p.close) })),
     };
 
     return result;
