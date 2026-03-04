@@ -1,11 +1,12 @@
-import React, { useRef, useCallback } from 'react';
+import React, { Suspense, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getWorkspaceThreads } from './utils/api';
-import WorkspaceGallery from './components/WorkspaceGallery';
-import ThreadGallery from './components/ThreadGallery';
 import ChatView from './components/ChatView';
 import './ChatAgent.css';
+
+const WorkspaceGallery = React.lazy(() => import('./components/WorkspaceGallery'));
+const ThreadGallery = React.lazy(() => import('./components/ThreadGallery'));
 
 // Module-level caches — survive ChatAgent unmount/remount from tab switching
 const _workspaceCache = {};  // { [workspaceId]: { threads, workspaceName, files, fetchedAt } }
@@ -103,20 +104,24 @@ function ChatAgent() {
     content = <ChatView key={`${workspaceId}-${threadId}`} workspaceId={workspaceId} threadId={threadId} onBack={handleBackToThreadGallery} workspaceName={cachedWorkspaceName} />;
   } else if (workspaceId) {
     content = (
-      <ThreadGallery
-        workspaceId={workspaceId}
-        onBack={handleBackToWorkspaceGallery}
-        onThreadSelect={handleThreadSelect}
-        cache={workspaceCacheRef}
-      />
+      <Suspense fallback={null}>
+        <ThreadGallery
+          workspaceId={workspaceId}
+          onBack={handleBackToWorkspaceGallery}
+          onThreadSelect={handleThreadSelect}
+          cache={workspaceCacheRef}
+        />
+      </Suspense>
     );
   } else {
     content = (
-      <WorkspaceGallery
-        onWorkspaceSelect={handleWorkspaceSelect}
-        cache={workspaceListCacheRef}
-        prefetchThreads={prefetchThreads}
-      />
+      <Suspense fallback={null}>
+        <WorkspaceGallery
+          onWorkspaceSelect={handleWorkspaceSelect}
+          cache={workspaceListCacheRef}
+          prefetchThreads={prefetchThreads}
+        />
+      </Suspense>
     );
   }
 

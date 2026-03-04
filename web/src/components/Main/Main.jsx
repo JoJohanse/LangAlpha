@@ -1,12 +1,13 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import Dashboard from '../../pages/Dashboard/Dashboard';
-import ChatAgent from '../../pages/ChatAgent/ChatAgent';
-import MarketView from '../../pages/MarketView/MarketView';
-import DetailPage from '../../pages/Detail/DetailPage';
-import NewsDetailPage from '../../pages/Detail/NewsDetailPage';
-import Automations from '../../pages/Automations/Automations';
+
+const Dashboard = React.lazy(() => import('../../pages/Dashboard/Dashboard'));
+const ChatAgent = React.lazy(() => import('../../pages/ChatAgent/ChatAgent'));
+const MarketView = React.lazy(() => import('../../pages/MarketView/MarketView'));
+const DetailPage = React.lazy(() => import('../../pages/Detail/DetailPage'));
+const NewsDetailPage = React.lazy(() => import('../../pages/Detail/NewsDetailPage'));
+const Automations = React.lazy(() => import('../../pages/Automations/Automations'));
 
 function Main() {
   const location = useLocation();
@@ -24,17 +25,19 @@ function Main() {
           transition={{ duration: 0.15, ease: 'easeInOut' }}
           style={{ height: '100%' }}
         >
-          <Routes location={location}>
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/chat" element={<ChatAgent />} />
-            <Route path="/chat/:workspaceId/:threadId" element={<ChatAgent />} />
-            <Route path="/chat/:workspaceId" element={<ChatAgent />} />
-            <Route path="/market" element={<MarketView />} />
-            <Route path="/automations" element={<Automations />} />
-            <Route path="/news/:id" element={<NewsDetailPage />} />
-            <Route path="/detail/:indexNumber" element={<DetailPage />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
+          <Suspense fallback={null}>
+            <Routes location={location}>
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/chat" element={<ChatAgent />} />
+              <Route path="/chat/:workspaceId/:threadId" element={<ChatAgent />} />
+              <Route path="/chat/:workspaceId" element={<ChatAgent />} />
+              <Route path="/market" element={<MarketView />} />
+              <Route path="/automations" element={<Automations />} />
+              <Route path="/news/:id" element={<NewsDetailPage />} />
+              <Route path="/detail/:indexNumber" element={<DetailPage />} />
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+          </Suspense>
         </motion.div>
       </AnimatePresence>
     </div>

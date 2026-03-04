@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { Suspense, useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, FolderOpen, StopCircle, ScrollText, AlertTriangle, CheckCircle2, Circle, Loader2, TextSelect, Minus, PanelLeftOpen } from 'lucide-react';
@@ -10,11 +10,9 @@ import { useChatMessages } from '../hooks/useChatMessages';
 import { saveChatSession, getChatSession, clearChatSession } from '../hooks/utils/chatSessionRestore';
 import { useCardState } from '../hooks/useCardState';
 import { useWorkspaceFiles } from '../hooks/useWorkspaceFiles';
-import FilePanel from './FilePanel';
 import './FilePanel.css';
 import ChatInput from '../../../components/ui/chat-input';
 import { attachmentsToImageContexts } from '../utils/fileUpload';
-import DetailPanel from './DetailPanel';
 import MessageList, { normalizeSubagentText } from './MessageList';
 import Markdown from './Markdown';
 import NavigationPanel from './NavigationPanel';
@@ -25,6 +23,9 @@ import SubagentStatusBar from './SubagentStatusBar';
 import TodoDrawer from './TodoDrawer';
 import { parseErrorMessage } from '../utils/parseErrorMessage';
 import { motion, AnimatePresence } from 'framer-motion';
+
+const FilePanel = React.lazy(() => import('./FilePanel'));
+const DetailPanel = React.lazy(() => import('./DetailPanel'));
 
 // Module-level nav panel state — survives ChatView remount on thread navigation
 let _navPanelVisible = false;
@@ -1430,40 +1431,42 @@ function ChatView({ workspaceId, threadId, onBack, workspaceName: initialWorkspa
               onMouseDown={handleDividerMouseDown}
             />
             <div className="flex-shrink-0" style={{ width: rightPanelWidth }}>
-              {rightPanelType === 'file' ? (
-                <FilePanel
-                  workspaceId={workspaceId}
-                  onClose={() => setRightPanelType(null)}
-                  targetFile={filePanelTargetFile}
-                  onTargetFileHandled={() => setFilePanelTargetFile(null)}
-                  targetDirectory={filePanelTargetDir}
-                  onTargetDirHandled={() => setFilePanelTargetDir(null)}
-                  files={workspaceFiles}
-                  filesLoading={filesLoading}
-                  filesError={filesError}
-                  onRefreshFiles={refreshFiles}
-                  onAddContext={handleAddContext}
-                  showSystemFiles={showSystemFiles}
-                  onToggleSystemFiles={() => {
-                    setShowSystemFiles((v) => {
-                      localStorage.setItem('filePanel.showSystemFiles', String(!v));
-                      return !v;
-                    });
-                  }}
-                />
-              ) : rightPanelType === 'detail' && (detailToolCall || detailPlanData) ? (
-                <DetailPanel
-                  toolCallProcess={detailToolCall}
-                  planData={detailPlanData}
-                  onClose={() => {
-                    setRightPanelType(null);
-                    setDetailToolCall(null);
-                    setDetailPlanData(null);
-                  }}
-                  onOpenFile={handleOpenFileFromChat}
-                  onOpenSubagentTask={handleOpenSubagentTask}
-                />
-              ) : null}
+              <Suspense fallback={null}>
+                {rightPanelType === 'file' ? (
+                  <FilePanel
+                    workspaceId={workspaceId}
+                    onClose={() => setRightPanelType(null)}
+                    targetFile={filePanelTargetFile}
+                    onTargetFileHandled={() => setFilePanelTargetFile(null)}
+                    targetDirectory={filePanelTargetDir}
+                    onTargetDirHandled={() => setFilePanelTargetDir(null)}
+                    files={workspaceFiles}
+                    filesLoading={filesLoading}
+                    filesError={filesError}
+                    onRefreshFiles={refreshFiles}
+                    onAddContext={handleAddContext}
+                    showSystemFiles={showSystemFiles}
+                    onToggleSystemFiles={() => {
+                      setShowSystemFiles((v) => {
+                        localStorage.setItem('filePanel.showSystemFiles', String(!v));
+                        return !v;
+                      });
+                    }}
+                  />
+                ) : rightPanelType === 'detail' && (detailToolCall || detailPlanData) ? (
+                  <DetailPanel
+                    toolCallProcess={detailToolCall}
+                    planData={detailPlanData}
+                    onClose={() => {
+                      setRightPanelType(null);
+                      setDetailToolCall(null);
+                      setDetailPlanData(null);
+                    }}
+                    onOpenFile={handleOpenFileFromChat}
+                    onOpenSubagentTask={handleOpenSubagentTask}
+                  />
+                ) : null}
+              </Suspense>
             </div>
           </motion.div>
         )}
