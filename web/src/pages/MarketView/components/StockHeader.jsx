@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Info } from 'lucide-react';
 import './StockHeader.css';
-import { isUSEquity } from '../utils/chartConstants';
+import { isUSEquity, EXT_COLOR_PRE, EXT_COLOR_POST } from '../utils/chartConstants';
+import { getExtendedHoursInfo } from '@/lib/marketUtils';
 
 const EXCHANGE_LABELS = { HK: 'HK', SS: 'SH', SZ: 'SZ', L: 'LON', T: 'TYO', TO: 'TSX', AX: 'ASX' };
 
@@ -13,7 +14,7 @@ function getDelayedLabel(sym) {
   return EXCHANGE_LABELS[suffix] ? `${EXCHANGE_LABELS[suffix]} Delayed` : 'Delayed';
 }
 
-const StockHeader = ({ symbol, stockInfo, realTimePrice, chartMeta, displayOverride, onToggleOverview, wsStatus, wsHasData = false, ginlixDataEnabled = true, quoteData }) => {
+const StockHeader = ({ symbol, stockInfo, realTimePrice, chartMeta, displayOverride, onToggleOverview, wsStatus, wsHasData = false, ginlixDataEnabled = true, quoteData, marketStatus, snapshot }) => {
   const formatNumber = (num) => {
     if (num == null || (num !== 0 && !num)) return '—';
     if (num >= 1e12) return (num / 1e12).toFixed(2) + 'T';
@@ -25,11 +26,12 @@ const StockHeader = ({ symbol, stockInfo, realTimePrice, chartMeta, displayOverr
 
   const price = realTimePrice?.price ?? stockInfo?.Price ?? null;
   const change = realTimePrice?.change ?? 0;
-  const changePercent = realTimePrice?.changePercent ?? '0.00%';
+  const changePercent = realTimePrice?.changePercent ?? 0;
   const isPositive = change > 0;
   const isNegative = change < 0;
   const priceColorClass = isPositive ? 'positive' : isNegative ? 'negative' : '';
 
+  const previousClose = snapshot?.previous_close ?? quoteData?.previousClose ?? null;
   const open = realTimePrice?.open ?? stockInfo?.Open ?? null;
   const high = realTimePrice?.high ?? stockInfo?.High ?? null;
   const low = realTimePrice?.low ?? stockInfo?.Low ?? null;
@@ -37,11 +39,14 @@ const StockHeader = ({ symbol, stockInfo, realTimePrice, chartMeta, displayOverr
   const fiftyTwoWeekLow = quoteData?.yearLow ?? stockInfo?.['52WeekLow'] ?? null;
   const averageVolume = quoteData?.avgVolume ?? stockInfo?.AverageVolume ?? null;
   const volume = stockInfo?.Volume ?? null;
-  const dayRange = (high != null && low != null) ? (Number(high) - Number(low)) : null;
+  const hasDayRange = high != null && low != null;
   const changePct = realTimePrice?.changePercent != null ? realTimePrice.changePercent : null;
 
   const displayName = displayOverride?.name ?? stockInfo?.Name ?? `${symbol} Corp`;
   const displayExchange = displayOverride?.exchange ?? stockInfo?.Exchange ?? '';
+
+  // Pre/post-market extended hours data
+  const { extPct: extendedChangePercent, extLabel: extendedLabel } = getExtendedHoursInfo(marketStatus, snapshot);
 
   // Live = WS connected AND actually delivering aggregate data for this symbol
   const usSymbol = isUSEquity(symbol);
@@ -93,12 +98,30 @@ const StockHeader = ({ symbol, stockInfo, realTimePrice, chartMeta, displayOverr
         <div className="stock-price-section">
           <div className={`stock-price ${priceColorClass}`}>{price != null ? price.toFixed(2) : '—'}</div>
           <div className={`stock-change ${priceColorClass}`}>
-            {isPositive ? '+' : ''}{change.toFixed(2)} {isPositive ? '+' : ''}{changePercent}
+            {isPositive ? '+' : ''}{change.toFixed(2)} {isPositive ? '+' : ''}{changePercent.toFixed(2)}%
           </div>
+          {extendedLabel && extendedChangePercent != null && (
+            <div
+              className="stock-extended-hours"
+              style={{
+                fontSize: 11,
+                marginTop: 2,
+                color: extendedLabel === 'Pre-Market' ? EXT_COLOR_PRE : EXT_COLOR_POST,
+              }}
+            >
+              {extendedLabel}: {extendedChangePercent >= 0 ? '+' : ''}{extendedChangePercent.toFixed(2)}%
+            </div>
+          )}
         </div>
       </div>
 
       <div className="stock-metrics">
+        <div className="metric-item">
+          <span className="metric-label">Prev Close</span>
+          <span className="metric-value">
+            {previousClose != null ? Number(previousClose).toFixed(2) : '—'}
+          </span>
+        </div>
         <div className="metric-item">
           <span className="metric-label">Open
             <span className="metrics-discrepancy-hint" title="Values are aggregated from intraday data and may differ slightly from daily figures shown on the chart.">!</span>
@@ -146,13 +169,13 @@ const StockHeader = ({ symbol, stockInfo, realTimePrice, chartMeta, displayOverr
         <div className="metric-item">
           <span className="metric-label">Day Range</span>
           <span className="metric-value">
-            {dayRange != null ? Number(dayRange).toFixed(2) : '—'}
+            {hasDayRange ? `${Number(low).toFixed(2)} – ${Number(high).toFixed(2)}` : '—'}
           </span>
         </div>
         <div className="metric-item">
           <span className="metric-label">Change %</span>
-          <span className={`metric-value ${(parseFloat(changePct) || 0) >= 0 ? 'positive' : 'negative'}`}>
-            {changePct != null && changePct !== '' ? (parseFloat(changePct) >= 0 ? '+' : '') + changePct : '—'}
+          <span className={`metric-value ${(changePct || 0) >= 0 ? 'positive' : 'negative'}`}>
+            {changePct != null ? (changePct >= 0 ? '+' : '') + changePct.toFixed(2) + '%' : '—'}
           </span>
         </div>
       </div>

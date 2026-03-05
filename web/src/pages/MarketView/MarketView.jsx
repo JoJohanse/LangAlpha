@@ -9,6 +9,7 @@ import ChatInput from '../../components/ui/chat-input';
 import MarketPanel from './components/MarketPanel';
 import MarketSidebarPanel from './components/MarketSidebarPanel';
 import { fetchStockQuote, fetchCompanyOverview, fetchAnalystData } from './utils/api';
+import { fetchMarketStatus } from '@/lib/marketUtils';
 import { supports1sInterval } from './utils/chartConstants';
 import { useMarketChat } from './hooks/useMarketChat';
 import { getWorkspaces } from '../ChatAgent/utils/api';
@@ -16,17 +17,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import CompanyOverviewPanel from './components/CompanyOverviewPanel';
 import { MarketDataWSProvider, useMarketDataWSContext } from './contexts/MarketDataWSContext';
 
-// --- localStorage persistence helpers (shared key prefix with MarketChart) ---
-const STORAGE_PREFIX = 'market-chart:';
-function loadPref(key, fallback) {
-  try {
-    const raw = localStorage.getItem(STORAGE_PREFIX + key);
-    return raw !== null ? JSON.parse(raw) : fallback;
-  } catch { return fallback; }
-}
-function savePref(key, value) {
-  try { localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value)); } catch { /* noop */ }
-}
+import { loadPref, savePref } from './utils/prefs';
 
 const QUICK_QUERIES = [
   'Analyze the technical setup of {symbol}',
@@ -43,7 +34,7 @@ function MarketViewInner() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
-  const { prices: wsPrices, connectionStatus: wsStatus, ginlixDataEnabled, subscribe: wsSubscribe, unsubscribe: wsUnsubscribe } = useMarketDataWSContext();
+  const { prices: wsPrices, connectionStatus: wsStatus, ginlixDataEnabled, subscribe: wsSubscribe, unsubscribe: wsUnsubscribe, setPreviousClose, setDayOpen } = useMarketDataWSContext();
   const [selectedStock, setSelectedStock] = useState(() => loadPref('symbol', 'GOOGL'));
   const [selectedStockDisplay, setSelectedStockDisplay] = useState(null);
   const [stockInfo, setStockInfo] = useState(null);
@@ -57,6 +48,8 @@ function MarketViewInner() {
   const [overviewData, setOverviewData] = useState(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [overlayData, setOverlayData] = useState(null);
+  const [snapshotData, setSnapshotData] = useState(null);
+  const [marketStatus, setMarketStatus] = useState(null);
   const [prefillMessage, setPrefillMessage] = useState('');
   const [mode, setMode] = useState('fast');
   const [workspaces, setWorkspaces] = useState([]);
@@ -137,6 +130,7 @@ function MarketViewInner() {
         : null
     );
     setChartMeta(null);
+    setSnapshotData(null);
     setShowOverview(false);
   }, []);
 
@@ -162,12 +156,18 @@ function MarketViewInner() {
 
     const loadStockQuote = async () => {
       try {
-        const { stockInfo: info, realTimePrice: price } = await fetchStockQuote(
+        const { stockInfo: info, realTimePrice: price, snapshot } = await fetchStockQuote(
           selectedStock,
           { signal: abortController.signal }
         );
         setStockInfo(info);
         if (price) setRealTimePrice(price);
+        // Seed WS refs from snapshot for accurate change% calculation
+        if (snapshot) {
+          setSnapshotData(snapshot);
+          if (snapshot.previous_close != null) setPreviousClose(selectedStock, snapshot.previous_close);
+          if (snapshot.open != null) setDayOpen(selectedStock, snapshot.open);
+        }
       } catch (error) {
         if (error?.name === 'CanceledError' || error?.name === 'AbortError') return;
         console.error('Error loading stock quote:', error);
@@ -187,18 +187,26 @@ function MarketViewInner() {
     }
 
     // Refresh price every 60s, but skip when tab is hidden (Page Visibility API)
+    let cancelled = false;
     const priceInterval = setInterval(async () => {
       if (document.hidden) return; // Skip fetch when tab is not visible
       try {
-        const { stockInfo: info, realTimePrice: price } = await fetchStockQuote(selectedStock);
+        const { stockInfo: info, realTimePrice: price, snapshot } = await fetchStockQuote(selectedStock);
+        if (cancelled) return;
         setStockInfo(info);
         if (price) setRealTimePrice(price);
+        if (snapshot) {
+          setSnapshotData(snapshot);
+          if (snapshot.previous_close != null) setPreviousClose(selectedStock, snapshot.previous_close);
+          if (snapshot.open != null) setDayOpen(selectedStock, snapshot.open);
+        }
       } catch (error) {
         console.error('Error refreshing stock quote:', error);
       }
     }, 60000);
 
     return () => {
+      cancelled = true;
       abortController.abort();
       clearInterval(priceInterval);
     };
@@ -239,6 +247,14 @@ function MarketViewInner() {
       });
     return () => ac.abort();
   }, [selectedStock]);
+
+  // Poll market status (60s interval)
+  useEffect(() => {
+    const loadStatus = () => fetchMarketStatus().then(setMarketStatus).catch(() => {});
+    loadStatus();
+    const id = setInterval(() => { if (!document.hidden) loadStatus(); }, 60000);
+    return () => clearInterval(id);
+  }, []);
 
   // Fetch workspaces for the workspace selector (deep mode)
   useEffect(() => {
@@ -310,7 +326,7 @@ function MarketViewInner() {
     }
 
     if (displayPrice) {
-      parts.push(`Real-time price: $${displayPrice.price} (${displayPrice.change >= 0 ? '+' : ''}${displayPrice.change} / ${displayPrice.changePercent})`);
+      parts.push(`Real-time price: $${displayPrice.price} (${displayPrice.change >= 0 ? '+' : ''}${displayPrice.change} / ${displayPrice.changePercent.toFixed(2)}%)`);
     }
 
     setChartImageDesc(parts.join('\n'));
@@ -417,17 +433,19 @@ function MarketViewInner() {
   const handleLatestBar = useCallback((bar) => {
     if (!bar?.close) return;
     setRealTimePrice((prev) => {
-      if (!prev) return prev;
-      // Derive previous day's close from the initial fetchStockQuote result
-      // (prev.price - prev.change = previousClose) to stay consistent with the header.
-      const previousClose = (prev.price ?? 0) - (prev.change ?? 0);
+      if (!prev || !prev.price) return prev;
+      const updatedPrice = Math.round(bar.close * 100) / 100;
+      // Use previousClose from snapshot if available, else derive from initial quote
+      const previousClose = prev.previousClose ?? ((prev.price ?? 0) - (prev.change ?? 0));
+      if (!previousClose) {
+        // Still update price even without previousClose — just skip change% recalculation
+        return { ...prev, price: updatedPrice, close: bar.close, timestamp: bar.time * 1000 };
+      }
       const change = bar.close - previousClose;
-      const changePct = previousClose
-        ? ((change / previousClose) * 100).toFixed(2) + '%'
-        : '0.00%';
+      const changePct = parseFloat(((change / previousClose) * 100).toFixed(2));
       return {
         ...prev,
-        price: Math.round(bar.close * 100) / 100,
+        price: updatedPrice,
         close: bar.close,
         change: Math.round(change * 100) / 100,
         changePercent: changePct,
@@ -483,6 +501,8 @@ function MarketViewInner() {
             wsHasData={!!wsPrices.get(selectedStock)}
             ginlixDataEnabled={ginlixDataEnabled}
             quoteData={overviewData?.quote || null}
+            marketStatus={marketStatus}
+            snapshot={snapshotData}
           />
           <div className="market-chart-area">
             {showOverview && (
@@ -515,6 +535,7 @@ function MarketViewInner() {
         <MarketSidebarPanel
           activeSymbol={selectedStock}
           onSymbolClick={handleSidebarSymbolClick}
+          marketStatus={marketStatus}
         />
         <div className="market-resize-handle" onMouseDown={handleDragStart} />
         <div className="market-right-panel" style={{ width: chatPanelWidth }}>

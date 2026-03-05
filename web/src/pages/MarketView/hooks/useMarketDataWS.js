@@ -10,6 +10,7 @@
  */
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { getMarketDataWSUrl, getWSAuthToken } from '../utils/api';
+import { utcMsToChartSec, utcMsToETDate } from '@/lib/utils';
 
 // Reconnect parameters
 const INITIAL_BACKOFF_MS = 1000;
@@ -28,7 +29,7 @@ const HIDDEN_CLOSE_DELAY_MS = 60000; // close 60s after page hidden
  * @property {number} close
  * @property {number} volume
  * @property {number} change
- * @property {string} changePercent
+ * @property {number} changePercent
  * @property {number} timestamp
  * @property {{time:number, open:number, high:number, low:number, close:number, volume:number}|null} barData
  */
@@ -50,6 +51,10 @@ export default function useMarketDataWS() {
 
   // Session OHLCV tracking per symbol (reset on new trading day)
   const sessionDataRef = useRef(new Map()); // symbol → { date, open, high, low, volume }
+
+  // Snapshot-seeded reference data for accurate change% calculation
+  const previousCloseRef = useRef(new Map()); // symbol → previousClose price
+  const dayOpenRef = useRef(new Map()); // symbol → actual market open price
 
   const resetStaleTimer = useCallback(() => {
     if (staleTimerRef.current) clearTimeout(staleTimerRef.current);
@@ -94,7 +99,7 @@ export default function useMarketDataWS() {
       low = d.low ?? d.l;
       close = d.close ?? d.c;
       volume = d.volume ?? d.v;
-      timestamp = d.timestamp ?? d.s ?? d.e ?? Date.now();
+      timestamp = d.time ?? d.timestamp ?? d.s ?? d.e ?? Date.now();
     } else {
       // Unrecognised message (status, keepalive, etc.) — ignore
       // Unrecognised — silently drop
@@ -107,8 +112,10 @@ export default function useMarketDataWS() {
     }
 
     // Session OHLCV tracking
-    const barDate = new Date(timestamp).toISOString().slice(0, 10);
-    const barTime = Math.floor(new Date(timestamp).getTime() / 1000);
+    // Timestamp is Unix ms from ginlix-data; convert to Unix seconds for chart
+    const tsMs = typeof timestamp === 'number' ? timestamp : Date.now();
+    const barTime = utcMsToChartSec(tsMs);
+    const barDate = utcMsToETDate(tsMs);
     let session = sessionDataRef.current.get(symbol);
     if (!session || session.date !== barDate) {
       // New trading day
@@ -117,17 +124,22 @@ export default function useMarketDataWS() {
     }
     if (high > session.high) session.high = high;
     if (low < session.low) session.low = low;
-    session.volume += volume;
+    session.volume += volume || 0;
 
-    const change = close - session.open;
-    const changePercent = session.open
-      ? ((change / session.open) * 100).toFixed(2) + '%'
-      : '0.00%';
+    // Use snapshot previousClose for accurate change%; fall back to session open
+    const prevClose = previousCloseRef.current.get(symbol);
+    const change = prevClose != null ? (close - prevClose) : (close - session.open);
+    const changePercent = prevClose != null
+      ? parseFloat(((change / prevClose) * 100).toFixed(2))
+      : session.open ? parseFloat((((close - session.open) / session.open) * 100).toFixed(2)) : 0;
+
+    // Use snapshot dayOpen if available (actual market open, not first WS tick)
+    const effectiveOpen = dayOpenRef.current.get(symbol) ?? session.open;
 
     const priceUpdate = {
       symbol,
       price: Math.round(close * 100) / 100,
-      open: session.open,
+      open: effectiveOpen,
       high: session.high,
       low: session.low,
       close,
@@ -347,7 +359,7 @@ export default function useMarketDataWS() {
         }
         // Reconnect if not connected and not disabled
         if (!disabledRef.current && (!wsRef.current || wsRef.current.readyState > WebSocket.OPEN)) {
-          backoffRef.current = INITIAL_BACKOFF_MS;
+          backoffRef.current = INITIAL_BACKOFF_MS * 2;  // skip preflight on visibility reconnect
           connect();
         }
       }
@@ -360,5 +372,13 @@ export default function useMarketDataWS() {
     };
   }, [connect, disconnect]);
 
-  return { prices, connectionStatus, ginlixDataEnabled, subscribe, unsubscribe };
+  const setPreviousClose = useCallback((symbol, price) => {
+    if (symbol && price != null) previousCloseRef.current.set(symbol.toUpperCase(), price);
+  }, []);
+
+  const setDayOpen = useCallback((symbol, price) => {
+    if (symbol && price != null) dayOpenRef.current.set(symbol.toUpperCase(), price);
+  }, []);
+
+  return { prices, connectionStatus, ginlixDataEnabled, subscribe, unsubscribe, setPreviousClose, setDayOpen };
 }

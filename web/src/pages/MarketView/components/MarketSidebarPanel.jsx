@@ -7,9 +7,11 @@ import { useMarketDataWSContext } from '../contexts/MarketDataWSContext';
 import AddWatchlistItemDialog from '../../Dashboard/components/AddWatchlistItemDialog';
 import AddPortfolioHoldingDialog from '../../Dashboard/components/AddPortfolioHoldingDialog';
 import ConfirmDialog from '../../Dashboard/components/ConfirmDialog';
+import { getExtendedHoursInfo } from '@/lib/marketUtils';
+import { EXT_COLOR_PRE, EXT_COLOR_POST } from '../utils/chartConstants';
 import './MarketSidebarPanel.css';
 
-function MarketSidebarPanel({ activeSymbol, onSymbolClick }) {
+function MarketSidebarPanel({ activeSymbol, onSymbolClick, marketStatus }) {
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState('watchlist');
@@ -69,9 +71,12 @@ function MarketSidebarPanel({ activeSymbol, onSymbolClick }) {
     return isPositive ? 'market-sidebar-row-change--positive' : 'market-sidebar-row-change--negative';
   };
 
+  const getExtendedHours = (row) => getExtendedHoursInfo(marketStatus, row, { shortLabels: true });
+
   const renderRows = (items, keyField, changeField, onDelete) => {
     return items.map((row) => {
       const isActive = activeSymbol && row.symbol === activeSymbol.toUpperCase();
+      const { extPct, extLabel } = getExtendedHours(row);
       return (
         <div
           key={row[keyField]}
@@ -82,6 +87,11 @@ function MarketSidebarPanel({ activeSymbol, onSymbolClick }) {
           <span className="market-sidebar-row-price">{formatPrice(row.price)}</span>
           <span className={`market-sidebar-row-change ${changeClass(row.isPositive, row[changeField])}`}>
             {formatChange(row[changeField])}
+            {extLabel && extPct != null && (
+              <span className="market-sidebar-row-ext" style={{ color: extLabel === 'PM' ? EXT_COLOR_PRE : EXT_COLOR_POST }}>
+                {extLabel}: {extPct >= 0 ? '+' : ''}{extPct.toFixed(2)}%
+              </span>
+            )}
           </span>
           <span className="market-sidebar-row-actions">
             <button
@@ -115,12 +125,18 @@ function MarketSidebarPanel({ activeSymbol, onSymbolClick }) {
     return rows.map((row) => {
       const ws = wsPrices.get(row.symbol);
       if (!ws) return row;
-      const changeField = isWatchlist ? 'changePercent' : 'unrealizedPlPercent';
-      const wsChangePercent = parseFloat(ws.changePercent);
+      if (isWatchlist) {
+        return {
+          ...row,
+          price: ws.price,
+          changePercent: ws.changePercent ?? row.changePercent,
+          isPositive: ws.change >= 0,
+        };
+      }
+      // Portfolio: only overlay price and direction — preserve unrealizedPlPercent
       return {
         ...row,
         price: ws.price,
-        [changeField]: isNaN(wsChangePercent) ? row[changeField] : wsChangePercent,
         isPositive: ws.change >= 0,
       };
     });

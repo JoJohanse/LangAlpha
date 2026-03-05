@@ -5,12 +5,12 @@ import './MarketChart.css';
 import { fetchStockData } from '../utils/api';
 import { calculateMA, calculateRSI, updateRSIIncremental } from '../utils/chartHelpers';
 import {
-  CHART_BG, CHART_TEXT, CHART_GRID, getChartTheme,
+  getChartTheme,
   INTERVALS, PRIMARY_INTERVAL_KEYS, INITIAL_LOAD_DAYS, SCROLL_CHUNK_DAYS,
   SCROLL_LOAD_THRESHOLD, RANGE_CHANGE_DEBOUNCE_MS,
   MA_CONFIGS, DEFAULT_ENABLED_MA, RSI_PERIODS, BARS_PER_DAY, AUTO_FIT_BARS,
   OVERLAY_COLORS, OVERLAY_LABELS,
-  EXTENDED_HOURS_INTERVALS, isExtendedHours, computeExtendedHoursRegions,
+  EXTENDED_HOURS_INTERVALS, getExtendedHoursType, computeExtendedHoursRegions,
   supports1sInterval,
 } from '../utils/chartConstants';
 import { ExtendedHoursBgPrimitive } from '../utils/extendedHoursBg';
@@ -19,21 +19,9 @@ import CrosshairTooltip from './CrosshairTooltip';
 import TradingViewWidget from './TradingViewWidget';
 import { useChartAnnotations } from '../hooks/useChartAnnotations';
 import { useChartOverlays } from '../hooks/useChartOverlays';
-import { SlidersHorizontal, Settings2, Maximize2, Minimize2, ChevronDown, Plus, Minus, RotateCcw } from 'lucide-react';
+import { SlidersHorizontal, Settings2, Maximize2, Minimize2, ChevronDown, Plus, Minus, RotateCcw, Menu } from 'lucide-react';
 
-// --- localStorage persistence helpers ---
-const STORAGE_PREFIX = 'market-chart:';
-
-function loadPref(key, fallback) {
-  try {
-    const raw = localStorage.getItem(STORAGE_PREFIX + key);
-    return raw !== null ? JSON.parse(raw) : fallback;
-  } catch { return fallback; }
-}
-
-function savePref(key, value) {
-  try { localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value)); } catch { /* noop */ }
-}
+import { loadPref, savePref } from '../utils/prefs';
 
 function useClickOutside(ref, onClose) {
   useEffect(() => {
@@ -63,6 +51,7 @@ const MarketChart = React.memo(forwardRef(({
 }, ref) => {
   const { theme } = useTheme();
   const ct = getChartTheme(theme);
+  const rootRef = useRef();
   const chartContainerRef = useRef();
   const rsiChartContainerRef = useRef();
   const lightWrapperRef = useRef();
@@ -76,6 +65,7 @@ const MarketChart = React.memo(forwardRef(({
   const extHoursBgRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
+  const [scrollLoading, setScrollLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastUpdateTime, setLastUpdateTime] = useState(null);
   const [rsiValue, setRsiValue] = useState(null);
@@ -97,18 +87,33 @@ const MarketChart = React.memo(forwardRef(({
     () => loadPref('overlayVisibility', { earnings: false, grades: false, priceTargets: false }),
   );
 
+  // Responsive compact mode — based on actual chart container width, not viewport
+  const [isCompact, setIsCompact] = useState(false);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setIsCompact(entry.contentRect.width < 925);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // Toolbar dropdown state
   const [indicatorsOpen, setIndicatorsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [intervalsOpen, setIntervalsOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
   const [disabledTooltip, setDisabledTooltip] = useState(null);
   const disabledTooltipTimer = useRef(null);
   const indicatorsDropdownRef = useRef(null);
   const toolsDropdownRef = useRef(null);
   const intervalsDropdownRef = useRef(null);
+  const viewDropdownRef = useRef(null);
   useClickOutside(indicatorsDropdownRef, indicatorsOpen ? () => setIndicatorsOpen(false) : null);
   useClickOutside(toolsDropdownRef, toolsOpen ? () => setToolsOpen(false) : null);
   useClickOutside(intervalsDropdownRef, intervalsOpen ? () => setIntervalsOpen(false) : null);
+  useClickOutside(viewDropdownRef, viewOpen ? () => setViewOpen(false) : null);
 
   // Crosshair tooltip state
   const [tooltipState, setTooltipState] = useState({ visible: false, x: 0, y: 0, data: null });
@@ -147,6 +152,11 @@ const MarketChart = React.memo(forwardRef(({
 
   // Track when the last WS live tick was applied (for REST polling fallback)
   const lastLiveTickTimeRef = useRef(0);
+  const gapFillDoneRef = useRef(false);  // gap fill between REST data and first WS tick
+  const gapFillRetryRef = useRef(0);    // retry count for gap fill attempts
+  const gapFillInProgressRef = useRef(false);  // prevent concurrent gap fill fetches
+  // Aggregation buffer for building 1m candles from 1s WS ticks
+  const minuteAggRef = useRef({ time: 0, open: 0, high: 0, low: 0, close: 0, volume: 0 });
 
   // Refs for scroll-based loading
   const allDataRef = useRef([]);
@@ -174,55 +184,144 @@ const MarketChart = React.memo(forwardRef(({
     const { time, open, high, low, close, volume } = liveTick;
     if (!time || close == null) return;
 
+    const data = allDataRef.current;
+
     // Track when WS last delivered a usable tick (used by REST polling fallback)
     lastLiveTickTimeRef.current = Date.now();
+
+    // Gap fill: if there's a gap between REST data and first WS tick,
+    // fetch REST data to fill it.  Retries up to 3 times with concurrency guard.
+    // Threshold: 5 seconds for 1s, 120s for 1min.
+    if (!gapFillDoneRef.current && !gapFillInProgressRef.current && data.length > 0) {
+      const lastDataTime = data[data.length - 1].time;
+      const gapSec = time - lastDataTime;
+      const gapThreshold = interval === '1s' ? 5 : 120;
+      if (gapSec > gapThreshold) {
+        gapFillRetryRef.current += 1;
+        if (gapFillRetryRef.current > 3) {
+          gapFillDoneRef.current = true;  // give up after 3 attempts
+        } else {
+          gapFillInProgressRef.current = true;
+          (async () => {
+            try {
+              const fromDate = new Date(lastDataTime * 1000).toISOString().split('T')[0];
+              const toDate = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+              const result = await fetchStockData(symbol, interval, fromDate, toDate);
+              const fillData = result?.data;
+              if (Array.isArray(fillData) && fillData.length > 0) {
+                // Merge: insert bars that fill the gap (between old last bar and current last bar)
+                const existingTimes = new Set(allDataRef.current.map(b => b.time));
+                const newBars = fillData.filter(b => !existingTimes.has(b.time));
+                if (newBars.length > 0) {
+                  const merged = [...allDataRef.current, ...newBars].sort((a, b) => a.time - b.time);
+                  // Deduplicate by time (keep last occurrence)
+                  const deduped = [];
+                  const seen = new Set();
+                  for (let i = merged.length - 1; i >= 0; i--) {
+                    if (!seen.has(merged[i].time)) {
+                      seen.add(merged[i].time);
+                      deduped.push(merged[i]);
+                    }
+                  }
+                  deduped.reverse();
+                  allDataRef.current = deduped;
+                  updateSeriesData(deduped);
+                  // Only mark done if we actually bridged the gap
+                  const lastFilled = deduped[deduped.length - 1]?.time || 0;
+                  if (lastFilled >= time - gapThreshold) {
+                    gapFillDoneRef.current = true;
+                  }
+                  // else: leave false → retry on next tick
+                }
+              }
+            } catch (err) {
+              console.debug('Gap fill attempt', gapFillRetryRef.current, 'failed:', err);
+            } finally {
+              gapFillInProgressRef.current = false;
+            }
+          })();
+        }
+      } else {
+        gapFillDoneRef.current = true;  // no gap, mark as done
+      }
+    }
 
     // Clear the "waiting for live data" hint once first tick arrives
     if (interval === '1s' && error) setError(null);
 
-    // Update candlestick series in-place (same time = update, newer = append)
-    candlestickSeriesRef.current.update({ time, open, high, low, close });
+    // Aggregate 1s ticks into 1m candle when on 1min interval
+    let barTime = time, barOpen = open, barHigh = high, barLow = low, barClose = close, barVolume = volume;
+    if (interval === '1min') {
+      const minuteTime = Math.floor(time / 60) * 60;
+      const agg = minuteAggRef.current;
+      if (minuteTime === agg.time) {
+        agg.high = Math.max(agg.high, high);
+        agg.low = Math.min(agg.low, low);
+        agg.close = close;
+        agg.volume += volume;
+      } else {
+        agg.time = minuteTime;
+        agg.open = open;
+        agg.high = high;
+        agg.low = low;
+        agg.close = close;
+        agg.volume = volume;
+      }
+      barTime = agg.time;
+      barOpen = agg.open;
+      barHigh = agg.high;
+      barLow = agg.low;
+      barClose = agg.close;
+      barVolume = agg.volume;
+    }
 
-    const ext = EXTENDED_HOURS_INTERVALS.has(interval) && isExtendedHours(time);
-    const up = close >= open;
+    // Skip out-of-order ticks — series.update() only accepts time >= last bar.
+    // Guard uses barTime (post-aggregation) rather than raw time to prevent crashes
+    // when switching intervals (e.g. 1s→1min where minute-flooring produces older times).
+    if (data.length > 0 && barTime < data[data.length - 1].time) return;
+
+    // Update candlestick series in-place (same time = update, newer = append)
+    candlestickSeriesRef.current.update({ time: barTime, open: barOpen, high: barHigh, low: barLow, close: barClose });
+
+    const ext = EXTENDED_HOURS_INTERVALS.has(interval) && getExtendedHoursType(barTime);
+    const up = barClose >= barOpen;
     const ct = ctRef.current;
     if (volumeSeriesRef.current) {
       volumeSeriesRef.current.update({
-        time,
-        value: volume,
+        time: barTime,
+        value: barVolume,
         color: ext
           ? (up ? ct.extVolumeUp : ct.extVolumeDown)
           : (up ? ct.upColor : ct.downColor),
       });
     }
 
-    // Keep allDataRef in sync
-    const data = allDataRef.current;
-    const isSameBar = data.length > 0 && data[data.length - 1].time === time;
+    // Keep allDataRef in sync (data already declared above for the time guard)
+    const isSameBar = data.length > 0 && data[data.length - 1].time === barTime;
     if (isSameBar) {
-      data[data.length - 1] = { time, open, high, low, close, volume };
-    } else if (!data.length || time > data[data.length - 1].time) {
-      data.push({ time, open, high, low, close, volume });
+      data[data.length - 1] = { time: barTime, open: barOpen, high: barHigh, low: barLow, close: barClose, volume: barVolume };
+    } else if (!data.length || barTime > data[data.length - 1].time) {
+      data.push({ time: barTime, open: barOpen, high: barHigh, low: barLow, close: barClose, volume: barVolume });
     }
 
-    // Incremental RSI update (Bug 2 fix)
+    // Incremental RSI update
     if (rsiSmoothingRef.current && rsiSeriesRef.current) {
       if (isSameBar) {
         // Same bar updated — recalculate from state *before* this bar was first applied
         if (prevBarSmoothingRef.current) {
-          const { value, state } = updateRSIIncremental(prevBarSmoothingRef.current, close);
+          const { value, state } = updateRSIIncremental(prevBarSmoothingRef.current, barClose);
           rsiSmoothingRef.current = state;
-          rsiSeriesRef.current.update({ time, value });
-          rsiDataMapRef.current.set(time, value);
+          rsiSeriesRef.current.update({ time: barTime, value });
+          rsiDataMapRef.current.set(barTime, value);
           setRsiValue(value.toFixed(0));
         }
       } else {
         // New bar — advance smoothing state
         prevBarSmoothingRef.current = rsiSmoothingRef.current;
-        const { value, state } = updateRSIIncremental(rsiSmoothingRef.current, close);
+        const { value, state } = updateRSIIncremental(rsiSmoothingRef.current, barClose);
         rsiSmoothingRef.current = state;
-        rsiSeriesRef.current.update({ time, value });
-        rsiDataMapRef.current.set(time, value);
+        rsiSeriesRef.current.update({ time: barTime, value });
+        rsiDataMapRef.current.set(barTime, value);
         setRsiValue(value.toFixed(0));
       }
     }
@@ -299,6 +398,7 @@ const MarketChart = React.memo(forwardRef(({
 
       const firstTime = data[0].time;
       const lastTime = data[data.length - 1].time;
+      // Chart timestamps are already ET-shifted, so UTC interpretation gives the ET date
       const formatDate = (ts) => new Date(ts * 1000).toISOString().split('T')[0];
 
       const enabledMAs = enabledMaPeriodsRef.current;
@@ -347,7 +447,7 @@ const MarketChart = React.memo(forwardRef(({
     if (volumeSeriesRef.current) {
       volumeSeriesRef.current.setData(data.map((d, i) => {
         const up = i > 0 && d.close >= data[i - 1].close;
-        const ext = applyExt && isExtendedHours(d.time);
+        const ext = applyExt && getExtendedHoursType(d.time);
         return {
           time: d.time,
           value: d.volume || 0,
@@ -414,38 +514,53 @@ const MarketChart = React.memo(forwardRef(({
     setChartDataForHooks(data);
   }, []);
 
+  // --- Merge prepended data helper (shared by scroll-load & MA backfill) ---
+  const mergePrependedData = (newData) => {
+    if (!newData?.length) return;
+    const prevLen = allDataRef.current.length;
+    const existingMap = new Map(allDataRef.current.map(d => [d.time, d]));
+    newData.forEach(d => { if (!existingMap.has(d.time)) existingMap.set(d.time, d); });
+    const merged = Array.from(existingMap.values()).sort((a, b) => a.time - b.time);
+    const prependedCount = merged.length - prevLen;
+    allDataRef.current = merged;
+    oldestDateRef.current = merged[0].time;
+    const ts = chartRef.current?.timeScale();
+    const savedRange = ts?.getVisibleLogicalRange();
+    updateSeriesData(merged);
+    if (ts && savedRange && prependedCount > 0) {
+      ts.setVisibleLogicalRange({ from: savedRange.from + prependedCount, to: savedRange.to + prependedCount });
+    }
+  };
+
+  // --- Fetch older bars before current oldest and merge into series ---
+  const fetchAndPrepend = async (days) => {
+    if (!oldestDateRef.current) return;
+    const oldest = new Date(oldestDateRef.current * 1000);
+    const toDate = new Date(oldest);
+    toDate.setDate(toDate.getDate() - 1);
+    const fromDate = new Date(toDate);
+    fromDate.setDate(fromDate.getDate() - days);
+
+    const result = await fetchStockData(symbol, interval,
+      fromDate.toISOString().split('T')[0], toDate.toISOString().split('T')[0]);
+    const newData = result?.data;
+    if (newData && Array.isArray(newData) && newData.length > 0) {
+      mergePrependedData(newData);
+    }
+  };
+
   // --- Scroll-based lazy loading ---
   const handleScrollLoadMore = useCallback(async () => {
     if (fetchingRef.current || !oldestDateRef.current) return;
     fetchingRef.current = true;
-
+    setScrollLoading(true);
     try {
-      const oldest = new Date(oldestDateRef.current * 1000);
-      const toDate = new Date(oldest);
-      toDate.setDate(toDate.getDate() - 1);
-      const fromDate = new Date(toDate);
-      fromDate.setDate(fromDate.getDate() - SCROLL_CHUNK_DAYS[interval]);
-
-      const fromStr = fromDate.toISOString().split('T')[0];
-      const toStr = toDate.toISOString().split('T')[0];
-
-      const result = await fetchStockData(symbol, interval, fromStr, toStr);
-      const newData = result?.data;
-
-      if (newData && Array.isArray(newData) && newData.length > 0) {
-        const existingMap = new Map(allDataRef.current.map((d) => [d.time, d]));
-        newData.forEach((d) => {
-          if (!existingMap.has(d.time)) existingMap.set(d.time, d);
-        });
-        const merged = Array.from(existingMap.values()).sort((a, b) => a.time - b.time);
-        allDataRef.current = merged;
-        oldestDateRef.current = merged[0].time;
-        updateSeriesData(merged);
-      }
+      await fetchAndPrepend(SCROLL_CHUNK_DAYS[interval]);
     } catch (err) {
       console.warn('Scroll-load fetch failed:', err);
     } finally {
       fetchingRef.current = false;
+      setScrollLoading(false);
     }
   }, [symbol, interval, updateSeriesData]);
 
@@ -453,34 +568,11 @@ const MarketChart = React.memo(forwardRef(({
   const backfillForMaPeriod = useCallback(async (period) => {
     const currentLen = allDataRef.current.length;
     if (currentLen >= period || fetchingRef.current || !oldestDateRef.current) return;
-
     fetchingRef.current = true;
     try {
       const deficit = period - currentLen;
       const extraDays = Math.ceil((deficit / (BARS_PER_DAY[interval] || 1)) * 1.5);
-
-      const oldest = new Date(oldestDateRef.current * 1000);
-      const toDate = new Date(oldest);
-      toDate.setDate(toDate.getDate() - 1);
-      const fromDate = new Date(toDate);
-      fromDate.setDate(fromDate.getDate() - extraDays);
-
-      const fromStr = fromDate.toISOString().split('T')[0];
-      const toStr = toDate.toISOString().split('T')[0];
-
-      const result = await fetchStockData(symbol, interval, fromStr, toStr);
-      const newData = result?.data;
-
-      if (newData && Array.isArray(newData) && newData.length > 0) {
-        const existingMap = new Map(allDataRef.current.map((d) => [d.time, d]));
-        newData.forEach((d) => {
-          if (!existingMap.has(d.time)) existingMap.set(d.time, d);
-        });
-        const merged = Array.from(existingMap.values()).sort((a, b) => a.time - b.time);
-        allDataRef.current = merged;
-        oldestDateRef.current = merged[0].time;
-        updateSeriesData(merged);
-      }
+      await fetchAndPrepend(extraDays);
     } catch (err) {
       console.warn('MA backfill fetch failed:', err);
     } finally {
@@ -755,7 +847,7 @@ const MarketChart = React.memo(forwardRef(({
         const applyExt = EXTENDED_HOURS_INTERVALS.has(intervalRef.current);
         volumeSeriesRef.current.setData(data.map((d, i) => {
           const up = i > 0 && d.close >= data[i - 1].close;
-          const ext = applyExt && isExtendedHours(d.time);
+          const ext = applyExt && getExtendedHoursType(d.time);
           return {
             time: d.time, value: d.volume || 0,
             color: ext
@@ -872,6 +964,10 @@ const MarketChart = React.memo(forwardRef(({
     allDataRef.current = [];
     oldestDateRef.current = null;
     fetchingRef.current = false;
+    gapFillDoneRef.current = false;
+    gapFillRetryRef.current = 0;
+    gapFillInProgressRef.current = false;
+    minuteAggRef.current = { time: 0, open: 0, high: 0, low: 0, close: 0, volume: 0 };
 
     // Unsubscribe previous scroll listener
     if (rangeUnsubRef.current) {
@@ -910,17 +1006,13 @@ const MarketChart = React.memo(forwardRef(({
         let fromDate, toDate;
         if (loadDays > 0) {
           const now = new Date();
-          toDate = now.toISOString().split('T')[0];
-          if (interval === '1s') {
-            // For 1s: load only today — avoids fetching 50k+ bars from
-            // previous sessions. Users can scroll back for more history.
-            fromDate = toDate;
-          } else {
+          toDate = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+          {
             const maxMaPeriod = Math.max(...enabledMaPeriodsRef.current, 0);
             const overheadDays = Math.ceil((maxMaPeriod / (BARS_PER_DAY[interval] || 1)) * 1.5);
             const from = new Date(now);
             from.setDate(from.getDate() - loadDays - overheadDays);
-            fromDate = from.toISOString().split('T')[0];
+            fromDate = from.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
           }
         }
 
@@ -968,10 +1060,6 @@ const MarketChart = React.memo(forwardRef(({
             rangeUnsubRef.current = unsubscribe;
           }
 
-          // For 1s: prefetch previous session so scroll-left is seamless
-          if (interval === '1s') {
-            handleScrollLoadMore();
-          }
         } else {
           // Silently downgrade 1s → 1min when ginlix-data unavailable or symbol ineligible
           if (interval === '1s' && (!ginlixDataEnabled || !supports1sInterval(symbol))) {
@@ -1014,28 +1102,30 @@ const MarketChart = React.memo(forwardRef(({
     };
   }, [symbol, interval, onStockMeta, updateSeriesData, handleScrollLoadMore]);
 
-  // --- REST polling fallback for 1s interval (safety net when WS not delivering) ---
+  // --- REST polling fallback (1s and 1min safety net when WS not delivering) ---
   useEffect(() => {
-    if (interval !== '1s' || chartMode !== 'custom') return;
+    const is1sPolling = interval === '1s';
+    const is1mPolling = interval === '1min';
+    if ((!is1sPolling && !is1mPolling) || chartMode !== 'custom') return;
 
     let timer = null;
     let aborted = false;
 
     const poll = async () => {
       if (aborted) return;
-      // Skip this iteration if WS delivered a live tick within the last 5s
+      // Skip if WS delivered a live tick recently
       if (lastLiveTickTimeRef.current > Date.now() - 5000) return;
       try {
         const now = new Date();
-        const toDate = now.toISOString().split('T')[0];
+        const toDate = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
         // Delta-based: fetch only from last known bar's time onward
         const lastBar = allDataRef.current?.[allDataRef.current.length - 1];
         const fromDate = lastBar
           ? new Date(lastBar.time * 1000).toISOString().split('T')[0]
-          : (() => { const d = new Date(now); d.setDate(d.getDate() - 3); return d.toISOString().split('T')[0]; })();
+          : (() => { const d = new Date(now); d.setDate(d.getDate() - 3); return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); })();
 
-        const result = await fetchStockData(symbol, '1s', fromDate, toDate);
+        const result = await fetchStockData(symbol, interval, fromDate, toDate);
         if (aborted) return;
 
         const data = result?.data;
@@ -1054,15 +1144,7 @@ const MarketChart = React.memo(forwardRef(({
             updateSeriesData(data);
           }
 
-          if (chartRef.current) {
-            const idealBars = AUTO_FIT_BARS['1s'];
-            if (idealBars && allDataRef.current.length > idealBars) {
-              chartRef.current.timeScale().setVisibleLogicalRange({
-                from: allDataRef.current.length - idealBars,
-                to: allDataRef.current.length,
-              });
-            }
-          }
+          // Don't re-zoom on poll updates — preserve user's manual scroll/zoom position
           setLastUpdateTime(new Date());
           setError(null);
 
@@ -1073,12 +1155,13 @@ const MarketChart = React.memo(forwardRef(({
           }
         }
       } catch (err) {
-        if (!aborted) console.debug('1s REST poll failed:', err);
+        if (!aborted) console.debug('REST poll failed:', err);
       }
     };
 
-    // Start polling every 5 seconds
-    timer = setInterval(poll, 5000);
+    // 1s: poll every 5s as WS fallback; native 1m: poll every 15s for canonical bars
+    const pollMs = is1sPolling ? 5000 : 15000;
+    timer = setInterval(poll, pollMs);
 
     return () => {
       aborted = true;
@@ -1168,8 +1251,118 @@ const MarketChart = React.memo(forwardRef(({
 
   const isTV = chartMode === 'tradingview';
 
+  // --- Toolbar render helpers (shared between wide & compact layouts) ---
+
+  const renderIndicatorsContent = () => (
+    <>
+      <div className="dropdown-section">
+        <span className="indicator-toggles-label">MA</span>
+        <div className="indicator-toggles">
+          {MA_CONFIGS.map(({ period, color }) => (
+            <button
+              key={period}
+              type="button"
+              className={`indicator-toggle-btn${enabledMaPeriods.includes(period) ? ' indicator-toggle-active' : ''}`}
+              style={enabledMaPeriods.includes(period) ? { color, borderColor: color } : undefined}
+              onClick={() => handleToggleMa(period)}
+            >
+              {period}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="dropdown-section">
+        <span className="indicator-toggles-label">RSI</span>
+        <div className="indicator-toggles">
+          {RSI_PERIODS.map((p) => (
+            <button
+              key={p}
+              type="button"
+              className={`indicator-toggle-btn${rsiPeriod === p ? ' indicator-toggle-active' : ''}`}
+              style={rsiPeriod === p ? { color: 'var(--color-accent-primary)', borderColor: 'var(--color-accent-primary)' } : undefined}
+              onClick={() => handleChangeRsiPeriod(p)}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="dropdown-section">
+        <span className="indicator-toggles-label">Overlay</span>
+        <div className="indicator-toggles">
+          {Object.entries(OVERLAY_LABELS).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={`indicator-toggle-btn${overlayVisibility[key] ? ' indicator-toggle-active' : ''}`}
+              style={overlayVisibility[key] ? { color: OVERLAY_COLORS[key], borderColor: OVERLAY_COLORS[key] } : undefined}
+              onClick={() => handleToggleOverlay(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+
+  const renderToolsContent = () => (
+    <>
+      <button
+        type="button"
+        className={`chart-tool-btn${priceScaleMode === PriceScaleMode.Percentage ? ' chart-tool-btn-active' : ''}`}
+        onClick={() => handleTogglePriceScale(PriceScaleMode.Percentage)}
+        title="Percentage Scale"
+      >
+        %
+      </button>
+      <button
+        type="button"
+        className={`chart-tool-btn${magnetMode ? ' chart-tool-btn-active' : ''}`}
+        onClick={() => setMagnetMode((v) => !v)}
+        title="Magnet Mode"
+      >
+        M
+      </button>
+      <button
+        type="button"
+        className={`chart-tool-btn${showBaseline ? ' chart-tool-btn-active' : ''}`}
+        onClick={() => setShowBaseline((v) => !v)}
+        title="Baseline vs Previous Close"
+      >
+        B
+      </button>
+      <button
+        type="button"
+        className={`chart-tool-btn${annotationsVisible ? ' chart-tool-btn-active' : ''}`}
+        onClick={handleToggleAnnotations}
+        title="Toggle Annotations"
+      >
+        T
+      </button>
+    </>
+  );
+
+  const renderViewButtons = () => (
+    <>
+      <button
+        type="button"
+        className={`chart-tool-btn${priceScaleMode === PriceScaleMode.Logarithmic ? ' chart-tool-btn-active' : ''}`}
+        onClick={() => handleTogglePriceScale(PriceScaleMode.Logarithmic)}
+        title="Log Scale"
+      >
+        Log
+      </button>
+      <button type="button" className="chart-tool-btn" onClick={handleZoomIn} title="Zoom In"><Plus size={14} /></button>
+      <button type="button" className="chart-tool-btn" onClick={handleZoomOut} title="Zoom Out"><Minus size={14} /></button>
+      <button type="button" className="chart-tool-btn" onClick={handleAutoNormalize} title="Auto Fit"><Maximize2 size={14} /></button>
+      <button type="button" className="chart-tool-btn" onClick={handleFitAll} title="Fit All Data"><Minimize2 size={14} /></button>
+      <button type="button" className="chart-tool-btn" onClick={handleScrollToRealTime} title="Scroll to Latest"><RotateCcw size={14} /></button>
+    </>
+  );
+
   return (
-    <div className="market-chart-container">
+    <div className={`market-chart-container${isCompact ? ' chart--compact' : ''}`} ref={rootRef}>
       {/* ---- Toolbar: intervals, indicator dropdown, values, tools dropdown, mode switcher ---- */}
       <div className="chart-tools">
         <div className="chart-tools-left">
@@ -1191,7 +1384,7 @@ const MarketChart = React.memo(forwardRef(({
                       disabledTooltipTimer.current = setTimeout(() => setDisabledTooltip(null), 2000);
                       return;
                     }
-                    onIntervalChange?.(key); setIntervalsOpen(false); setIndicatorsOpen(false); setToolsOpen(false);
+                    onIntervalChange?.(key); setIntervalsOpen(false); setIndicatorsOpen(false); setToolsOpen(false); setViewOpen(false);
                   }}
                 >
                   {label}
@@ -1207,7 +1400,7 @@ const MarketChart = React.memo(forwardRef(({
               <button
                 type="button"
                 className={`interval-btn${(!PRIMARY_INTERVAL_KEYS.has(interval) || intervalsOpen) ? ' interval-btn-active' : ''}`}
-                onClick={() => { setIntervalsOpen((v) => !v); setIndicatorsOpen(false); setToolsOpen(false); }}
+                onClick={() => { setIntervalsOpen((v) => !v); setIndicatorsOpen(false); setToolsOpen(false); setViewOpen(false); }}
               >
                 {!PRIMARY_INTERVAL_KEYS.has(interval)
                   ? INTERVALS.find(({ key }) => key === interval)?.label
@@ -1232,71 +1425,24 @@ const MarketChart = React.memo(forwardRef(({
           </div>
           {!isTV && (
             <>
-              {/* Indicators dropdown: MA, RSI, Overlay toggles */}
-              <div className="toolbar-dropdown" ref={indicatorsDropdownRef}>
+              {/* Indicators dropdown — wide only */}
+              <div className="toolbar-dropdown toolbar--wide-only" ref={indicatorsDropdownRef}>
                 <button
                   type="button"
                   className={`chart-tool-btn${indicatorsOpen ? ' chart-tool-btn-active' : ''}`}
-                  onClick={() => { setIndicatorsOpen((v) => !v); setToolsOpen(false); }}
+                  onClick={() => { setIndicatorsOpen((v) => !v); setToolsOpen(false); setViewOpen(false); }}
                   title="Indicators"
                 >
                   <SlidersHorizontal size={14} />
                 </button>
                 {indicatorsOpen && (
                   <div className="toolbar-dropdown-panel">
-                    <div className="dropdown-section">
-                      <span className="indicator-toggles-label">MA</span>
-                      <div className="indicator-toggles">
-                        {MA_CONFIGS.map(({ period, color }) => (
-                          <button
-                            key={period}
-                            type="button"
-                            className={`indicator-toggle-btn${enabledMaPeriods.includes(period) ? ' indicator-toggle-active' : ''}`}
-                            style={enabledMaPeriods.includes(period) ? { color, borderColor: color } : undefined}
-                            onClick={() => handleToggleMa(period)}
-                          >
-                            {period}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="dropdown-section">
-                      <span className="indicator-toggles-label">RSI</span>
-                      <div className="indicator-toggles">
-                        {RSI_PERIODS.map((p) => (
-                          <button
-                            key={p}
-                            type="button"
-                            className={`indicator-toggle-btn${rsiPeriod === p ? ' indicator-toggle-active' : ''}`}
-                            style={rsiPeriod === p ? { color: 'var(--color-accent-primary)', borderColor: 'var(--color-accent-primary)' } : undefined}
-                            onClick={() => handleChangeRsiPeriod(p)}
-                          >
-                            {p}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="dropdown-section">
-                      <span className="indicator-toggles-label">Overlay</span>
-                      <div className="indicator-toggles">
-                        {Object.entries(OVERLAY_LABELS).map(([key, label]) => (
-                          <button
-                            key={key}
-                            type="button"
-                            className={`indicator-toggle-btn${overlayVisibility[key] ? ' indicator-toggle-active' : ''}`}
-                            style={overlayVisibility[key] ? { color: OVERLAY_COLORS[key], borderColor: OVERLAY_COLORS[key] } : undefined}
-                            onClick={() => handleToggleOverlay(key)}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                    {renderIndicatorsContent()}
                   </div>
                 )}
               </div>
-              {/* Indicator values — always visible */}
-              <div className="chart-indicators">
+              {/* Indicator values — wide only */}
+              <div className="chart-indicators toolbar--wide-only">
                 {MA_CONFIGS.filter(({ period }) => enabledMaPeriods.includes(period)).map(({ period, color, label }) => (
                   <span className="indicator-item" key={period}>
                     <span className="indicator-color" style={{ backgroundColor: color }} />
@@ -1314,12 +1460,12 @@ const MarketChart = React.memo(forwardRef(({
         <div className="chart-tools-right">
           {!isTV && (
             <>
-              {/* Tools dropdown: scale, magnet, baseline, annotations, scroll-to-latest */}
-              <div className="toolbar-dropdown" ref={toolsDropdownRef}>
+              {/* Tools dropdown — wide only */}
+              <div className="toolbar-dropdown toolbar--wide-only" ref={toolsDropdownRef}>
                 <button
                   type="button"
                   className={`chart-tool-btn${toolsOpen ? ' chart-tool-btn-active' : ''}`}
-                  onClick={() => { setToolsOpen((v) => !v); setIndicatorsOpen(false); }}
+                  onClick={() => { setToolsOpen((v) => !v); setIndicatorsOpen(false); setViewOpen(false); }}
                   title="Chart Tools"
                 >
                   <Settings2 size={14} />
@@ -1327,57 +1473,44 @@ const MarketChart = React.memo(forwardRef(({
                 {toolsOpen && (
                   <div className="toolbar-dropdown-panel toolbar-dropdown-panel--right">
                     <div className="dropdown-tool-grid">
-                      <button
-                        type="button"
-                        className={`chart-tool-btn${priceScaleMode === PriceScaleMode.Percentage ? ' chart-tool-btn-active' : ''}`}
-                        onClick={() => handleTogglePriceScale(PriceScaleMode.Percentage)}
-                        title="Percentage Scale"
-                      >
-                        %
-                      </button>
-                      <button
-                        type="button"
-                        className={`chart-tool-btn${magnetMode ? ' chart-tool-btn-active' : ''}`}
-                        onClick={() => setMagnetMode((v) => !v)}
-                        title="Magnet Mode"
-                      >
-                        M
-                      </button>
-                      <button
-                        type="button"
-                        className={`chart-tool-btn${showBaseline ? ' chart-tool-btn-active' : ''}`}
-                        onClick={() => setShowBaseline((v) => !v)}
-                        title="Baseline vs Previous Close"
-                      >
-                        B
-                      </button>
-                      <button
-                        type="button"
-                        className={`chart-tool-btn${annotationsVisible ? ' chart-tool-btn-active' : ''}`}
-                        onClick={handleToggleAnnotations}
-                        title="Toggle Annotations"
-                      >
-                        T
-                      </button>
+                      {renderToolsContent()}
                     </div>
                   </div>
                 )}
               </div>
-              {/* Zoom, fit, and navigation — always visible */}
-              <div className="chart-tool-buttons">
+              {/* Zoom, fit, navigation — inline, wide only */}
+              <div className="chart-tool-buttons toolbar--wide-only">
+                {renderViewButtons()}
+              </div>
+              {/* Combined menu — compact only (merges indicators + tools + view) */}
+              <div className="toolbar-dropdown toolbar--compact-only" ref={viewDropdownRef}>
                 <button
                   type="button"
-                  className={`chart-tool-btn${priceScaleMode === PriceScaleMode.Logarithmic ? ' chart-tool-btn-active' : ''}`}
-                  onClick={() => handleTogglePriceScale(PriceScaleMode.Logarithmic)}
-                  title="Log Scale"
+                  className={`chart-tool-btn${viewOpen ? ' chart-tool-btn-active' : ''}`}
+                  onClick={() => { setViewOpen((v) => !v); setIndicatorsOpen(false); setToolsOpen(false); }}
+                  title="Chart Settings"
                 >
-                  Log
+                  <Menu size={14} />
                 </button>
-                <button type="button" className="chart-tool-btn" onClick={handleZoomIn} title="Zoom In"><Plus size={14} /></button>
-                <button type="button" className="chart-tool-btn" onClick={handleZoomOut} title="Zoom Out"><Minus size={14} /></button>
-                <button type="button" className="chart-tool-btn" onClick={handleAutoNormalize} title="Auto Fit"><Maximize2 size={14} /></button>
-                <button type="button" className="chart-tool-btn" onClick={handleFitAll} title="Fit All Data"><Minimize2 size={14} /></button>
-                <button type="button" className="chart-tool-btn" onClick={handleScrollToRealTime} title="Scroll to Latest"><RotateCcw size={14} /></button>
+                {viewOpen && (
+                  <div className="toolbar-dropdown-panel toolbar-dropdown-panel--right compact-menu-panel">
+                    {/* Indicators section */}
+                    <div className="compact-menu-section-label">Indicators</div>
+                    {renderIndicatorsContent()}
+                    {/* Tools section */}
+                    <div className="compact-menu-divider" />
+                    <div className="compact-menu-section-label">Tools</div>
+                    <div className="dropdown-tool-grid">
+                      {renderToolsContent()}
+                    </div>
+                    {/* View section */}
+                    <div className="compact-menu-divider" />
+                    <div className="compact-menu-section-label">View</div>
+                    <div className="dropdown-tool-grid compact-menu-view-grid">
+                      {renderViewButtons()}
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -1386,14 +1519,14 @@ const MarketChart = React.memo(forwardRef(({
               <button
                 type="button"
                 className={`interval-btn${!isTV ? ' interval-btn-active' : ''}`}
-                onClick={() => { setChartMode('custom'); setIndicatorsOpen(false); setToolsOpen(false); }}
+                onClick={() => { setChartMode('custom'); setIndicatorsOpen(false); setToolsOpen(false); setViewOpen(false); }}
               >
                 Light
               </button>
               <button
                 type="button"
                 className={`interval-btn${isTV ? ' interval-btn-active' : ''}`}
-                onClick={() => { setChartMode('tradingview'); setIndicatorsOpen(false); setToolsOpen(false); }}
+                onClick={() => { setChartMode('tradingview'); setIndicatorsOpen(false); setToolsOpen(false); setViewOpen(false); }}
               >
                 Advanced
               </button>
@@ -1429,6 +1562,11 @@ const MarketChart = React.memo(forwardRef(({
                 containerWidth={chartContainerRef.current?.clientWidth}
                 containerHeight={chartContainerRef.current?.clientHeight}
               />
+              {scrollLoading && (
+                <div className="chart-scroll-loading">
+                  <div className="chart-scroll-loading-spinner" />
+                </div>
+              )}
             </div>
             <div className="rsi-container">
               <div className="rsi-label">RSI ({rsiPeriod}): {rsiValue ?? '\u2014'}</div>

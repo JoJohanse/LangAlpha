@@ -4,6 +4,7 @@ import {
   ResponsiveContainer, LabelList,
 } from 'recharts';
 import { useTranslation } from 'react-i18next';
+import { utcMsToETDate } from '@/lib/utils';
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -90,8 +91,12 @@ export function InlineStockPriceCard({ artifact, onClick }) {
   if (!ohlcv?.length) return null;
 
   const lastClose = ohlcv[ohlcv.length - 1]?.close;
-  const firstDate = ohlcv[0]?.date;
-  const lastDate = ohlcv[ohlcv.length - 1]?.date;
+  const formatDateLabel = (val) => {
+    if (typeof val === 'number') return utcMsToETDate(val);
+    return val || '';
+  };
+  const firstDate = formatDateLabel(ohlcv[0]?.time ?? ohlcv[0]?.date);
+  const lastDate = formatDateLabel(ohlcv[ohlcv.length - 1]?.time ?? ohlcv[ohlcv.length - 1]?.date);
   const changePct = stats?.period_change_pct;
   const isPositive = (changePct ?? 0) >= 0;
   const color = isPositive ? GREEN : RED;

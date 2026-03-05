@@ -76,7 +76,7 @@ export const PRIMARY_INTERVAL_KEYS = new Set(['1s', '1min', '1day']);
 
 // Days of history per interval for initial load (0 = full history)
 export const INITIAL_LOAD_DAYS = {
-  '1s': 1, '1min': 7, '5min': 30, '15min': 60, '30min': 120,
+  '1s': 0, '1min': 7, '5min': 30, '15min': 60, '30min': 120,
   '1hour': 180, '4hour': 365, '1day': 0,
 };
 
@@ -129,6 +129,8 @@ export const OVERLAY_LABELS = {
 };
 
 // --- Extended-hours detection ---
+export const EXT_COLOR_PRE = '#fbbf24';   // amber — pre-market
+export const EXT_COLOR_POST = '#3b82f6';  // blue  — after-hours
 export const EXTENDED_HOURS_INTERVALS = new Set(['1s', '1min', '5min', '15min', '30min', '1hour']);
 
 /**

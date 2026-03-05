@@ -7,6 +7,7 @@ import {
   LineChart, Line, ReferenceLine,
 } from 'recharts';
 import { fetchStockData } from '../../../MarketView/utils/api';
+import { utcMsToChartSec } from '@/lib/utils';
 import { useTheme } from '../../../../contexts/ThemeContext';
 import { useTranslation } from 'react-i18next';
 
@@ -54,13 +55,10 @@ const formatPct = (val) => {
  * Daily dates ("2024-01-15") → kept as string (business day format).
  * Intraday datetimes ("2024-01-15 09:30:00") → UNIX timestamp (seconds).
  */
-const toChartTime = (dateStr) => {
-  if (!dateStr) return dateStr;
-  // If it contains a space or T, it's a datetime → convert to UNIX timestamp
-  if (dateStr.includes(' ') || dateStr.includes('T')) {
-    return Math.floor(new Date(dateStr).getTime() / 1000);
-  }
-  return dateStr; // daily date string, lightweight-charts handles it natively
+const toChartTime = (val) => {
+  if (val == null) return val;
+  if (typeof val === 'number') return utcMsToChartSec(val); // Unix ms → ET chart seconds
+  return val; // daily date string, lightweight-charts handles it natively
 };
 
 // ─── Scroll-load config (mirrors MarketView/MarketChart.jsx) ────
@@ -286,7 +284,7 @@ export function StockPriceChart({ data }) {
 
     // Convert initial OHLCV to lightweight-charts format
     const chartData = initialOhlcv.map((d) => ({
-      time: toChartTime(d.date),
+      time: toChartTime(d.time ?? d.date),
       open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume || 0,
     })).sort((a, b) => a.time - b.time)
       .filter((item, i, arr) => i === 0 || item.time !== arr[i - 1].time);
@@ -1075,8 +1073,9 @@ function MiniCandlestick({ ohlcv, height = 180 }) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
 
-  // Detect if data is intraday (datetime strings with space or T)
-  const isIntraday = ohlcv?.[0]?.date && (ohlcv[0].date.includes(' ') || ohlcv[0].date.includes('T'));
+  // Detect if data is intraday (numeric timestamps are always intraday from our API)
+  const firstBar = ohlcv?.[0];
+  const isIntraday = firstBar && (typeof (firstBar.time ?? firstBar.date) === 'number');
 
   useEffect(() => {
     if (!containerRef.current || !ohlcv?.length) return;
@@ -1112,7 +1111,7 @@ function MiniCandlestick({ ohlcv, height = 180 }) {
     });
     series.setData(
       ohlcv.map((d) => ({
-        time: toChartTime(d.date),
+        time: toChartTime(d.time ?? d.date),
         open: d.open,
         high: d.high,
         low: d.low,
