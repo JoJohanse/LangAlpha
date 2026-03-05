@@ -18,9 +18,11 @@ from src.data_client import get_market_data_provider
 from src.server.services.cache._ohlcv_envelope import (
     _EMPTY_RESULT_TTL,
     _build_envelope,
+    _is_stale_date,
     _merge_bars,
     _needs_refresh,
     _parse_envelope,
+    watermark_to_date_str,
 )
 from src.utils.cache.redis_cache import get_cache_client
 from src.utils.market_hours import current_market_phase, seconds_until_next_open
@@ -77,9 +79,10 @@ class DailyFetchResult:
     ttl_remaining: Optional[int]
     background_refresh_triggered: bool
     cache_key: Optional[str] = None
-    watermark: Optional[str] = None
+    watermark: Optional[int] = None
     complete: Optional[bool] = None
     market_phase: Optional[str] = None
+    truncated: Optional[bool] = None
     error: Optional[str] = None
 
 
@@ -129,13 +132,13 @@ class DailyCacheService:
         is_index: bool = False,
         user_id: Optional[str] = None,
     ) -> tuple:
-        """Fetch daily data and return ``(bars, source_name)``."""
+        """Fetch daily data and return ``(bars, source_name, truncated)``."""
         provider = await get_market_data_provider()
-        data, source = await provider.get_daily_with_source(
+        data, source, truncated = await provider.get_daily_with_source(
             symbol=symbol, from_date=from_date, to_date=to_date,
             is_index=is_index, user_id=user_id,
         )
-        return data, source
+        return data, source, truncated
 
     async def _find_cached(
         self, symbol: str, from_date: Optional[str], to_date: Optional[str],
@@ -183,20 +186,26 @@ class DailyCacheService:
                 watermark = envelope["watermark"] if envelope else None
                 existing_bars = envelope["bars"] if envelope else []
 
-                # For daily data, watermark IS a date — use it directly
-                delta_from = watermark[:10] if watermark and len(watermark) >= 10 else None
-
-                delta, _source = await self._fetch_data(symbol, from_date=delta_from, to_date=None, is_index=is_index, user_id=user_id)
-
-                if watermark and existing_bars:
-                    merged = _merge_bars(existing_bars, delta, watermark)
-                else:
+                if envelope and envelope.get("truncated"):
+                    # Truncated base — full re-fetch instead of delta
+                    delta, _source, truncated = await self._fetch_data(symbol, from_date=None, to_date=None, is_index=is_index, user_id=user_id)
                     merged = delta
+                else:
+                    # Normal delta refresh
+                    # Convert watermark (Unix ms) to date string for API from_date param
+                    delta_from = watermark_to_date_str(watermark)
+
+                    delta, _source, truncated = await self._fetch_data(symbol, from_date=delta_from, to_date=None, is_index=is_index, user_id=user_id)
+
+                    if watermark and existing_bars:
+                        merged = _merge_bars(existing_bars, delta, watermark)
+                    else:
+                        merged = delta
 
                 complete = closed and len(merged) > 0
                 base = self._base_ttl()
                 eff = self._effective_ttl(base, complete)
-                env = _build_envelope(merged, phase, complete, stored_ttl=eff)
+                env = _build_envelope(merged, phase, complete, stored_ttl=eff, truncated=truncated)
                 await cache.set(cache_key, env, ttl=eff)
 
                 logger.debug(
@@ -237,26 +246,34 @@ class DailyCacheService:
 
             bg_triggered = False
             if _needs_refresh(envelope, base_ttl):
-                bg_triggered = True
-                asyncio.create_task(
-                    self._delta_refresh(cache_key, normalized, is_index=is_index, user_id=user_id)
-                )
+                if _is_stale_date(envelope) or envelope.get("complete"):
+                    # Stale date or day-boundary transition → sync re-fetch
+                    logger.info("Daily cache %s: stale/complete → sync re-fetch", normalized)
+                    envelope = None
+                else:
+                    # Normal SWR: return stale bars, refresh in background.
+                    bg_triggered = True
+                    asyncio.create_task(
+                        self._delta_refresh(cache_key, normalized, is_index=is_index, user_id=user_id)
+                    )
 
-            return DailyFetchResult(
-                symbol=normalized,
-                data=bars,
-                cached=True,
-                ttl_remaining=ttl_remaining,
-                background_refresh_triggered=bg_triggered,
-                cache_key=cache_key,
-                watermark=watermark,
-                complete=complete,
-                market_phase=phase,
-            )
+            if envelope is not None:
+                return DailyFetchResult(
+                    symbol=normalized,
+                    data=bars,
+                    cached=True,
+                    ttl_remaining=ttl_remaining,
+                    background_refresh_triggered=bg_triggered,
+                    cache_key=cache_key,
+                    watermark=watermark,
+                    complete=complete,
+                    market_phase=phase,
+                    truncated=envelope.get("truncated"),
+                )
 
         # --- Cache miss: full fetch ---
         try:
-            data, source = await self._fetch_data(normalized, from_date, to_date, is_index=is_index, user_id=user_id)
+            data, source, truncated = await self._fetch_data(normalized, from_date, to_date, is_index=is_index, user_id=user_id)
             cache_key = DailyCacheKeyBuilder.daily_key(normalized, from_date, to_date, source=source, is_index=is_index)
 
             closed = phase == "closed"
@@ -264,7 +281,7 @@ class DailyCacheService:
             eff_ttl = self._effective_ttl(base_ttl, complete)
             if not data:
                 eff_ttl = _EMPTY_RESULT_TTL
-            env = _build_envelope(data, phase, complete, stored_ttl=eff_ttl)
+            env = _build_envelope(data, phase, complete, stored_ttl=eff_ttl, truncated=truncated)
 
             await cache.set(cache_key, env, ttl=eff_ttl)
 
@@ -278,6 +295,7 @@ class DailyCacheService:
                 watermark=env["watermark"],
                 complete=complete,
                 market_phase=phase,
+                truncated=truncated,
             )
 
         except Exception as e:

@@ -9,14 +9,14 @@ import json
 import logging
 import os
 from datetime import datetime, date
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Optional
 from contextlib import asynccontextmanager
 from uuid import UUID
 
 import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool
 
-from src.config.settings import is_redis_cache_enabled, get_nested_config
+from src.config.settings import is_redis_cache_enabled, get_nested_config, get_redis_max_connections
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class RedisCacheClient:
     def __init__(
         self,
         url: Optional[str] = None,
-        max_connections: int = 10,
+        max_connections: int = 50,
         socket_timeout: int = 5,
         socket_connect_timeout: int = 5,
         decode_responses: bool = False,  # We handle JSON encoding manually
@@ -315,80 +315,6 @@ class RedisCacheClient:
             logger.error(f"Cache TTL error for {key}: {e}")
             return -2
 
-    # ==================== Stale-While-Revalidate Operations ====================
-
-    async def get_with_swr(
-        self,
-        key: str,
-        original_ttl: int,
-        soft_ttl_ratio: float = 0.6,
-    ) -> Tuple[Optional[Any], bool]:
-        """
-        Get value with stale-while-revalidate info.
-
-        Returns cached value and whether a background refresh is recommended.
-        The soft TTL threshold determines when data is considered "stale but usable".
-
-        Args:
-            key: Cache key
-            original_ttl: Original TTL when the key was set (needed for ratio calculation)
-            soft_ttl_ratio: Ratio of TTL at which data becomes stale (default 0.6 = 60%)
-                           When remaining TTL < original_ttl * (1 - soft_ttl_ratio),
-                           the data is stale and needs_refresh=True
-
-        Returns:
-            Tuple of (value, needs_refresh):
-            - value: Cached value or None if not found
-            - needs_refresh: True if cache miss OR remaining TTL below soft threshold
-        """
-        if not self.enabled or not self.client:
-            return None, True
-
-        try:
-            # Get value
-            value = await self.client.get(key)
-
-            if value is None:
-                self.stats["misses"] += 1
-                logger.debug(f"Cache MISS (SWR): {key}")
-                return None, True
-
-            self.stats["hits"] += 1
-
-            # Deserialize JSON
-            try:
-                deserialized = json.loads(value)
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to deserialize cache value for {key}: {e}")
-                self.stats["errors"] += 1
-                return None, True
-
-            # Check remaining TTL to determine if refresh is needed
-            remaining_ttl = await self.client.ttl(key)
-
-            # TTL of -1 means no expiry, -2 means key doesn't exist
-            soft_threshold = original_ttl * soft_ttl_ratio
-            if remaining_ttl < 0:
-                # No expiry set or key vanished - consider fresh if we have data
-                needs_refresh = remaining_ttl == -2
-            else:
-                # Calculate soft threshold: refresh when we've consumed (1 - soft_ttl_ratio) of TTL
-                # Example: soft_ttl_ratio=0.6 means refresh when 40% of TTL has passed
-                # i.e., when remaining_ttl < 60% of original_ttl
-                needs_refresh = remaining_ttl < soft_threshold
-
-            if needs_refresh:
-                logger.debug(f"Cache HIT (SWR stale): {key} - remaining TTL {remaining_ttl}s < threshold {soft_threshold}s")
-            else:
-                logger.debug(f"Cache HIT (SWR fresh): {key} - remaining TTL {remaining_ttl}s")
-
-            return deserialized, needs_refresh
-
-        except Exception as e:
-            logger.error(f"Cache get_with_swr error for {key}: {e}")
-            self.stats["errors"] += 1
-            return None, True
-
     # ==================== List Operations ====================
 
     async def list_append(
@@ -420,16 +346,14 @@ class RedisCacheClient:
             else:
                 serialized = json.dumps(value, ensure_ascii=False, cls=DateTimeEncoder)
 
-            # Append to list
-            await self.client.rpush(key, serialized)
-
-            # Trim to max size (FIFO: keep newest elements)
-            if max_size:
-                await self.client.ltrim(key, -max_size, -1)
-
-            # Set TTL if provided
-            if ttl:
-                await self.client.expire(key, ttl)
+            # Atomic RPUSH + LTRIM + EXPIRE via pipeline
+            async with self.client.pipeline(transaction=True) as pipe:
+                pipe.rpush(key, serialized)
+                if max_size:
+                    pipe.ltrim(key, -max_size, -1)
+                if ttl:
+                    pipe.expire(key, ttl)
+                await pipe.execute()
 
             self.stats["sets"] += 1
             logger.debug(f"List APPEND: {key} (max_size: {max_size})")
@@ -629,9 +553,10 @@ class RedisCacheClient:
 
     async def clear_all(self) -> bool:
         """
-        Clear all cache entries.
+        Clear all market-data cache entries.
 
-        WARNING: This flushes the entire Redis database.
+        Uses targeted pattern deletes instead of FLUSHDB to avoid
+        wiping unrelated Redis data (e.g. event buffers, sessions).
 
         Returns:
             True if successful, False otherwise
@@ -640,8 +565,10 @@ class RedisCacheClient:
             return False
 
         try:
-            await self.client.flushdb()
-            logger.warning("Cache cleared (FLUSHDB)")
+            total = 0
+            for pattern in ("ohlcv:*", "snapshot:*", "fmp:*", "market:*"):
+                total += await self.delete_pattern(pattern)
+            logger.warning("Cache cleared: %d market-data keys removed", total)
             return True
         except Exception as e:
             logger.error(f"Cache clear error: {e}")
@@ -694,7 +621,7 @@ def get_cache_client() -> RedisCacheClient:
     global _cache_client
 
     if _cache_client is None:
-        _cache_client = RedisCacheClient()
+        _cache_client = RedisCacheClient(max_connections=get_redis_max_connections())
 
     return _cache_client
 

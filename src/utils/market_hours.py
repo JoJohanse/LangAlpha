@@ -7,7 +7,7 @@ used by the OHLCV cache to gate background refreshes and set TTL policies.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time, date
+from datetime import datetime, time, date, timedelta
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
@@ -117,6 +117,35 @@ def is_market_closed(now: datetime | None = None) -> bool:
     return current_market_phase(now) == "closed"
 
 
+def current_trading_date(now: datetime | None = None) -> str:
+    """Return the current trading date as ``YYYY-MM-DD``.
+
+    Before 04:00 ET on a trading day the trading date is the *previous*
+    trading day (pre-market hasn't started).  After 04:00 ET on a trading
+    day it's today.  On weekends/holidays it's the most recent past
+    trading day.
+    """
+    if now is None:
+        now = datetime.now(ET)
+    else:
+        now = now.astimezone(ET)
+
+    candidate = now.date()
+
+    # If it's before pre-market open, the current session hasn't started yet
+    if now.time() < _PRE_OPEN:
+        candidate -= timedelta(days=1)
+
+    # Walk backward to find the most recent trading day
+    for _ in range(10):
+        if _is_trading_day(candidate):
+            return candidate.strftime("%Y-%m-%d")
+        candidate -= timedelta(days=1)
+
+    # Fallback — shouldn't happen
+    return now.date().strftime("%Y-%m-%d")
+
+
 def seconds_until_next_open(now: datetime | None = None) -> int:
     """Seconds until the next pre-market open (04:00 ET on a trading day).
 
@@ -140,7 +169,6 @@ def seconds_until_next_open(now: datetime | None = None) -> int:
         return max(0, int((next_open - now).total_seconds()))
 
     # Otherwise advance to the next trading day
-    from datetime import timedelta
     candidate += timedelta(days=1)
     # Safety limit: max 10 days (handles long holiday runs)
     for _ in range(10):

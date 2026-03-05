@@ -75,7 +75,7 @@ background_execution:
 # Redis is used for caching and background workflow event storage
 redis:
   cache_enabled: true  # Enable/disable caching globally
-  max_connections: 10  # Connection pool size
+  max_connections: 50  # Connection pool size
 
   # Cache TTL settings (seconds)
   ttl:
@@ -88,7 +88,7 @@ redis:
     # Per-interval OHLCV cache TTLs (≈ interval_seconds × 1.5)
     # SWR soft threshold stays at 50% of these values
     ohlcv:
-      "1s": 5
+      "1s": 30
       "1min": 90
       "5min": 360
       "15min": 1080
@@ -104,7 +104,7 @@ redis:
   # SWR returns stale data immediately while refreshing in background
   swr:
     enabled: true  # Enable SWR for cache reads
-    soft_ttl_ratio: 0.6  # Refresh when remaining TTL < 60% of original (e.g., at 3 min for 5 min TTL)
+    soft_ttl_ratio: 0.6  # Used by OHLCV cache envelope _needs_refresh()
     warm_after_invalidation: true  # Pre-populate cache after invalidation
 
 
