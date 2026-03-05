@@ -10,6 +10,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Optional
+from uuid import uuid4
 from fastapi import HTTPException
 from langgraph.types import Command
 
@@ -156,6 +157,94 @@ async def _setup_fork_and_persistence(
         await persistence_service.get_or_calculate_turn_index()
 
     return query_type, is_fork, persistence_service
+
+
+async def backfill_queued_queries(
+    thread_id: str, queued_messages: list[dict]
+) -> None:
+    """Backfill query records for queued messages that produced orphan responses.
+
+    After a workflow completes, responses may exist at turn indices that have no
+    matching query (because the user message was injected mid-workflow via
+    MessageQueueMiddleware rather than arriving as a normal HTTP request).
+    This function finds those orphan response turns and creates query records.
+    """
+    if not queued_messages:
+        return
+
+    from src.server.database.conversation import (
+        create_query,
+        get_queries_for_thread,
+        get_responses_for_thread,
+    )
+
+    try:
+        queries = await get_queries_for_thread(thread_id)
+        responses = await get_responses_for_thread(thread_id)
+
+        query_turns = {q["turn_index"] for q in queries}
+        response_turns = {r["turn_index"] for r in responses}
+        orphan_turns = sorted(response_turns - query_turns)
+
+        if not orphan_turns:
+            return
+
+        # Match orphan turns with queued messages (FIFO order)
+        for turn_index, msg in zip(orphan_turns, queued_messages):
+            content = msg.get("content", "")
+            if not content:
+                continue
+            await create_query(
+                conversation_query_id=str(uuid4()),
+                conversation_thread_id=thread_id,
+                turn_index=turn_index,
+                content=content,
+                query_type="queued",
+            )
+            logger.info(
+                f"[CHAT] Backfilled queued query: thread_id={thread_id} "
+                f"turn_index={turn_index}"
+            )
+    except Exception as e:
+        logger.error(f"[CHAT] Failed to backfill queued queries: {e}")
+
+
+async def drain_queued_messages(thread_id: str) -> list[dict] | None:
+    """Drain any unconsumed queued messages from Redis after workflow completion.
+
+    Returns the messages so they can be sent back to the client for input restoration.
+    """
+    from src.utils.cache.redis_cache import get_cache_client
+
+    cache = get_cache_client()
+    if not cache.enabled or not cache.client:
+        return None
+
+    try:
+        key = f"workflow:queued_messages:{thread_id}"
+        pipe = cache.client.pipeline()
+        pipe.lrange(key, 0, -1)
+        pipe.delete(key)
+        results = await pipe.execute()
+
+        raw_messages = results[0]
+        if not raw_messages:
+            return None
+
+        messages = []
+        for raw in raw_messages:
+            try:
+                data = json.loads(
+                    raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                )
+                messages.append(data)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
+
+        return messages or None
+    except Exception as e:
+        logger.error(f"[CHAT] Failed to drain queued messages: {e}")
+        return None
 
 
 async def queue_message_for_thread(
@@ -884,12 +973,46 @@ async def astream_flash_workflow(
             tool_tracker=tool_tracker,
         )
 
+        # Track queued messages injected mid-workflow for post-completion backfill
+        async def _track_queued_messages(messages):
+            handler.injected_queued_messages.extend(
+                msg for msg in messages if msg.get("content")
+            )
+        handler.on_queued_message_injected = _track_queued_messages
+
         # =====================================================================
         # Background Execution (same pattern as PTC for reconnection support)
         # =====================================================================
 
         tracker = WorkflowTracker.get_instance()
         manager = BackgroundTaskManager.get_instance()
+
+        # Wait for any running/soft-interrupted workflow to complete before starting new one
+        ready_for_new_request = await manager.wait_for_soft_interrupted(
+            thread_id, timeout=30.0
+        )
+        if not ready_for_new_request:
+            # Try to queue the message for injection into the running workflow
+            queued = await queue_message_for_thread(thread_id, user_input, user_id)
+            if queued:
+                event_data = json.dumps(
+                    {
+                        "thread_id": thread_id,
+                        "content": user_input,
+                        "position": queued["position"],
+                    }
+                )
+                yield f"event: message_queued\ndata: {event_data}\n\n"
+                return
+
+            # Fallback: raise 409 if queuing failed
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Workflow {thread_id} is still running. "
+                    "Wait a moment, or use /reconnect to continue streaming, or /cancel to stop it."
+                ),
+            )
 
         # Mark workflow as active in Redis tracker
         await tracker.mark_active(
@@ -928,6 +1051,13 @@ async def astream_flash_workflow(
                         "execution_time": execution_time,
                     },
                 )
+
+                # Backfill query records for queued messages that produced orphan responses
+                if handler and handler.injected_queued_messages:
+                    await backfill_queued_queries(
+                        thread_id, handler.injected_queued_messages
+                    )
+
                 logger.info(
                     f"[FLASH_COMPLETE] Background completion persisted: "
                     f"thread_id={thread_id} duration={execution_time:.2f}s"
@@ -941,26 +1071,49 @@ async def astream_flash_workflow(
                 await release_burst_slot(user_id)
 
         # Start workflow in background
-        await manager.start_workflow(
-            thread_id=thread_id,
-            workflow_generator=handler.stream_workflow(
+        try:
+            await manager.start_workflow(
+                thread_id=thread_id,
+                workflow_generator=handler.stream_workflow(
+                    graph=flash_graph,
+                    input_state=input_state,
+                    config=graph_config,
+                ),
+                metadata={
+                    "workspace_id": workspace_id,
+                    "user_id": user_id,
+                    "started_at": datetime.now().isoformat(),
+                    "start_time": start_time,
+                    "msg_type": "flash",
+                    "is_byok": is_byok,
+                    "handler": handler,
+                    "token_callback": token_callback,
+                },
+                completion_callback=on_flash_workflow_complete,
                 graph=flash_graph,
-                input_state=input_state,
-                config=graph_config,
-            ),
-            metadata={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
-                "started_at": datetime.now().isoformat(),
-                "start_time": start_time,
-                "msg_type": "flash",
-                "is_byok": is_byok,
-                "handler": handler,
-                "token_callback": token_callback,
-            },
-            completion_callback=on_flash_workflow_complete,
-            graph=flash_graph,
-        )
+            )
+        except RuntimeError:
+            # Race condition: another request registered first — queue the message
+            await release_burst_slot(user_id)
+            queued = await queue_message_for_thread(thread_id, user_input, user_id)
+            if queued:
+                event_data = json.dumps(
+                    {
+                        "thread_id": thread_id,
+                        "content": user_input,
+                        "position": queued["position"],
+                    }
+                )
+                yield f"event: message_queued\ndata: {event_data}\n\n"
+                return
+
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Workflow {thread_id} is still running. "
+                    "Wait a moment, or use /reconnect to continue streaming, or /cancel to stop it."
+                ),
+            )
 
         # Stream live events from background task to client
         live_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
@@ -984,6 +1137,22 @@ async def astream_flash_workflow(
                     ]:
                         break
                     continue
+
+            # After workflow ends, return any unconsumed queued messages to the client
+            unconsumed = await drain_queued_messages(thread_id)
+            if unconsumed:
+                logger.info(
+                    f"[FLASH_CHAT] Returning {len(unconsumed)} unconsumed queued "
+                    f"message(s) to client: thread_id={thread_id}"
+                )
+                event_data = json.dumps({
+                    "thread_id": thread_id,
+                    "messages": [
+                        {"content": m["content"], "user_id": m.get("user_id")}
+                        for m in unconsumed
+                    ],
+                })
+                yield f"event: queued_message_returned\ndata: {event_data}\n\n"
 
         except (asyncio.CancelledError, GeneratorExit):
             _disconnected = True
@@ -1691,6 +1860,13 @@ async def astream_ptc_workflow(
             background_registry=background_registry,
         )
 
+        # Track queued messages injected mid-workflow for post-completion backfill
+        async def _track_queued_messages(messages):
+            handler.injected_queued_messages.extend(
+                msg for msg in messages if msg.get("content")
+            )
+        handler.on_queued_message_injected = _track_queued_messages
+
         # Initialize workflow tracker
         tracker = WorkflowTracker.get_instance()
         await tracker.mark_active(
@@ -1805,6 +1981,12 @@ async def astream_ptc_workflow(
                     },
                 )
 
+                # Backfill query records for queued messages that produced orphan responses
+                if _handler and _handler.injected_queued_messages:
+                    await backfill_queued_queries(
+                        thread_id, _handler.injected_queued_messages
+                    )
+
                 logger.info(
                     f"[PTC_COMPLETE] Background completion persisted: thread_id={thread_id} "
                     f"duration={execution_time:.2f}s"
@@ -1877,6 +2059,22 @@ async def astream_ptc_workflow(
                     ]:
                         break
                     continue
+
+            # After workflow ends, return any unconsumed queued messages to the client
+            unconsumed = await drain_queued_messages(thread_id)
+            if unconsumed:
+                logger.info(
+                    f"[PTC_CHAT] Returning {len(unconsumed)} unconsumed queued "
+                    f"message(s) to client: thread_id={thread_id}"
+                )
+                event_data = json.dumps({
+                    "thread_id": thread_id,
+                    "messages": [
+                        {"content": m["content"], "user_id": m.get("user_id")}
+                        for m in unconsumed
+                    ],
+                })
+                yield f"event: queued_message_returned\ndata: {event_data}\n\n"
 
         except (asyncio.CancelledError, GeneratorExit):
             # Client disconnected (tab close, refresh, network drop).
@@ -2188,6 +2386,19 @@ async def reconnect_to_workflow_stream(
                     ]:
                         break
                     continue
+
+            # After workflow ends, return any unconsumed queued messages to the client
+            unconsumed = await drain_queued_messages(thread_id)
+            if unconsumed:
+                event_data = json.dumps({
+                    "thread_id": thread_id,
+                    "messages": [
+                        {"content": m["content"], "user_id": m.get("user_id")}
+                        for m in unconsumed
+                    ],
+                })
+                yield f"event: queued_message_returned\ndata: {event_data}\n\n"
+
         finally:
             await manager.unsubscribe_from_live_events(thread_id, live_queue)
             await manager.decrement_connection(thread_id)

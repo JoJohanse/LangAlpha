@@ -311,6 +311,10 @@ class WorkflowStreamHandler:
         # Background task registry (single source of truth for SSE events)
         self._background_registry = background_registry
 
+        # Track queued messages injected mid-workflow (for query backfill)
+        self.injected_queued_messages: list[dict] = []
+        self.on_queued_message_injected: Optional[Any] = None
+
         # Snapshot of task IDs from previous workflow (set at stream start)
         self._old_tool_call_ids: set[str] = set()
 
@@ -562,6 +566,14 @@ class WorkflowStreamHandler:
                                 "messages": event_data.get("messages", []),
                                 "timestamp": event_data.get("timestamp"),
                             })
+                            # Track injected messages for later query backfill
+                            if self.on_queued_message_injected:
+                                try:
+                                    await self.on_queued_message_injected(
+                                        event_data.get("messages", [])
+                                    )
+                                except Exception:
+                                    pass
                             continue
 
                         # Check if this is an artifact event from middleware
