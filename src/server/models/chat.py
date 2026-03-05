@@ -244,6 +244,12 @@ class ChatRequest(BaseModel):
         description="LLM model name from models.json (e.g., 'minimax-m2.1', 'claude-sonnet-4-5')",
     )
 
+    # Reasoning effort override (optional - defaults to model's configured level)
+    reasoning_effort: Optional[Literal["low", "medium", "high"]] = Field(
+        default=None,
+        description="Override reasoning effort for this request (low/medium/high)",
+    )
+
     # External thread identity (for channel integrations like Telegram, Slack)
     external_thread_id: Optional[str] = Field(
         default=None,

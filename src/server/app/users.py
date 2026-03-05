@@ -13,10 +13,11 @@ Endpoints:
 """
 
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi import File, UploadFile
 from pydantic import BaseModel
 from src.ptc_agent.utils.storage.r2_uploader import upload_bytes, get_public_url
@@ -295,6 +296,127 @@ async def get_preferences(user_id: CurrentUserId):
     return UserPreferencesResponse.model_validate(preferences)
 
 
+def _validate_custom_models(custom_models: list, custom_providers: list | None = None) -> None:
+    """Validate custom_models list before persisting.
+
+    Raises HTTPException 400 on invalid data.
+    """
+    from src.llms.llm import ModelConfig, CUSTOM_MODEL_NAME_RE
+
+    if not isinstance(custom_models, list):
+        raise HTTPException(status_code=400, detail="custom_models must be a list")
+
+    mc = ModelConfig()
+    name_re = re.compile(CUSTOM_MODEL_NAME_RE)
+    seen_names: set[str] = set()
+
+    # Build valid provider set once: BYOK-eligible built-ins + custom providers
+    valid_providers = set(mc.get_byok_eligible_providers())
+    if custom_providers:
+        valid_providers.update(
+            cp["name"] for cp in custom_providers if isinstance(cp, dict) and cp.get("name")
+        )
+
+    for idx, cm in enumerate(custom_models):
+        if not isinstance(cm, dict):
+            raise HTTPException(status_code=400, detail=f"custom_models[{idx}]: must be an object")
+
+        name = cm.get("name")
+        model_id = cm.get("model_id")
+        provider = cm.get("provider")
+
+        # Required fields
+        if not name:
+            raise HTTPException(status_code=400, detail=f"custom_models[{idx}]: name is required")
+        if not model_id:
+            raise HTTPException(status_code=400, detail=f"custom_models[{idx}]: model_id is required")
+        if not provider:
+            raise HTTPException(status_code=400, detail=f"custom_models[{idx}]: provider is required")
+
+        # Name format
+        if not name_re.match(name):
+            raise HTTPException(
+                status_code=400,
+                detail=f"custom_models[{idx}]: name '{name}' is invalid (alphanumeric start, max 63 chars, only .-_ allowed)",
+            )
+
+        # No collision with system models
+        if mc.get_model_config(name):
+            raise HTTPException(
+                status_code=400,
+                detail=f"custom_models[{idx}]: name '{name}' conflicts with a system model",
+            )
+
+        # No duplicate names
+        if name in seen_names:
+            raise HTTPException(
+                status_code=400,
+                detail=f"custom_models[{idx}]: duplicate name '{name}'",
+            )
+        seen_names.add(name)
+
+        # Provider format: must be non-empty string
+        if not isinstance(provider, str) or not provider.strip():
+            raise HTTPException(
+                status_code=400,
+                detail=f"custom_models[{idx}]: provider must be a non-empty string",
+            )
+
+        # Provider must reference a known BYOK-eligible or custom provider
+        if provider not in valid_providers:
+            raise HTTPException(
+                status_code=400,
+                detail=f"custom_models[{idx}]: provider '{provider}' is not a known BYOK-eligible or custom provider",
+            )
+
+        # Validate JSON fields are dicts if present
+        for field in ("parameters", "extra_body"):
+            val = cm.get(field)
+            if val is not None and not isinstance(val, dict):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"custom_models[{idx}]: {field} must be a JSON object",
+                )
+
+
+def _validate_custom_providers(custom_providers: list) -> None:
+    """Validate custom_providers list before persisting."""
+    if not isinstance(custom_providers, list):
+        raise HTTPException(status_code=400, detail="custom_providers must be a list")
+
+    from src.llms.llm import ModelConfig
+
+    mc = ModelConfig()
+    builtin = set(mc.get_byok_eligible_providers())
+    name_re = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$")
+    seen: set[str] = set()
+
+    for idx, cp in enumerate(custom_providers):
+        if not isinstance(cp, dict):
+            raise HTTPException(status_code=400, detail=f"custom_providers[{idx}]: must be an object")
+
+        name = cp.get("name")
+        parent = cp.get("parent_provider")
+
+        if not name:
+            raise HTTPException(status_code=400, detail=f"custom_providers[{idx}]: name is required")
+        if not parent:
+            raise HTTPException(status_code=400, detail=f"custom_providers[{idx}]: parent_provider is required")
+        if not name_re.match(name):
+            raise HTTPException(status_code=400, detail=f"custom_providers[{idx}]: invalid name '{name}'")
+        if name in builtin:
+            raise HTTPException(status_code=400, detail=f"custom_providers[{idx}]: name '{name}' conflicts with built-in provider")
+        if name in seen:
+            raise HTTPException(status_code=400, detail=f"custom_providers[{idx}]: duplicate name '{name}'")
+        if parent not in builtin:
+            raise HTTPException(status_code=400, detail=f"custom_providers[{idx}]: parent_provider '{parent}' is not a BYOK-eligible provider")
+        seen.add(name)
+
+        ura = cp.get("use_response_api")
+        if ura is not None and not isinstance(ura, bool):
+            raise HTTPException(status_code=400, detail=f"custom_providers[{idx}]: use_response_api must be a boolean")
+
+
 @router.put("/users/me/preferences", response_model=UserPreferencesResponse)
 @handle_api_exceptions("update preferences", logger)
 async def update_preferences(
@@ -330,6 +452,26 @@ async def update_preferences(
     investment_pref = request.investment_preference.model_dump(exclude_unset=True) if request.investment_preference else None
     agent_pref = request.agent_preference.model_dump(exclude_unset=True) if request.agent_preference else None
     other_pref = request.other_preference.model_dump(exclude_unset=True) if request.other_preference else None
+
+    # Validate custom_providers BEFORE custom_models (models may reference providers)
+    if other_pref and "custom_providers" in other_pref:
+        custom_providers = other_pref["custom_providers"]
+        if custom_providers is not None:
+            _validate_custom_providers(custom_providers)
+
+    # Validate custom_models if present in other_preference
+    if other_pref and "custom_models" in other_pref:
+        custom_models = other_pref["custom_models"]
+        if custom_models is not None:
+            # Resolve custom_providers for validation:
+            # - If in this request → use them (even if empty/null → means being deleted)
+            # - Otherwise → load existing from DB
+            if "custom_providers" in other_pref:
+                cp_for_validation = other_pref.get("custom_providers") or []
+            else:
+                existing = await db_get_user_preferences(user_id)
+                cp_for_validation = (existing or {}).get("other_preference", {}).get("custom_providers") or []
+            _validate_custom_models(custom_models, cp_for_validation)
 
     preferences = await upsert_user_preferences(
         user_id=user_id,

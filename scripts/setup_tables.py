@@ -409,6 +409,7 @@ async def setup_tables_async():
                                 ON DELETE CASCADE ON UPDATE CASCADE,
                             provider VARCHAR(50) NOT NULL,
                             api_key BYTEA NOT NULL,
+                            base_url TEXT,
                             created_at TIMESTAMPTZ DEFAULT NOW(),
                             updated_at TIMESTAMPTZ DEFAULT NOW(),
                             PRIMARY KEY (user_id, provider)

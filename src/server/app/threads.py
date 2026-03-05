@@ -296,11 +296,12 @@ async def _handle_send_message(request: ChatRequest, auth: ChatRateLimited, thre
 
     config = await resolve_llm_config(
         setup.agent_config, user_id, request.llm_model, is_byok, mode=agent_mode,
+        reasoning_effort=getattr(request, "reasoning_effort", None),
     )
 
-    # OAuth or BYOK resolved a user-provided client → mark as own-key
-    if config.llm_client is not None:
-        is_byok = True
+    # is_byok reflects whether THIS request actually uses a user-provided key
+    # (BYOK, custom model via BYOK, or OAuth), not just whether the toggle is on
+    is_byok = config.llm_client is not None
 
     # Credit check: only when using platform key (no user-provided key resolved)
     if config.llm_client is None:

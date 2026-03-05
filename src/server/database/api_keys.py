@@ -37,16 +37,17 @@ async def get_user_api_keys(user_id: str) -> Dict[str, Any]:
             user_row = await cur.fetchone()
             byok_enabled = bool(user_row["byok_enabled"]) if user_row else False
 
-            # Fetch all provider keys (decrypted)
+            # Fetch all provider keys (decrypted) and base URLs
             await cur.execute(
-                "SELECT provider, pgp_sym_decrypt(api_key, %s) AS api_key "
+                "SELECT provider, pgp_sym_decrypt(api_key, %s) AS api_key, base_url "
                 "FROM user_api_keys WHERE user_id = %s ORDER BY provider",
                 (enc_key, user_id),
             )
             rows = await cur.fetchall()
             keys = {row["provider"]: row["api_key"] for row in rows}
+            base_urls = {row["provider"]: row["base_url"] for row in rows}
 
-            return {"byok_enabled": byok_enabled, "keys": keys}
+            return {"byok_enabled": byok_enabled, "keys": keys, "base_urls": base_urls}
 
 
 async def set_byok_enabled(user_id: str, enabled: bool) -> bool:
@@ -67,22 +68,25 @@ async def set_byok_enabled(user_id: str, enabled: bool) -> bool:
             return bool(result["byok_enabled"]) if result else False
 
 
-async def upsert_api_key(user_id: str, provider: str, api_key: str) -> None:
+async def upsert_api_key(
+    user_id: str, provider: str, api_key: str, base_url: str | None = None
+) -> None:
     """
-    Insert or update a single provider key (encrypted).
+    Insert or update a single provider key (encrypted) and optional base_url.
     """
     enc_key = _get_encryption_key()
     async with get_db_connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                INSERT INTO user_api_keys (user_id, provider, api_key, created_at, updated_at)
-                VALUES (%s, %s, pgp_sym_encrypt(%s, %s), NOW(), NOW())
+                INSERT INTO user_api_keys (user_id, provider, api_key, base_url, created_at, updated_at)
+                VALUES (%s, %s, pgp_sym_encrypt(%s, %s), %s, NOW(), NOW())
                 ON CONFLICT (user_id, provider) DO UPDATE
                 SET api_key = EXCLUDED.api_key,
+                    base_url = EXCLUDED.base_url,
                     updated_at = NOW()
                 """,
-                (user_id, provider, api_key, enc_key),
+                (user_id, provider, api_key, enc_key, base_url),
             )
             logger.info(f"[api_keys_db] upsert_key user_id={user_id} provider={provider}")
 
@@ -137,11 +141,33 @@ async def is_byok_active(user_id: str) -> bool:
             return (await cur.fetchone()) is not None
 
 
-async def get_byok_key_for_provider(user_id: str, provider: str) -> Optional[str]:
+async def update_base_url(user_id: str, provider: str, base_url: str | None) -> None:
+    """Update base_url on an existing API key row (no-op if row doesn't exist)."""
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE user_api_keys SET base_url = %s, updated_at = NOW() "
+                "WHERE user_id = %s AND provider = %s",
+                (base_url, user_id, provider),
+            )
+            if cur.rowcount == 0:
+                logger.warning(
+                    f"[api_keys_db] update_base_url no-op: no key row for user_id={user_id} provider={provider}"
+                )
+            else:
+                logger.info(
+                    f"[api_keys_db] update_base_url user_id={user_id} provider={provider}"
+                )
+
+
+async def get_byok_config_for_provider(
+    user_id: str, provider: str
+) -> Optional[Dict[str, Any]]:
     """
-    Combined query: return the decrypted API key only if BYOK is enabled.
+    Combined query: return the decrypted API key and base_url only if BYOK is enabled.
 
     Returns None if BYOK is disabled OR no key exists for this provider.
+    Returns {"api_key": str, "base_url": str | None} otherwise.
     Saves a round-trip vs calling is_byok_active() + get_key_for_provider() separately.
     """
     enc_key = _get_encryption_key()
@@ -149,7 +175,7 @@ async def get_byok_key_for_provider(user_id: str, provider: str) -> Optional[str
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
-                SELECT pgp_sym_decrypt(k.api_key, %s) AS api_key
+                SELECT pgp_sym_decrypt(k.api_key, %s) AS api_key, k.base_url
                 FROM user_api_keys k
                 JOIN users u ON u.user_id = k.user_id
                 WHERE k.user_id = %s AND k.provider = %s AND u.byok_enabled = TRUE
@@ -157,4 +183,6 @@ async def get_byok_key_for_provider(user_id: str, provider: str) -> Optional[str
                 (enc_key, user_id, provider),
             )
             row = await cur.fetchone()
-            return row["api_key"] if row else None
+            if not row:
+                return None
+            return {"api_key": row["api_key"], "base_url": row["base_url"]}

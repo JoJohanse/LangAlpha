@@ -282,35 +282,147 @@ async def queue_message_for_subagent(
         )
 
 
-async def resolve_byok_llm_client(user_id: str, model_name: str, is_byok: bool):
+async def _resolve_custom_model_byok(
+    user_id: str,
+    model_name: str,
+    custom_config: dict,
+    mc,
+    _pref_cache: dict | None = None,
+):
     """
-    If BYOK is active, look up the user's key for the model's provider
+    Resolve BYOK key + base_url for a user-defined custom model.
+
+    Key lookup order:
+    1. model name as a custom sub-provider (model and provider share a name)
+    2. custom model's provider field as a custom sub-provider
+    3. parent of the custom model's provider (system provider)
+    """
+    from src.server.database.api_keys import get_byok_config_for_provider
+
+    provider = custom_config["provider"]
+
+    # 1. Model name is itself a custom sub-provider with a key
+    cp_by_name = await get_custom_provider_config(user_id, model_name, _pref_cache=_pref_cache)
+    if cp_by_name:
+        byok_config = await get_byok_config_for_provider(user_id, model_name)
+        if byok_config:
+            base_url = byok_config.get("base_url") or mc.get_provider_info(cp_by_name["parent_provider"]).get("base_url")
+            if cp_by_name.get("use_response_api"):
+                custom_config = {**custom_config, "_use_response_api": True}
+            return byok_config, base_url, custom_config
+
+    # 2. Provider field is a custom sub-provider
+    cp_by_provider = await get_custom_provider_config(user_id, provider, _pref_cache=_pref_cache)
+    if cp_by_provider:
+        byok_config = await get_byok_config_for_provider(user_id, provider)
+        if byok_config:
+            base_url = byok_config.get("base_url") or mc.get_provider_info(cp_by_provider["parent_provider"]).get("base_url")
+            if cp_by_provider.get("use_response_api"):
+                custom_config = {**custom_config, "_use_response_api": True}
+            return byok_config, base_url, custom_config
+
+    # 3. System/parent provider
+    parent = mc.get_parent_provider(provider)
+    byok_config = await get_byok_config_for_provider(user_id, parent)
+    if byok_config:
+        base_url = byok_config.get("base_url") or mc.get_provider_info(parent).get("base_url")
+        return byok_config, base_url, custom_config
+
+    return None, None, custom_config
+
+
+async def resolve_byok_llm_client(
+    user_id: str,
+    model_name: str,
+    is_byok: bool,
+    reasoning_effort: str | None = None,
+    _pref_cache: dict | None = None,
+):
+    """
+    If BYOK is active, look up the user's key for the model's **parent** provider
     and return a fresh LLM client.  Returns None if BYOK isn't applicable.
 
-    Uses a single combined query (get_byok_key_for_provider) instead of
-    separate is_is_byok + get_key_for_provider calls.
+    Auto-reroutes from sub-providers (e.g., anthropic-aws) to the parent provider's
+    official endpoint (or user's custom base_url if set).
     """
     if not is_byok:
         return None
 
-    from src.server.database.api_keys import get_byok_key_for_provider
-    from src.llms.llm import LLM as LLMFactory, create_llm
+    from src.server.database.api_keys import get_byok_config_for_provider
+    from src.llms.llm import LLM as LLMFactory, create_llm, create_llm_from_custom
 
     mc = LLMFactory.get_model_config()
     model_info = mc.get_model_config(model_name)
+
     if not model_info:
-        return None
+        # Fall back to user's custom models
+        custom_config = await get_custom_model_config(user_id, model_name, _pref_cache=_pref_cache)
+
+        if not custom_config:
+            # Check if model_name is a BYOK custom provider name
+            # (user selected a custom provider directly as their model)
+            cp_config = await get_custom_provider_config(user_id, model_name, _pref_cache=_pref_cache)
+            if cp_config:
+                custom_config = {
+                    "name": model_name,
+                    "model_id": model_name,
+                    "provider": cp_config["parent_provider"],
+                }
+            else:
+                return None
+
+        byok_config, base_url, custom_config = await _resolve_custom_model_byok(
+            user_id, model_name, custom_config, mc, _pref_cache=_pref_cache,
+        )
+        if not byok_config:
+            logger.warning(
+                f"[CHAT] No BYOK key found for custom model={model_name} "
+                f"provider={custom_config['provider']}. Falling back to system default."
+            )
+            return None
+
+        logger.info(
+            f"[CHAT] Using BYOK key for custom model={model_name} "
+            f"provider={custom_config['provider']} base_url={base_url or 'SDK default'}"
+        )
+        return create_llm_from_custom(
+            custom_config,
+            api_key=byok_config["api_key"],
+            base_url=base_url,
+        )
 
     provider = model_info["provider"]
-    user_key = await get_byok_key_for_provider(user_id, provider)
-    if not user_key:
+    parent = mc.get_parent_provider(provider)
+
+    # Look up BYOK key for parent provider (e.g., "anthropic" not "anthropic-aws")
+    byok_config = await get_byok_config_for_provider(user_id, parent)
+    if not byok_config:
         return None
 
-    logger.info(f"[CHAT] Using BYOK key for provider={provider}")
-    return create_llm(model_name, api_key=user_key)
+    # Resolve base_url: user custom > parent provider's official > None (SDK default)
+    base_url = byok_config.get("base_url")
+    if not base_url:
+        parent_info = mc.get_provider_info(parent)
+        base_url = parent_info.get("base_url")  # None for anthropic = SDK default
+
+    logger.info(
+        f"[CHAT] Using BYOK key for parent_provider={parent} "
+        f"(model_provider={provider}) base_url={base_url or 'SDK default'}"
+    )
+    # Always pass base_url (even None) to override the sub-provider's URL via sentinel
+    return create_llm(
+        model_name,
+        api_key=byok_config["api_key"],
+        base_url=base_url,
+        reasoning_effort=reasoning_effort,
+    )
 
 
-async def resolve_oauth_llm_client(user_id: str, model_name: str):
+async def resolve_oauth_llm_client(
+    user_id: str,
+    model_name: str,
+    reasoning_effort: str | None = None,
+):
     """Resolve OAuth-connected LLM client. Independent of BYOK toggle."""
     from src.llms.llm import LLM as LLMFactory, create_llm
 
@@ -350,6 +462,7 @@ async def resolve_oauth_llm_client(user_id: str, model_name: str):
         model_name,
         api_key=access_token,
         default_headers=headers if headers else None,
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -363,23 +476,43 @@ async def get_model_preference(user_id: str) -> dict:
     return prefs.get("other_preference") or {}
 
 
+async def get_custom_model_config(user_id: str, model_name: str, _pref_cache: dict | None = None) -> dict | None:
+    """Look up a user-defined custom model by name from other_preference.custom_models."""
+    model_pref = _pref_cache if _pref_cache is not None else await get_model_preference(user_id)
+    for cm in model_pref.get("custom_models") or []:
+        if cm.get("name") == model_name:
+            return cm
+    return None
+
+
+async def get_custom_provider_config(user_id: str, provider: str, _pref_cache: dict | None = None) -> dict | None:
+    """Look up a user-defined sub-provider config (name, parent_provider, use_response_api, etc.)."""
+    model_pref = _pref_cache if _pref_cache is not None else await get_model_preference(user_id)
+    for cp in model_pref.get("custom_providers") or []:
+        if cp.get("name") == provider:
+            return cp
+    return None
+
+
 async def resolve_llm_config(
     base_config,
     user_id: str,
     request_model: str | None,
     is_byok: bool,
     mode: str = "ptc",
+    reasoning_effort: str | None = None,
 ):
     """
     Resolve final LLM config with priority:
     per-request model > user preferred model > default.
-    Then inject BYOK client if active.
+    Then inject BYOK/OAuth client if active, and apply reasoning effort.
 
     Mode determines which config field and preference key to use
     (see _MODE_MODEL_MAP). Easy to extend for new modes.
     """
     model_field, pref_key = _MODE_MODEL_MAP[mode]
     config = base_config
+    model_pref = await get_model_preference(user_id)
 
     if request_model:
         config = config.model_copy(deep=True)
@@ -387,7 +520,6 @@ async def resolve_llm_config(
         config.llm_client = None
         logger.info(f"[CHAT] Using per-request LLM model: {request_model}")
     else:
-        model_pref = await get_model_preference(user_id)
         preferred = model_pref.get(pref_key)
         if preferred:
             config = config.model_copy(deep=True)
@@ -402,8 +534,33 @@ async def resolve_llm_config(
     # Resolve the effective model from whichever field we just set
     effective_model = getattr(config.llm, model_field, None) or config.llm.name
 
+    # If effective model is a custom model but BYOK is off, fall back to system default
+    from src.llms.llm import LLM as LLMFactory
+
+    mc = LLMFactory.get_model_config()
+    is_system_model = mc.get_model_config(effective_model) is not None
+    if not is_system_model:
+        is_custom = await get_custom_model_config(user_id, effective_model, _pref_cache=model_pref) is not None
+        is_custom_provider = not is_custom and await get_custom_provider_config(user_id, effective_model, _pref_cache=model_pref) is not None
+        if (is_custom or is_custom_provider) and not is_byok:
+            # Custom model/provider requires BYOK — revert to system default
+            default_model = getattr(base_config.llm, model_field, None) or base_config.llm.name
+            logger.warning(
+                f"[CHAT] Custom model {effective_model} selected but BYOK disabled, "
+                f"falling back to system default: {default_model}"
+            )
+            effective_model = default_model
+            config = base_config
+
+    # Resolve reasoning effort: per-request > user pref > None (use model default)
+    effective_reasoning = reasoning_effort
+    if not effective_reasoning:
+        effective_reasoning = model_pref.get("reasoning_effort")
+
     # Try OAuth-connected providers first (independent of BYOK toggle)
-    oauth_client = await resolve_oauth_llm_client(user_id, effective_model)
+    oauth_client = await resolve_oauth_llm_client(
+        user_id, effective_model, effective_reasoning
+    )
     if oauth_client:
         if config is base_config:
             config = config.model_copy(deep=True)
@@ -411,12 +568,25 @@ async def resolve_llm_config(
     # Then try BYOK
     elif is_byok:
         byok_client = await resolve_byok_llm_client(
-            user_id, effective_model, is_byok
+            user_id, effective_model, is_byok, effective_reasoning,
+            _pref_cache=model_pref,
         )
         if byok_client:
             if config is base_config:
                 config = config.model_copy(deep=True)
             config.llm_client = byok_client
+    # Default path (system key) — apply reasoning_effort if set
+    elif effective_reasoning:
+        from src.llms.llm import create_llm
+
+        if config is base_config:
+            config = config.model_copy(deep=True)
+        config.llm_client = create_llm(
+            effective_model, reasoning_effort=effective_reasoning
+        )
+        logger.info(
+            f"[CHAT] Applied reasoning_effort={effective_reasoning} to {effective_model}"
+        )
 
     return config
 
@@ -573,7 +743,8 @@ async def astream_flash_workflow(
         # Resolve LLM config (pre-resolved by route handler, fallback for standalone use)
         if config is None:
             config = await resolve_llm_config(
-                setup.agent_config, user_id, request.llm_model, is_byok, mode="flash"
+                setup.agent_config, user_id, request.llm_model, is_byok, mode="flash",
+                reasoning_effort=getattr(request, "reasoning_effort", None),
             )
 
         # Fetch user profile for prompt injection
@@ -1239,7 +1410,8 @@ async def astream_ptc_workflow(
         # Resolve LLM config (pre-resolved by route handler, fallback for standalone use)
         if config is None:
             config = await resolve_llm_config(
-                setup.agent_config, user_id, request.llm_model, is_byok, mode="ptc"
+                setup.agent_config, user_id, request.llm_model, is_byok, mode="ptc",
+                reasoning_effort=getattr(request, "reasoning_effort", None),
             )
 
         subagents = request.subagents_enabled or config.subagents.enabled
