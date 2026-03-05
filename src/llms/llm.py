@@ -74,6 +74,27 @@ class ModelConfig:
             if cfg.get("byok_eligible", False)
         ]
 
+    def get_parent_provider(self, provider: str) -> str:
+        """Return the parent provider name (self if no parent)."""
+        info = self.get_provider_info(provider)
+        return info.get("parent_provider", provider)
+
+    def get_display_name(self, provider: str) -> str:
+        """Return display name, resolving through parent if needed."""
+        info = self.get_provider_info(provider)
+        parent = info.get("parent_provider")
+        if parent:
+            info = self.get_provider_info(parent)
+        else:
+            parent = provider
+        return info.get("display_name", parent.title())
+
+
+_UNSET = object()  # Sentinel to distinguish "no override" from "override to None"
+
+# Name regex for custom models: alphanumeric start, then alphanumeric/./_ /-
+CUSTOM_MODEL_NAME_RE = r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$"
+
 
 class LLM:
     """Factory class for creating LangChain LLM clients."""
@@ -88,13 +109,23 @@ class LLM:
             cls._model_config = ModelConfig()
         return cls._model_config
 
-    def __init__(self, model: str, api_key: str | None = None, **override_params):
+    def __init__(
+        self,
+        model: str,
+        api_key: str | None = None,
+        base_url_override=_UNSET,
+        reasoning_effort: str | None = None,
+        **override_params,
+    ):
         """
         Initializes the LLM factory.
 
         Args:
             model: The customized model name (key in llm_config.json).
             api_key: Optional API key override (e.g. from BYOK).
+            base_url_override: Override base URL. Use _UNSET (default) for no override,
+                None to clear to SDK default, or a string for a custom URL.
+            reasoning_effort: Optional reasoning effort level ("low", "medium", "high").
             **override_params: Additional parameters to override defaults.
         """
         self.model_config = self.get_model_config()
@@ -113,6 +144,12 @@ class LLM:
         # Override with any provided parameters
         self.parameters.update(override_params)
 
+        # Apply reasoning effort override (before provider resolution)
+        if reasoning_effort:
+            from src.llms.reasoning import apply_reasoning_effort
+
+            apply_reasoning_effort(reasoning_effort, self.parameters, self.extra_body)
+
         # Store optional API key override (BYOK)
         self.api_key_override = api_key
 
@@ -124,12 +161,78 @@ class LLM:
         self.env_key = self.provider_info.get("env_key")
         self.base_url = self.provider_info.get("base_url")
 
+        # Apply base_url override (sentinel distinguishes "not set" from "set to None")
+        if base_url_override is not _UNSET:
+            self.base_url = base_url_override
+
         # Store response API flags for OpenAI SDK
         self.use_response_api = self.provider_info.get("use_response_api", False) if self.sdk in ("openai", "codex") else False
         self.use_previous_response_id = self.provider_info.get("use_previous_response_id", False) if self.sdk == "openai" else False
 
         # Optional default headers from provider config
         self.default_headers = self.provider_info.get("default_headers")
+
+    @classmethod
+    def from_custom_config(
+        cls,
+        config: dict,
+        api_key: str | None = None,
+        base_url_override=_UNSET,
+        **override_params,
+    ):
+        """
+        Create an LLM instance from an inline config dict (user-defined custom model).
+
+        Bypasses models.json lookup — the caller supplies model_id, provider,
+        parameters, and extra_body directly.
+
+        Args:
+            config: Dict with keys: model_id, provider, and optional parameters/extra_body.
+            api_key: Optional API key override (e.g. from BYOK).
+            base_url_override: Override base URL. _UNSET = no override.
+            **override_params: Additional parameters to override defaults.
+
+        Returns:
+            A LangChain chat model instance.
+        """
+        instance = cls.__new__(cls)
+        instance.model_config = cls.get_model_config()
+        instance.custom_model_name = config.get("name", config["model_id"])
+        instance.model = config["model_id"]
+        instance.provider = config["provider"]
+        instance.parameters = (config.get("parameters") or {}).copy()
+        instance.extra_body = (config.get("extra_body") or {}).copy()
+        instance.parameters.update(override_params)
+        instance.api_key_override = api_key
+
+        # Get provider info from manifest (empty dict for unknown providers)
+        instance.provider_info = instance.model_config.get_provider_info(instance.provider)
+
+        # Extract provider configuration; default to openai SDK for unknown providers
+        # (most custom endpoints are OpenAI-compatible)
+        instance.sdk = instance.provider_info.get("sdk") or "openai"
+        instance.env_key = instance.provider_info.get("env_key")
+        instance.base_url = instance.provider_info.get("base_url")
+
+        if base_url_override is not _UNSET:
+            instance.base_url = base_url_override
+
+        # use_response_api: explicit config override > provider_info > False
+        if config.get("_use_response_api") is not None:
+            instance.use_response_api = bool(config["_use_response_api"]) and instance.sdk in ("openai", "codex")
+        else:
+            instance.use_response_api = (
+                instance.provider_info.get("use_response_api", False)
+                if instance.sdk in ("openai", "codex")
+                else False
+            )
+        instance.use_previous_response_id = (
+            instance.provider_info.get("use_previous_response_id", False)
+            if instance.sdk == "openai"
+            else False
+        )
+        instance.default_headers = instance.provider_info.get("default_headers")
+        return instance.get_llm()
 
     def get_llm(self):
         """
@@ -342,7 +445,14 @@ class LLM:
 
 
 # Backward compatibility functions
-def create_llm(model: str, api_key: str | None = None, default_headers: dict | None = None, **kwargs):
+def create_llm(
+    model: str,
+    api_key: str | None = None,
+    default_headers: dict | None = None,
+    base_url=_UNSET,
+    reasoning_effort: str | None = None,
+    **kwargs,
+):
     """
     Convenience function for creating an LLM instance.
 
@@ -351,16 +461,45 @@ def create_llm(model: str, api_key: str | None = None, default_headers: dict | N
         api_key: Optional API key override (e.g. from BYOK)
         default_headers: Optional headers to merge onto the LLM instance
             (e.g. ChatGPT-Account-Id for Codex OAuth)
+        base_url: Override base URL. None = SDK default, str = custom URL.
+        reasoning_effort: Optional reasoning effort level ("low", "medium", "high").
         **kwargs: Additional parameters to override
 
     Returns:
         A LangChain chat model instance
     """
-    instance = LLM(model, api_key=api_key, **kwargs)
+    instance = LLM(
+        model,
+        api_key=api_key,
+        base_url_override=base_url,
+        reasoning_effort=reasoning_effort,
+        **kwargs,
+    )
     if default_headers:
         existing = instance.default_headers or {}
         instance.default_headers = {**existing, **default_headers}
     return instance.get_llm()
+
+
+def create_llm_from_custom(
+    config: dict,
+    api_key: str | None = None,
+    base_url=_UNSET,
+    **kwargs,
+):
+    """
+    Convenience function for creating an LLM from a user-defined custom model config.
+
+    Args:
+        config: Dict with model_id, provider, and optional parameters/extra_body.
+        api_key: Optional API key override (e.g. from BYOK).
+        base_url: Override base URL. _UNSET = no override, None = SDK default.
+        **kwargs: Additional parameters to override.
+
+    Returns:
+        A LangChain chat model instance.
+    """
+    return LLM.from_custom_config(config, api_key=api_key, base_url_override=base_url, **kwargs)
 
 
 def get_llm_by_type(llm_type: str) -> BaseChatModel:
@@ -383,21 +522,23 @@ def get_llm_by_type(llm_type: str) -> BaseChatModel:
 
 def get_configured_llm_models() -> dict[str, list[str]]:
     """
-    Get visible LLM models grouped by provider.
+    Get visible LLM models grouped by parent provider.
 
     Only returns models with "visible": true in models.json.
+    Models are grouped by their parent provider (e.g., anthropic-aws → anthropic).
 
     Returns:
-        Dictionary mapping provider to list of visible model names.
+        Dictionary mapping parent provider to list of visible model names.
     """
     try:
-        config = ModelConfig()
+        config = LLM.get_model_config()  # singleton — no disk I/O
         models: dict[str, list[str]] = {}
 
         for model_name, model_info in config.llm_config.items():
             if model_info and model_info.get("visible", False):
                 provider = model_info.get("provider", "unknown")
-                models.setdefault(provider, []).append(model_name)
+                parent = config.get_parent_provider(provider)
+                models.setdefault(parent, []).append(model_name)
 
         return models
 
