@@ -1165,7 +1165,7 @@ function Settings() {
                                       onMouseLeave={(e) => { if (!isStarred) e.currentTarget.style.backgroundColor = 'transparent'; }}
                                     >
                                       <span>{typeof m === 'string' ? m : (m.name || key)}</span>
-                                      <Pin className="h-3 w-3 flex-shrink-0" style={{ color: isStarred ? 'var(--color-accent-primary)' : 'var(--color-text-tertiary)', opacity: isStarred ? 1 : 0.4 }} />
+                                      {isStarred && <Pin className="h-3 w-3 flex-shrink-0" style={{ color: 'var(--color-accent-primary)' }} />}
                                     </button>
                                   );
                                 })}
@@ -1275,10 +1275,19 @@ function Settings() {
                                 }
                               }}
                               disabled={isSubmitting}
-                              style={{ width: 'auto', minWidth: '140px', display: 'inline-flex' }}
+                              style={{
+                                width: 'auto',
+                                minWidth: '100px',
+                                display: 'inline-flex',
+                                border: '1px dashed var(--color-border-muted)',
+                                background: 'transparent',
+                                color: 'var(--color-text-tertiary)',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                              }}
                               className="text-xs"
                             >
-                              <option value="">{t('settings.addFallback', '+ Add fallback')}</option>
+                              <option value="">{t('settings.addFallback', '+ Add')}</option>
                               {Object.entries(availableModels).map(([provider, providerData]) => {
                                 const models = Array.isArray(providerData) ? providerData : providerData?.models || [];
                                 const displayName = providerData?.display_name || provider.charAt(0).toUpperCase() + provider.slice(1);
