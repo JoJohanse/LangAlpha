@@ -55,6 +55,13 @@ function Settings() {
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [modelPickerSearch, setModelPickerSearch] = useState('');
 
+  // Other models state
+  const [summarizationModel, setSummarizationModel] = useState('');
+  const [fetchModel, setFetchModel] = useState('');
+  const [fallbackModels, setFallbackModels] = useState([]);
+  const [showOtherModels, setShowOtherModels] = useState(false);
+  const [systemDefaults, setSystemDefaults] = useState({});
+
   // Custom Models state
   const [customModels, setCustomModels] = useState([]);
   const [showCustomModelForm, setShowCustomModelForm] = useState(false);
@@ -198,6 +205,8 @@ function Settings() {
         getClaudeOAuthStatus(),
       ]);
       setAvailableModels(modelsRes?.models || {});
+      const defaults = modelsRes?.system_defaults || {};
+      setSystemDefaults(defaults);
       setByokEnabled(keysRes?.byok_enabled || false);
       setByokProviders(keysRes?.providers || []);
       const initialBaseUrls = {};
@@ -209,6 +218,9 @@ function Settings() {
       setPreferredFlashModel(prefsRes?.other_preference?.preferred_flash_model || '');
       setStarredModels(prefsRes?.other_preference?.starred_models || []);
       setCustomModels(prefsRes?.other_preference?.custom_models || []);
+      setSummarizationModel(prefsRes?.other_preference?.summarization_model || '');
+      setFetchModel(prefsRes?.other_preference?.fetch_model || '');
+      setFallbackModels(prefsRes?.other_preference?.fallback_models || defaults.fallback_models || []);
       setCodexOAuthStatus(codexStatus || { connected: false });
       setClaudeOAuthStatus(claudeStatus || { connected: false });
     } catch {
@@ -236,6 +248,9 @@ function Settings() {
           starred_models: starredModels.length > 0 ? starredModels : null,
           custom_models: customModels.length > 0 ? customModels : null,
           custom_providers: customProvidersList.length > 0 ? customProvidersList : null,
+          summarization_model: summarizationModel || null,
+          fetch_model: fetchModel || null,
+          fallback_models: fallbackModels.length > 0 ? fallbackModels : null,
         },
       });
 
@@ -998,9 +1013,11 @@ function Settings() {
                     {/* Default + Flash selectors — side by side */}
                     <div className="grid grid-cols-2 gap-3">
                       {[
-                        { label: t('settings.defaultModel'), desc: t('settings.defaultModelDesc'), value: preferredModel, setter: setPreferredModel },
-                        { label: t('settings.flashModel'), desc: t('settings.flashModelDesc'), value: preferredFlashModel, setter: setPreferredFlashModel },
-                      ].map(({ label, desc, value, setter }) => (
+                        { label: t('settings.defaultModel'), desc: t('settings.defaultModelDesc'), value: preferredModel, setter: setPreferredModel, defaultKey: 'default_model' },
+                        { label: t('settings.flashModel'), desc: t('settings.flashModelDesc'), value: preferredFlashModel, setter: setPreferredFlashModel, defaultKey: 'flash_model' },
+                      ].map(({ label, desc, value, setter, defaultKey }) => {
+                        const sysDefault = systemDefaults[defaultKey] || '';
+                        return (
                         <div key={label}>
                           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>{label}</label>
                           <Select
@@ -1008,7 +1025,9 @@ function Settings() {
                             onChange={(e) => setter(e.target.value)}
                             disabled={isSubmitting}
                           >
-                            <option value="">{t('settings.systemDefault')}</option>
+                            <option value="">
+                              {sysDefault ? `${t('settings.systemDefault')} (${sysDefault})` : t('settings.systemDefault')}
+                            </option>
                             {Object.entries(availableModels).map(([provider, providerData]) => {
                               const models = Array.isArray(providerData) ? providerData : providerData?.models || [];
                               const displayName = providerData?.display_name || provider.charAt(0).toUpperCase() + provider.slice(1);
@@ -1039,7 +1058,8 @@ function Settings() {
                           </Select>
                           <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>{desc}</p>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
 
                     {/* Quick-access models — compact strip */}
@@ -1152,6 +1172,126 @@ function Settings() {
                               </div>
                             );
                           })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Other Models — collapsible */}
+                  <div style={{ borderTop: '1px solid var(--color-border-muted)', paddingTop: '16px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowOtherModels(v => !v)}
+                      className="w-full flex items-center justify-between text-sm font-medium"
+                      style={{ color: 'var(--color-text-primary)' }}
+                    >
+                      <span>{t('settings.otherModels', 'Other Models')}</span>
+                      <ChevronDown
+                        className="h-4 w-4 transition-transform"
+                        style={{
+                          color: 'var(--color-text-tertiary)',
+                          transform: showOtherModels ? 'rotate(180deg)' : 'rotate(0deg)',
+                        }}
+                      />
+                    </button>
+                    <p className="text-xs mt-0.5 mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
+                      {t('settings.otherModelsDesc', 'Configure models used for background tasks.')}
+                    </p>
+
+                    {showOtherModels && (
+                      <div className="space-y-4 mt-3">
+                        {/* Summarization + Fetch — side by side */}
+                        <div className="grid grid-cols-2 gap-3">
+                          {[
+                            { label: t('settings.summarizationModel', 'Summarization'), desc: t('settings.summarizationModelDesc', 'Model for conversation summarization'), value: summarizationModel, setter: setSummarizationModel, defaultKey: 'summarization_model' },
+                            { label: t('settings.fetchModel', 'Fetch'), desc: t('settings.fetchModelDesc', 'Model for web content extraction'), value: fetchModel, setter: setFetchModel, defaultKey: 'fetch_model' },
+                          ].map(({ label, desc, value, setter, defaultKey }) => {
+                            const sysDefault = systemDefaults[defaultKey] || '';
+                            return (
+                              <div key={label}>
+                                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>{label}</label>
+                                <Select
+                                  value={value}
+                                  onChange={(e) => setter(e.target.value)}
+                                  disabled={isSubmitting}
+                                >
+                                  <option value="">
+                                    {sysDefault ? `${t('settings.systemDefault')} (${sysDefault})` : t('settings.systemDefault')}
+                                  </option>
+                                  {Object.entries(availableModels).map(([provider, providerData]) => {
+                                    const models = Array.isArray(providerData) ? providerData : providerData?.models || [];
+                                    const displayName = providerData?.display_name || provider.charAt(0).toUpperCase() + provider.slice(1);
+                                    return (
+                                      <optgroup key={provider} label={displayName}>
+                                        {models.map((m) => (
+                                          <option key={m} value={m}>{m}</option>
+                                        ))}
+                                      </optgroup>
+                                    );
+                                  })}
+                                </Select>
+                                <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-tertiary)' }}>{desc}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Fallback models */}
+                        <div>
+                          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                            {t('settings.fallbackModels', 'Fallback Models')}
+                          </label>
+                          <p className="text-[11px] mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                            {t('settings.fallbackModelsDesc', 'Models to try when the primary model is unavailable, in order of priority.')}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {fallbackModels.map((key, idx) => {
+                              const isDefault = (systemDefaults.fallback_models || []).includes(key);
+                              return (
+                                <button
+                                  key={`${key}-${idx}`}
+                                  type="button"
+                                  onClick={() => setFallbackModels(prev => prev.filter((_, i) => i !== idx))}
+                                  className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md text-xs transition-colors group"
+                                  style={{
+                                    border: `1px solid ${isDefault ? 'var(--color-accent-primary)' : 'var(--color-border-muted)'}`,
+                                    background: isDefault ? 'var(--color-accent-soft)' : 'var(--color-bg-card)',
+                                    color: isDefault ? 'var(--color-accent-light)' : 'var(--color-text-secondary)',
+                                  }}
+                                  title={isDefault ? t('settings.systemDefault') : t('common.remove', 'Remove')}
+                                >
+                                  <span>{key}</span>
+                                  {isDefault && <span style={{ color: 'var(--color-text-tertiary)', fontSize: '10px' }}>default</span>}
+                                  <X className="h-3 w-3 opacity-40 group-hover:opacity-100 transition-opacity" />
+                                </button>
+                              );
+                            })}
+                            <Select
+                              value=""
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val && !fallbackModels.includes(val)) {
+                                  setFallbackModels(prev => [...prev, val]);
+                                }
+                              }}
+                              disabled={isSubmitting}
+                              style={{ width: 'auto', minWidth: '140px', display: 'inline-flex' }}
+                              className="text-xs"
+                            >
+                              <option value="">{t('settings.addFallback', '+ Add fallback')}</option>
+                              {Object.entries(availableModels).map(([provider, providerData]) => {
+                                const models = Array.isArray(providerData) ? providerData : providerData?.models || [];
+                                const displayName = providerData?.display_name || provider.charAt(0).toUpperCase() + provider.slice(1);
+                                return (
+                                  <optgroup key={provider} label={displayName}>
+                                    {models.filter(m => !fallbackModels.includes(m)).map((m) => (
+                                      <option key={m} value={m}>{m}</option>
+                                    ))}
+                                  </optgroup>
+                                );
+                              })}
+                            </Select>
+                          </div>
                         </div>
                       </div>
                     )}
