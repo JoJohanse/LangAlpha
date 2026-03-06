@@ -224,8 +224,8 @@ export function useChatMessages(workspaceId, initialThreadId = null, updateTodoL
   const historyMessagesRef = useRef(new Set()); // Track message IDs from history
   const newMessagesStartIndexRef = useRef(0); // Index where new messages start
 
-  // Track the LLM model used in this thread (from first query's metadata)
-  const [threadModel, setThreadModel] = useState(null);
+  // Track all LLM models used in this thread (ordered, deduplicated)
+  const [threadModels, setThreadModels] = useState([]);
 
   // Track if streaming is in progress to prevent history loading during streaming
   const isStreamingRef = useRef(false);
@@ -309,7 +309,7 @@ export function useChatMessages(workspaceId, initialThreadId = null, updateTodoL
       // Preserve messages when transitioning from '__default__' to actual thread ID
       if (isThreadSwitch) {
         setMessages([]);
-        setThreadModel(null);
+        setThreadModels([]);
         // Reset refs
         contentOrderCounterRef.current = 0;
         currentReasoningIdRef.current = null;
@@ -465,9 +465,9 @@ export function useChatMessages(workspaceId, initialThreadId = null, updateTodoL
         // Handle user_message events from history
         // Note: event.content may be empty for HITL resume pairs (plan approval/rejection)
         if (eventType === 'user_message' && hasPairIndex) {
-          // Capture the LLM model from the first query's metadata
-          if (event.turn_index === 0 && event.metadata?.llm_model) {
-            setThreadModel(event.metadata.llm_model);
+          // Collect LLM models from query metadata (may differ across turns)
+          if (event.metadata?.llm_model) {
+            setThreadModels(prev => prev.includes(event.metadata.llm_model) ? prev : [...prev, event.metadata.llm_model]);
           }
           // Resolve pending plan_approval interrupt from content (empty = approved, non-empty = rejected).
           {
@@ -2747,9 +2747,9 @@ export function useChatMessages(workspaceId, initialThreadId = null, updateTodoL
     const isNewConversation = messages.length === 0 || threadId === '__default__';
     isNewConversationRef.current = isNewConversation;
 
-    // Lock thread model on first send (so dropdown disables incompatible models immediately)
-    if (!threadModel && model) {
-      setThreadModel(model);
+    // Track model used in this send
+    if (model) {
+      setThreadModels(prev => prev.includes(model) ? prev : [...prev, model]);
     }
 
     // Add user message after history messages
@@ -3442,7 +3442,7 @@ export function useChatMessages(workspaceId, initialThreadId = null, updateTodoL
   return {
     messages,
     threadId,
-    threadModel,
+    threadModels,
     isLoading,
     hasActiveSubagents,
     workspaceStarting,

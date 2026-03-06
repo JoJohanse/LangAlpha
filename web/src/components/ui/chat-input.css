@@ -160,15 +160,20 @@
 .workspace-dropdown {
   position: absolute;
   left: 0;
-  right: 0;
-  bottom: 100%;
-  margin-bottom: 4px;
+  width: 220px;
   background-color: var(--color-bg-elevated);
   border: 1px solid var(--color-border-muted);
   border-radius: 8px;
   max-height: 200px;
   overflow-y: auto;
   z-index: 100;
+  opacity: 1;
+  isolation: isolate;
+}
+
+.workspace-dropdown-up {
+  bottom: 100%;
+  margin-bottom: 4px;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.4);
 }
 
@@ -193,14 +198,25 @@
   position: absolute;
   right: 0;
   width: 240px;
-  bottom: 100%;
-  margin-bottom: 4px;
   background-color: var(--color-bg-elevated);
   border: 1px solid var(--color-border-muted);
   border-radius: 8px;
-  overflow: hidden;
+  overflow: visible;
   z-index: 100;
+  opacity: 1;
+  isolation: isolate;
+}
+
+.model-dropdown-up {
+  bottom: 100%;
+  margin-bottom: 4px;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.model-dropdown-down {
+  top: 100%;
+  margin-top: 4px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
 }
 
 .model-dropdown-item {
@@ -214,8 +230,7 @@
   color: var(--color-text-primary);
   transition: background-color 0.1s;
 }
-.model-dropdown-item:hover,
-.model-dropdown-item.active {
+.model-dropdown-item:hover {
   background-color: var(--color-accent-soft);
 }
 .model-dropdown-item.disabled {
@@ -283,6 +298,46 @@
 .model-dropdown-link:hover {
   color: var(--color-text-primary);
   background-color: var(--color-accent-soft);
+}
+
+.model-dropdown-link-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+/* ====== Model selector submenu (More models) ====== */
+
+.model-dropdown-submenu {
+  position: absolute;
+  left: calc(100% + 4px);
+  /* Invisible bridge to cover the gap between trigger and submenu */
+  &::before {
+    content: '';
+    position: absolute;
+    right: 100%;
+    top: 0;
+    width: 8px;
+    height: 100%;
+  }
+  width: 240px;
+  background-color: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  overflow: hidden;
+  z-index: 101;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  opacity: 1;
+  isolation: isolate;
+}
+
+.model-dropdown-submenu-up {
+  bottom: 0;
+}
+
+.model-dropdown-submenu-down {
+  top: 0;
 }
 
 .model-dropdown-empty {

@@ -606,12 +606,13 @@ function ThreadGallery({ workspaceId, onBack, onThreadSelect, cache }) {
             </div>
 
             {/* Chat Input */}
-            <div className="w-full enter-fade-up enter-fade-up-d2">
+            <div className="w-full enter-fade-up enter-fade-up-d2 relative z-20">
               <ChatInput
                 ref={chatInputRef}
                 onSend={handleSendMessage}
                 disabled={isSendingMessage || !workspaceId}
                 files={panelFiles}
+                dropdownDirection="down"
               />
             </div>
 

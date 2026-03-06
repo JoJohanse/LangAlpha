@@ -311,6 +311,7 @@
     "compactionError": "上下文压缩失败",
     "modelSelector": {
       "manageModels": "管理模型",
+      "moreModels": "更多模型",
       "configureModels": "配置模型 →",
       "reasoningEffort": "推理",
       "effortLow": "低",

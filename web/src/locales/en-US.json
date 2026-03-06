@@ -311,6 +311,7 @@
     "compactionError": "Context compaction failed",
     "modelSelector": {
       "manageModels": "Manage models",
+      "moreModels": "More models",
       "configureModels": "Configure models →",
       "reasoningEffort": "Reasoning",
       "effortLow": "L",

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import {
   Plus, ArrowUp, X, FileText, Loader2, Archive, Square,
-  ScrollText, ChartCandlestick, Zap, FileStack, ChevronDown, FolderOpen, TextSelect,
+  ScrollText, ChartCandlestick, Zap, FileStack, ChevronDown, ChevronRight, FolderOpen, TextSelect,
   Terminal, Bot, Shrink, HardDriveDownload, Check, Brain, Flame,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -171,6 +171,10 @@ const ChatInput = forwardRef(function ChatInput({
   onAction = null,
   // Model selector
   initialModel = null,
+  // All models used in this thread (shown in primary menu)
+  threadModels: threadModelsProp = [],
+  // Dropdown direction: 'up' (default, for bottom-positioned inputs) or 'down' (for mid-page inputs like ThreadGallery)
+  dropdownDirection = 'up',
 }, ref) {
   const { t } = useTranslation();
   const { preferences } = useAuth();
@@ -186,6 +190,8 @@ const ChatInput = forwardRef(function ChatInput({
   const [selectedModel, setSelectedModel] = useState(effectiveInitialModel);
   const [reasoningEffort, setReasoningEffort] = useState(null);
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [showMoreModels, setShowMoreModels] = useState(false);
+  const moreModelsTimeout = useRef(null);
   const [modelMetadata, setModelMetadata] = useState({});
   const modelMenuRef = useRef(null);
   const navigate = useNavigate();
@@ -257,6 +263,7 @@ const ChatInput = forwardRef(function ChatInput({
   // Workspace dropdown
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const workspaceMenuRef = useRef(null);
+  const workspaceBtnRef = useRef(null);
 
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -310,6 +317,7 @@ const ChatInput = forwardRef(function ChatInput({
   useEffect(() => {
     if (!showWorkspaceMenu) return;
     const handleClickOutside = (e) => {
+      if (workspaceBtnRef.current?.contains(e.target)) return;
       if (workspaceMenuRef.current && !workspaceMenuRef.current.contains(e.target)) {
         setShowWorkspaceMenu(false);
       }
@@ -324,6 +332,7 @@ const ChatInput = forwardRef(function ChatInput({
     const handleClickOutside = (e) => {
       if (modelMenuRef.current && !modelMenuRef.current.contains(e.target)) {
         setShowModelMenu(false);
+        setShowMoreModels(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -634,6 +643,7 @@ const ChatInput = forwardRef(function ChatInput({
       setShowAutocomplete(false);
       setShowSlashMenu(false);
       setShowModelMenu(false);
+      setShowMoreModels(false);
     }, 200);
   }, []);
 
@@ -750,6 +760,7 @@ const ChatInput = forwardRef(function ChatInput({
   return (
     <div
       className="relative w-full"
+      style={showModelMenu ? { zIndex: 50 } : undefined}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
@@ -891,90 +902,6 @@ const ChatInput = forwardRef(function ChatInput({
             </div>
           )}
 
-          {/* Workspace dropdown */}
-          {showWorkspaceMenu && showWorkspaceSelector && (
-            <div className="workspace-dropdown" ref={workspaceMenuRef}>
-              {workspaces.map((ws) => (
-                <div
-                  key={ws.workspace_id}
-                  className={`workspace-dropdown-item ${ws.workspace_id === selectedWorkspaceId ? 'active' : ''}`}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    onWorkspaceChange?.(ws.workspace_id);
-                    setShowWorkspaceMenu(false);
-                  }}
-                >
-                  <FolderOpen className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }} />
-                  <span>{ws.name}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Model selector dropdown */}
-          {showModelMenu && (
-            <div className="model-dropdown" ref={modelMenuRef}>
-              {starredModels.length > 0 ? (
-                <>
-                  {starredModels.map((m) => {
-                    const compatible = !initialModel || areModelsCompatible(selectedModel, m, modelMetadata);
-                    return (
-                      <div
-                        key={m}
-                        className={`model-dropdown-item ${m === selectedModel ? 'active' : ''} ${!compatible ? 'disabled' : ''}`}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          if (!compatible) return;
-                          setSelectedModel(m);
-                          setShowModelMenu(false);
-                        }}
-                        title={!compatible ? t('chat.modelSelector.incompatibleSdk') : undefined}
-                      >
-                        <span style={!compatible ? { opacity: 0.4 } : undefined}>{getModelDisplayName(m)}</span>
-                        {m === selectedModel && <Check className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--color-accent-primary)' }} />}
-                      </div>
-                    );
-                  })}
-                  <div className="model-dropdown-separator" />
-                  <div className="model-effort-section">
-                    <span className="model-effort-label">{t('chat.modelSelector.reasoningEffort')}</span>
-                    <div className="model-effort-toggle">
-                      {[['low', Zap, t('chat.modelSelector.effortLow')], ['medium', Brain, t('chat.modelSelector.effortMedium')], ['high', Flame, t('chat.modelSelector.effortHigh')]].map(([level, Icon, label]) => (
-                        <button
-                          key={level}
-                          className={`model-effort-btn ${level === reasoningEffort ? 'active' : ''}`}
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            setReasoningEffort(level === reasoningEffort ? null : level);
-                          }}
-                          title={label}
-                        >
-                          <Icon className="h-3.5 w-3.5" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="model-dropdown-separator" />
-                  <div
-                    className="model-dropdown-link"
-                    onMouseDown={(e) => { e.preventDefault(); navigate('/settings', { state: { tab: 'models' } }); setShowModelMenu(false); }}
-                  >
-                    {t('chat.modelSelector.manageModels')}
-                  </div>
-                </>
-              ) : (
-                <div className="model-dropdown-empty">
-                  <div
-                    className="model-dropdown-link"
-                    onMouseDown={(e) => { e.preventDefault(); navigate('/settings', { state: { tab: 'models' } }); setShowModelMenu(false); }}
-                  >
-                    {t('chat.modelSelector.configureModels')}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Textarea */}
           <div className="relative">
             <textarea
@@ -1055,7 +982,9 @@ const ChatInput = forwardRef(function ChatInput({
 
               {/* Workspace Selector */}
               {showWorkspaceSelector && (
+                <div className="relative" ref={workspaceMenuRef}>
                 <button
+                  ref={workspaceBtnRef}
                   className="inline-flex items-center rounded-full border-none cursor-pointer"
                   style={{
                     gap: '4px',
@@ -1081,6 +1010,25 @@ const ChatInput = forwardRef(function ChatInput({
                   <span className="max-w-[100px] truncate">{selectedWorkspaceName}</span>
                   <ChevronDown className="h-3 w-3" />
                 </button>
+                {showWorkspaceMenu && (
+                  <div className="workspace-dropdown workspace-dropdown-up">
+                    {workspaces.map((ws) => (
+                      <div
+                        key={ws.workspace_id}
+                        className={`workspace-dropdown-item ${ws.workspace_id === selectedWorkspaceId ? 'active' : ''}`}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          onWorkspaceChange?.(ws.workspace_id);
+                          setShowWorkspaceMenu(false);
+                        }}
+                      >
+                        <FolderOpen className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--color-text-tertiary)' }} />
+                        <span>{ws.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                </div>
               )}
 
               {/* Plan Mode Toggle — shown when no mode toggle (PTC enforced) OR mode === 'deep' */}
@@ -1117,31 +1065,131 @@ const ChatInput = forwardRef(function ChatInput({
             <div className="flex flex-row items-center min-w-0 gap-1">
               {/* Model Selector */}
               {(starredModels.length > 0 || selectedModel) && (
-                <button
-                  className="inline-flex items-center rounded-full border-none cursor-pointer"
-                  style={{
-                    gap: '4px',
-                    padding: '6px 10px',
-                    fontSize: '13px',
-                    fontWeight: 500,
-                    background: showModelMenu ? 'var(--color-accent-soft)' : 'transparent',
-                    color: showModelMenu ? 'var(--color-accent-light)' : 'var(--color-text-muted, #8b8fa3)',
-                    border: showModelMenu ? '1px solid var(--color-accent-overlay)' : '1px solid transparent',
-                    transition: 'background 0.2s, color 0.2s, border-color 0.2s',
-                  }}
-                  onClick={(e) => { e.stopPropagation(); setShowModelMenu((v) => !v); }}
-                  onMouseEnter={(e) => {
-                    if (!showModelMenu) e.currentTarget.style.background = 'var(--color-border-muted)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!showModelMenu) e.currentTarget.style.background = 'transparent';
-                  }}
-                  type="button"
-                  title="Select model"
-                >
-                  <span className="max-w-[120px] truncate">{getModelDisplayName(selectedModel) || 'Model'}</span>
-                  <ChevronDown className="h-3 w-3" />
-                </button>
+                <div className="relative" ref={modelMenuRef}>
+                  <button
+                    className="inline-flex items-center rounded-full border-none cursor-pointer"
+                    style={{
+                      gap: '4px',
+                      padding: '6px 10px',
+                      fontSize: '13px',
+                      fontWeight: 500,
+                      background: showModelMenu ? 'var(--color-accent-soft)' : 'transparent',
+                      color: showModelMenu ? 'var(--color-accent-light)' : 'var(--color-text-muted, #8b8fa3)',
+                      border: showModelMenu ? '1px solid var(--color-accent-overlay)' : '1px solid transparent',
+                      transition: 'background 0.2s, color 0.2s, border-color 0.2s',
+                    }}
+                    onClick={(e) => { e.stopPropagation(); setShowModelMenu((v) => !v); setShowMoreModels(false); }}
+                    onMouseEnter={(e) => {
+                      if (!showModelMenu) e.currentTarget.style.background = 'var(--color-border-muted)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!showModelMenu) e.currentTarget.style.background = 'transparent';
+                    }}
+                    type="button"
+                    title="Select model"
+                  >
+                    <span className="max-w-[120px] truncate">{getModelDisplayName(selectedModel) || 'Model'}</span>
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                  {showModelMenu && (
+                    <div className={`model-dropdown ${dropdownDirection === 'down' ? 'model-dropdown-down' : 'model-dropdown-up'}`}>
+                      {/* Primary menu: thread models + reasoning + "More models" */}
+                      {(() => {
+                        const primaryModels = threadModelsProp.length > 0
+                          ? [...new Set([...threadModelsProp, selectedModel].filter(Boolean))]
+                          : [selectedModel].filter(Boolean);
+                        return primaryModels
+                          .filter((m) => !initialModel || areModelsCompatible(selectedModel, m, modelMetadata))
+                          .map((m) => (
+                            <div
+                              key={m}
+                              className="model-dropdown-item"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setSelectedModel(m);
+                                setShowModelMenu(false);
+                                setShowMoreModels(false);
+                              }}
+                            >
+                              <span>{getModelDisplayName(m)}</span>
+                              {m === selectedModel && <Check className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--color-accent-primary)' }} />}
+                            </div>
+                          ));
+                      })()}
+                      <div className="model-dropdown-separator" />
+                      <div className="model-effort-section">
+                        <span className="model-effort-label">{t('chat.modelSelector.reasoningEffort')}</span>
+                        <div className="model-effort-toggle">
+                          {[['low', Zap, t('chat.modelSelector.effortLow')], ['medium', Brain, t('chat.modelSelector.effortMedium')], ['high', Flame, t('chat.modelSelector.effortHigh')]].map(([level, Icon, label]) => (
+                            <button
+                              key={level}
+                              className={`model-effort-btn ${level === reasoningEffort ? 'active' : ''}`}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setReasoningEffort(level === reasoningEffort ? null : level);
+                              }}
+                              title={label}
+                            >
+                              <Icon className="h-3.5 w-3.5" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="model-dropdown-separator" />
+                      {/* "More models" with hover submenu */}
+                      <div
+                        className="model-dropdown-link model-dropdown-link-arrow"
+                        onMouseEnter={() => { clearTimeout(moreModelsTimeout.current); setShowMoreModels(true); }}
+                        onMouseLeave={() => { moreModelsTimeout.current = setTimeout(() => setShowMoreModels(false), 150); }}
+                      >
+                        <span>{t('chat.modelSelector.moreModels')}</span>
+                        <ChevronRight className="h-3.5 w-3.5" />
+                        {/* Submenu — appears on hover */}
+                        {showMoreModels && (
+                          <div
+                            className={`model-dropdown-submenu ${dropdownDirection === 'down' ? 'model-dropdown-submenu-down' : 'model-dropdown-submenu-up'}`}
+                            onMouseEnter={() => clearTimeout(moreModelsTimeout.current)}
+                            onMouseLeave={() => { moreModelsTimeout.current = setTimeout(() => setShowMoreModels(false), 150); }}
+                          >
+                            {(() => {
+                              const compatible = starredModels.filter((m) => !initialModel || areModelsCompatible(selectedModel, m, modelMetadata));
+                              return compatible.length > 0 ? (
+                                compatible.map((m) => (
+                                  <div
+                                    key={m}
+                                    className="model-dropdown-item"
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      setSelectedModel(m);
+                                      setShowModelMenu(false);
+                                      setShowMoreModels(false);
+                                    }}
+                                  >
+                                    <span>{getModelDisplayName(m)}</span>
+                                    {m === selectedModel && <Check className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--color-accent-primary)' }} />}
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="model-dropdown-link"
+                                  onMouseDown={(e) => { e.preventDefault(); navigate('/settings?tab=model'); setShowModelMenu(false); setShowMoreModels(false); }}
+                                >
+                                  {t('chat.modelSelector.configureModels')}
+                                </div>
+                              );
+                            })()}
+                            <div className="model-dropdown-separator" />
+                            <div
+                              className="model-dropdown-link"
+                              onMouseDown={(e) => { e.preventDefault(); navigate('/settings?tab=model'); setShowModelMenu(false); setShowMoreModels(false); }}
+                            >
+                              {t('chat.modelSelector.manageModels')}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
               {/* Send / Stop Button */}
               {isLoading && onStop ? (

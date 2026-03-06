@@ -349,7 +349,7 @@ function ChatView({ workspaceId, threadId, onBack, workspaceName: initialWorkspa
     handleRejectStartQuestion,
     tokenUsage,
     threadId: currentThreadId,
-    threadModel,
+    threadModels,
     isShared: threadIsShared,
     insertNotification,
     handleEditMessage,
@@ -1417,7 +1417,8 @@ function ChatView({ workspaceId, threadId, onBack, workspaceName: initialWorkspa
                       files={workspaceFiles}
                       tokenUsage={tokenUsage}
                       onAction={handleAction}
-                      initialModel={threadModel || preferredModel}
+                      initialModel={threadModels[0] || preferredModel}
+                      threadModels={threadModels}
                     />
                   </>
                 ) : activeAgent ? (
