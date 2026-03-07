@@ -91,6 +91,25 @@ export const SCROLL_LOAD_THRESHOLD = 20;
 // Debounce delay for visible range changes (ms)
 export const RANGE_CHANGE_DEBOUNCE_MS = 300;
 
+// Stage 1 (fast) initial load — days to fetch for immediate render.
+// Intervals not listed here skip staged loading entirely.
+export const STAGE1_LOAD_DAYS = {
+  '1s': 0,    // 1s: stage 1 = no date range (today's data from backend)
+  '1min': 2,  // 1min: stage 1 = 2 days (fast render)
+};
+
+// Stage 2 (background backfill) — additional days to fetch silently after stage 1.
+export const STAGE2_BACKFILL_DAYS = {
+  '1s': 1,    // backfill 1 prior day
+  '1min': 5,  // backfill remaining 5 days (total = 2 + 5 = 7 = INITIAL_LOAD_DAYS)
+};
+
+// Background prefetch: intervals that pre-load the next scroll chunk before user reaches the edge
+export const PREFETCH_ENABLED_INTERVALS = new Set(['1s']);
+
+// How far from left edge (in bars) to trigger background prefetch (well before SCROLL_LOAD_THRESHOLD=20)
+export const PREFETCH_THRESHOLD = 150;
+
 // --- MA / RSI / Volume configuration ---
 export const MA_CONFIGS = [
   { period: 5,   color: '#22d3ee', label: 'MA5'   },  // cyan

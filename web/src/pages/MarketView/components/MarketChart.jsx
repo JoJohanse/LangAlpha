@@ -8,6 +8,7 @@ import {
   getChartTheme,
   INTERVALS, PRIMARY_INTERVAL_KEYS, INITIAL_LOAD_DAYS, SCROLL_CHUNK_DAYS,
   SCROLL_LOAD_THRESHOLD, RANGE_CHANGE_DEBOUNCE_MS,
+  STAGE1_LOAD_DAYS, STAGE2_BACKFILL_DAYS, PREFETCH_ENABLED_INTERVALS, PREFETCH_THRESHOLD,
   MA_CONFIGS, DEFAULT_ENABLED_MA, RSI_PERIODS, BARS_PER_DAY, AUTO_FIT_BARS, TARGET_BAR_SPACING,
   OVERLAY_COLORS, OVERLAY_LABELS,
   EXTENDED_HOURS_INTERVALS, getExtendedHoursType, computeExtendedHoursRegions,
@@ -171,6 +172,12 @@ const MarketChart = React.memo(forwardRef(({
   const fetchingRef = useRef(false);
   const rangeChangeTimerRef = useRef(null);
   const rangeUnsubRef = useRef(null);
+
+  // Refs for staged loading and background prefetch
+  const stage2AbortRef = useRef(null);
+  const prefetchAbortRef = useRef(null);
+  const prefetchedDataRef = useRef(null);
+  const prefetchingRef = useRef(false);
 
   // Chart data state for hooks
   const [chartDataForHooks, setChartDataForHooks] = useState([]);
@@ -635,13 +642,66 @@ const MarketChart = React.memo(forwardRef(({
     }
   };
 
+  // --- Background prefetch for 1s (pre-load next scroll chunk before user reaches edge) ---
+  const triggerPrefetch = () => {
+    if (!PREFETCH_ENABLED_INTERVALS.has(intervalRef.current)) return;
+    if (prefetchingRef.current || prefetchedDataRef.current) return;
+    if (!oldestDateRef.current) return;
+
+    prefetchingRef.current = true;
+    const capturedOldest = oldestDateRef.current;
+    const capturedSym = symbolRef.current;
+    const capturedInterval = intervalRef.current;
+    const days = SCROLL_CHUNK_DAYS[capturedInterval] || 0;
+
+    prefetchAbortRef.current?.abort();
+    const ac = new AbortController();
+    prefetchAbortRef.current = ac;
+
+    const oldest = new Date(capturedOldest * 1000);
+    const toDate = new Date(oldest);
+    toDate.setDate(toDate.getDate() - 1);
+    const fromDate = new Date(toDate);
+    fromDate.setDate(fromDate.getDate() - days);
+
+    fetchStockData(capturedSym, capturedInterval,
+      fromDate.toISOString().split('T')[0],
+      toDate.toISOString().split('T')[0],
+      { signal: ac.signal }
+    ).then(result => {
+      if (ac.signal.aborted || symbolRef.current !== capturedSym) return;
+      if (result?.data?.length > 0) {
+        prefetchedDataRef.current = { data: result.data, anchorOldest: capturedOldest };
+      }
+    }).catch(err => {
+      if (err?.name !== 'AbortError' && err?.name !== 'CanceledError') {
+        console.warn('Prefetch failed:', err);
+      }
+    }).finally(() => {
+      prefetchingRef.current = false;
+    });
+  };
+
   // --- Scroll-based lazy loading ---
   const handleScrollLoadMore = useCallback(async () => {
     if (fetchingRef.current || !oldestDateRef.current) return;
     fetchingRef.current = true;
     setScrollLoading(true);
     try {
-      await fetchAndPrepend(SCROLL_CHUNK_DAYS[interval]);
+      const buf = prefetchedDataRef.current;
+      if (buf && buf.anchorOldest === oldestDateRef.current && buf.data?.length > 0) {
+        // Instant merge from prefetch buffer — no network wait
+        mergePrependedData(buf.data);
+        prefetchedDataRef.current = null;
+        triggerPrefetch();
+      } else {
+        // Buffer miss — fall back to synchronous fetch
+        prefetchedDataRef.current = null;
+        await fetchAndPrepend(SCROLL_CHUNK_DAYS[interval] || 0);
+        if (PREFETCH_ENABLED_INTERVALS.has(interval)) {
+          triggerPrefetch();
+        }
+      }
     } catch (err) {
       console.warn('Scroll-load fetch failed:', err);
     } finally {
@@ -1057,6 +1117,12 @@ const MarketChart = React.memo(forwardRef(({
     gapFillInProgressRef.current = false;
     minuteAggRef.current = { time: 0, open: 0, high: 0, low: 0, close: 0, volume: 0 };
 
+    // Cancel any in-flight stage 2 / prefetch from previous symbol/interval
+    stage2AbortRef.current?.abort();
+    prefetchAbortRef.current?.abort();
+    prefetchedDataRef.current = null;
+    prefetchingRef.current = false;
+
     // Unsubscribe previous scroll listener
     if (rangeUnsubRef.current) {
       rangeUnsubRef.current();
@@ -1105,7 +1171,7 @@ const MarketChart = React.memo(forwardRef(({
       setError(null);
 
       try {
-        const loadDays = INITIAL_LOAD_DAYS[interval];
+        const loadDays = (interval in STAGE1_LOAD_DAYS) ? STAGE1_LOAD_DAYS[interval] : INITIAL_LOAD_DAYS[interval];
 
         let fromDate, toDate;
         if (loadDays > 0) {
@@ -1150,12 +1216,89 @@ const MarketChart = React.memo(forwardRef(({
             const unsubscribe = chartRef.current.timeScale().subscribeVisibleLogicalRangeChange((range) => {
               clearTimeout(rangeChangeTimerRef.current);
               rangeChangeTimerRef.current = setTimeout(() => {
-                if (range && range.from <= SCROLL_LOAD_THRESHOLD) {
+                if (!range) return;
+                // Prefetch: start loading next chunk early (150 bars from left)
+                if (range.from <= PREFETCH_THRESHOLD && PREFETCH_ENABLED_INTERVALS.has(intervalRef.current)) {
+                  triggerPrefetch();
+                }
+                // Scroll-load: merge when near edge (20 bars from left)
+                if (range.from <= SCROLL_LOAD_THRESHOLD) {
                   handleScrollLoadMore();
                 }
               }, RANGE_CHANGE_DEBOUNCE_MS);
             });
             rangeUnsubRef.current = unsubscribe;
+          }
+
+          // --- Stage 2: background backfill ---
+          const backfillDays = STAGE2_BACKFILL_DAYS[interval];
+          if (backfillDays > 0 && oldestDateRef.current) {
+            const stage2Abort = new AbortController();
+            stage2AbortRef.current = stage2Abort;
+            const capturedSym = symbol;
+
+            // Yield to rendering before starting background fetch
+            setTimeout(async () => {
+              if (stage2Abort.signal.aborted || symbolRef.current !== capturedSym) return;
+
+              // --- Today gap fill for 1s: fill missing morning bars ---
+              if (interval === '1s' && oldestDateRef.current) {
+                const firstBarDate = new Date(oldestDateRef.current * 1000);
+                const firstBarMins = firstBarDate.getUTCHours() * 60 + firstBarDate.getUTCMinutes();
+                const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+                const firstBarDateStr = firstBarDate.toISOString().split('T')[0];
+
+                // Fill if first bar is from today and starts after 4:30 AM ET (270 mins)
+                if (firstBarDateStr === todayStr && firstBarMins > 270) {
+                  try {
+                    const gapResult = await fetchStockData(capturedSym, '1s', todayStr, todayStr,
+                      { signal: stage2Abort.signal });
+                    if (stage2Abort.signal.aborted || symbolRef.current !== capturedSym) return;
+                    if (gapResult?.data?.length > 0) {
+                      const gapBars = gapResult.data.filter(b => b.time < oldestDateRef.current);
+                      if (gapBars.length > 0) {
+                        mergePrependedData(gapBars);
+                      }
+                    }
+                  } catch (err) {
+                    if (err?.name !== 'AbortError' && err?.name !== 'CanceledError') {
+                      console.warn('Today gap fill failed:', err);
+                    }
+                  }
+                }
+              }
+
+              if (stage2Abort.signal.aborted || symbolRef.current !== capturedSym) return;
+
+              // --- Backwards backfill: fetch prior days ---
+              const oldest = new Date(oldestDateRef.current * 1000);
+              const to = new Date(oldest);
+              to.setDate(to.getDate() - 1);
+              const from = new Date(to);
+              const maxMaPeriod = Math.max(...enabledMaPeriodsRef.current, 0);
+              const maOverhead = Math.ceil((maxMaPeriod / (BARS_PER_DAY[interval] || 1)) * 1.5);
+              from.setDate(from.getDate() - backfillDays - maOverhead);
+
+              try {
+                const result = await fetchStockData(capturedSym, interval,
+                  from.toISOString().split('T')[0],
+                  to.toISOString().split('T')[0],
+                  { signal: stage2Abort.signal });
+                if (stage2Abort.signal.aborted || symbolRef.current !== capturedSym) return;
+                if (result?.data?.length > 0) {
+                  mergePrependedData(result.data);
+                }
+              } catch (err) {
+                if (err?.name !== 'AbortError' && err?.name !== 'CanceledError') {
+                  console.warn('Stage 2 backfill failed:', err);
+                }
+              }
+
+              // Start prefetching the next scroll chunk for prefetch-enabled intervals
+              if (PREFETCH_ENABLED_INTERVALS.has(interval) && symbolRef.current === capturedSym) {
+                triggerPrefetch();
+              }
+            }, 50);
           }
 
         } else {
@@ -1197,6 +1340,8 @@ const MarketChart = React.memo(forwardRef(({
 
     return () => {
       abortController.abort();
+      stage2AbortRef.current?.abort();
+      prefetchAbortRef.current?.abort();
     };
   }, [symbol, interval, onStockMeta, updateSeriesData, handleScrollLoadMore]);
 

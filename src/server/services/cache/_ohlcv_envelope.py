@@ -65,6 +65,10 @@ def _merge_bars(
     Delta replaces everything from the watermark onward.
     Delta may start earlier than the watermark (when from_date is a date
     string rather than a precise timestamp), so we filter it first.
+
+    Gap fill: when the delta contains bars that predate the existing prefix
+    (e.g. the initial load returned only recent bars), those earlier bars
+    are prepended so the gap is filled on the next refresh.
     """
     if not existing:
         return delta
@@ -78,10 +82,15 @@ def _merge_bars(
     # Filter delta to only bars at or after the watermark so we don't
     # re-introduce bars that are already in the immutable prefix.
     fresh = [b for b in delta if b.get("time", 0) >= watermark]
-    if not fresh:
+
+    # Gap fill: delta bars that predate existing (partial initial load).
+    first_existing_time = times[0] if times else 0
+    gap_fill = [b for b in delta if 0 < b.get("time", 0) < first_existing_time]
+
+    if not fresh and not gap_fill:
         return existing
 
-    return existing[:split_idx] + fresh
+    return gap_fill + existing[:split_idx] + fresh
 
 
 def watermark_to_date_str(watermark) -> Optional[str]:
