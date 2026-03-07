@@ -10,6 +10,7 @@ import SyntaxHighlighter, { oneDark, oneLight } from './SyntaxHighlighter';
 import { Copy, Check } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 import WorkspaceImage from './WorkspaceImage';
+import { isFilePath, normalizeFilePath } from './FileCard';
 
 // --- CodeBlock component ---
 function CodeBlock({ language, code, compact = false }) {
@@ -482,7 +483,7 @@ function normalizeLatexDelimiters(content) {
   return content;
 }
 
-function Markdown({ content, variant = 'panel', className = '', style }) {
+function Markdown({ content, variant = 'panel', className = '', style, onOpenFile }) {
   const config = VARIANTS[variant];
   const processed = useMemo(
     () => normalizeLatexDelimiters(escapeCurrencyDollars(fixMarkdownTables(stripFrontMatter(content)))),
@@ -491,12 +492,35 @@ function Markdown({ content, variant = 'panel', className = '', style }) {
 
   const lineKey = useMemo(() => (processed.match(/\n/g) || []).length, [processed]);
 
+  const components = useMemo(() => {
+    if (!onOpenFile && variant !== 'chat') return config.components;
+    const fileAwareA = ({ node, href, ...props }) => {
+      if (isFilePath(href)) {
+        if (onOpenFile) {
+          return (
+            <a
+              className="underline hover:opacity-80 transition-opacity cursor-pointer"
+              style={{ color: 'var(--color-accent-primary)' }}
+              onClick={(e) => { e.preventDefault(); onOpenFile(normalizeFilePath(href)); }}
+              {...props}
+            />
+          );
+        }
+        // No onOpenFile handler — render as non-clickable text
+        return <span {...props} />;
+      }
+      // External URL — default behavior
+      return config.components.a({ node, href, ...props });
+    };
+    return { ...config.components, a: fileAwareA };
+  }, [onOpenFile, variant, config.components]);
+
   return (
     <div
       className={`${config.className} ${className}`.trim()}
       style={{ ...config.style, ...style }}
     >
-      <ReactMarkdown key={lineKey} remarkPlugins={[remarkGfm, remarkCjkFriendly, remarkMath]} rehypePlugins={[[rehypeKatex, { strict: false }], rehypeRaw]} components={config.components}>
+      <ReactMarkdown key={lineKey} remarkPlugins={[remarkGfm, remarkCjkFriendly, remarkMath]} rehypePlugins={[[rehypeKatex, { strict: false }], rehypeRaw]} components={components}>
         {processed}
       </ReactMarkdown>
     </div>

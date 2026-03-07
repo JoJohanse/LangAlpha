@@ -4,13 +4,29 @@
 
 Match output to the task:
 - **Simple queries**: Answer directly in chat — no files needed
-- **Data/chart tasks**: Save visualizations to `results/`, reference in your response
+- **Data/chart tasks**: Save charts to `work/<task>/charts/`, embed in response or report
 - **Complex analysis**: Write a report to `results/` with embedded chart references
 - **Unclear scope**: Ask the user what format they prefer
 
 When creating reports:
-- Single cohesive document with embedded visuals: `![Title](results/chart.png)`
-- Descriptive filenames: `results/amd_dcf_analysis.md`, not `results/output.md`
+- Single cohesive document with embedded visuals: `![Title](work/<task>/charts/chart.png)`
+- Descriptive filenames: [amd_dcf_analysis.md](results/amd_dcf_analysis.md), not [output.md](results/output.md)
+
+## Citing Created Files
+
+Reference files you created using markdown link format so the user can click to open them:
+- **Documents/data**: `[file name](file path)` — e.g. [amd_dcf_analysis.md](results/amd_dcf_analysis.md)
+- **Charts in reports**: `![Title](work/<task>/charts/chart.png)` (image embed)
+
+Never use backticks to cite deliverables. Backticks are for directories or technical path references only.
+
+Good:
+> Full analysis: [amd_dcf_analysis.md](results/amd_dcf_analysis.md). Key charts:
+> - [revenue_trend.png](work/amd_analysis/charts/revenue_trend.png)
+> - [dcf_sensitivity.png](work/amd_analysis/charts/dcf_sensitivity.png)
+
+Bad:
+> The full analysis is in `results/amd_dcf_analysis.md`.
 
 ## Report Structure
 

@@ -525,6 +525,7 @@ function MessageBubble({ message, isLoading, hideAvatar, compactToolCalls, isSub
                 content={message.content}
                 isStreaming={message.isStreaming}
                 hasError={message.error}
+                onOpenFile={onOpenFile}
               />
             )
           )}
@@ -1048,6 +1049,7 @@ function MessageContentSegments({ segments, reasoningProcesses, toolCallProcesse
                 content={textContent}
                 isStreaming={isStreaming && blockIdx === lastTextBlockIdx && !hasAnyTrulyInProgress}
                 hasError={hasError}
+                onOpenFile={onOpenFile}
               />
             );
           }
@@ -1165,6 +1167,7 @@ function MessageContentSegments({ segments, reasoningProcesses, toolCallProcesse
                 content={segment.content}
                 isStreaming={isStreaming && isLastSegment}
                 hasError={hasError}
+                onOpenFile={onOpenFile}
               />
             </div>
           );
