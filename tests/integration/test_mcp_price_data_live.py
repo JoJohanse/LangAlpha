@@ -1,0 +1,153 @@
+"""Integration tests for price_data_mcp_server — hits real APIs.
+
+Run with:  uv run python -m pytest tests/integration/ -m integration -v
+Requires:  FMP_API_KEY (for OHLCV), GINLIX_DATA_URL (for short data)
+"""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+
+pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+_has_fmp = bool(os.getenv("FMP_API_KEY"))
+_has_ginlix = bool(os.getenv("GINLIX_DATA_URL"))
+
+
+# ---------------------------------------------------------------------------
+# get_stock_data
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not _has_fmp, reason="FMP_API_KEY not set")
+class TestGetStockDataLive:
+    async def test_daily(self):
+        from mcp_servers.price_data_mcp_server import get_stock_data
+
+        result = await get_stock_data("AAPL", interval="1day")
+        assert "error" not in result, result.get("error")
+        assert result["symbol"] == "AAPL"
+        assert result["count"] > 0
+        row = result["rows"][0]
+        assert all(k in row for k in ("date", "open", "high", "low", "close", "volume"))
+        # Descending order
+        if result["count"] > 1:
+            assert result["rows"][0]["date"] >= result["rows"][1]["date"]
+
+    async def test_intraday_5min(self):
+        from mcp_servers.price_data_mcp_server import get_stock_data
+
+        result = await get_stock_data("AAPL", interval="5min")
+        assert "error" not in result, result.get("error")
+        assert result["count"] > 0
+
+    async def test_unsupported_interval(self):
+        from mcp_servers.price_data_mcp_server import get_stock_data
+
+        result = await get_stock_data("AAPL", interval="2min")
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# get_asset_data
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not _has_fmp, reason="FMP_API_KEY not set")
+class TestGetAssetDataLive:
+    async def test_commodity(self):
+        from mcp_servers.price_data_mcp_server import get_asset_data
+
+        result = await get_asset_data("GCUSD", asset_type="commodity")
+        assert "error" not in result, result.get("error")
+        assert result["count"] > 0
+
+    async def test_crypto(self):
+        from mcp_servers.price_data_mcp_server import get_asset_data
+
+        result = await get_asset_data("BTCUSD", asset_type="crypto")
+        assert "error" not in result, result.get("error")
+        assert result["count"] > 0
+
+    async def test_forex(self):
+        from mcp_servers.price_data_mcp_server import get_asset_data
+
+        result = await get_asset_data("EURUSD", asset_type="forex")
+        assert "error" not in result, result.get("error")
+        assert result["count"] > 0
+
+
+# ---------------------------------------------------------------------------
+# get_short_data
+# ---------------------------------------------------------------------------
+
+def _init_ginlix():
+    """Ensure the ginlix-data httpx client is initialized on the module.
+
+    Sends X-Service-Token and X-User-Id (required by ginlix-data auth).
+    """
+    import httpx
+    import mcp_servers.price_data_mcp_server as mod
+
+    if mod._ginlix_http is None:
+        url = os.getenv("GINLIX_DATA_URL", "")
+        token = os.getenv("INTERNAL_SERVICE_TOKEN", "")
+        headers: dict[str, str] = {}
+        if token:
+            headers["X-Service-Token"] = token
+            headers["X-User-Id"] = "integration-test"
+        mod._ginlix_http = httpx.AsyncClient(
+            base_url=url.rstrip("/"), headers=headers, timeout=30.0,
+        )
+    return mod
+
+
+@pytest.mark.skipif(not _has_ginlix, reason="GINLIX_DATA_URL not set")
+class TestGetShortDataLive:
+    async def test_both(self):
+        mod = _init_ginlix()
+        result = await mod.get_short_data("AAPL")
+        assert "error" not in result, result.get("error")
+        assert result["source"] == "ginlix-data"
+        assert "short_interest" in result
+        assert "short_volume" in result
+        assert len(result["short_interest"]) > 0
+        assert len(result["short_volume"]) > 0
+
+        # Verify newest-first ordering
+        si = result["short_interest"]
+        if len(si) > 1:
+            assert si[0]["settlement_date"] >= si[1]["settlement_date"]
+        sv = result["short_volume"]
+        if len(sv) > 1:
+            assert sv[0]["date"] >= sv[1]["date"]
+
+        # Verify expected fields
+        si_row = si[0]
+        assert "short_interest" in si_row
+        assert "settlement_date" in si_row
+        assert "days_to_cover" in si_row
+
+        sv_row = sv[0]
+        assert "short_volume" in sv_row
+        assert "short_volume_ratio" in sv_row
+        assert "total_volume" in sv_row
+
+    async def test_short_interest_only_with_date_filter(self):
+        mod = _init_ginlix()
+        result = await mod.get_short_data(
+            "AAPL", data_type="short_interest",
+            from_date="2025-01-01", to_date="2025-12-31", limit=5,
+        )
+        assert "short_interest" in result
+        assert "short_volume" not in result
+        assert len(result["short_interest"]) <= 5
+        for row in result["short_interest"]:
+            assert row["settlement_date"] >= "2025-01-01"
+
+    async def test_short_volume_only(self):
+        mod = _init_ginlix()
+        result = await mod.get_short_data("TSLA", data_type="short_volume", limit=3)
+        assert "short_volume" in result
+        assert "short_interest" not in result
+        assert len(result["short_volume"]) <= 3
