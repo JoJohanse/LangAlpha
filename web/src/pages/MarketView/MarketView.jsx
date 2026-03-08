@@ -118,8 +118,6 @@ function MarketViewInner() {
       const symbol = symbolParam.trim().toUpperCase();
       if (symbol && symbol !== selectedStock) {
         setSelectedStock(symbol);
-        setRealTimePrice(null);
-        setStockInfo(null);
         setSelectedStockDisplay(null);
         setChartMeta(null);
       }
@@ -135,8 +133,6 @@ function MarketViewInner() {
 
   const handleStockSearch = useCallback((symbol, searchResult) => {
     setSelectedStock(symbol);
-    setRealTimePrice(null);
-    setStockInfo(null);
     setSelectedStockDisplay(
       searchResult
         ? {
@@ -146,7 +142,6 @@ function MarketViewInner() {
         : null
     );
     setChartMeta(null);
-    setSnapshotData(null);
     setShowOverview(false);
   }, []);
 

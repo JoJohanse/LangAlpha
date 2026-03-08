@@ -1,17 +1,9 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { getNews, getIndices, INDEX_SYMBOLS, fallbackIndex, normalizeIndexSymbol } from '../utils/api';
 import { fetchMarketStatus } from '@/lib/marketUtils';
 
-// Module-level caches (survive navigation, clear on page refresh)
-// This caching is quite basic; a more robust solution like React Query would improve efficiency.
-let newsCache = null;          // { items }
-let indicesCache = null;       // [ index objects ]
-
 /**
  * Formats a given timestamp to a relative time string (e.g. "just now", "10 min ago").
- * 
- * Future efficiency note: This could be memoized or handled by an internationalization 
- * library like date-fns, rather than computing it on the fly for every render.
  */
 function formatRelativeTime(timestamp) {
   if (!timestamp) return '';
@@ -29,27 +21,41 @@ function formatRelativeTime(timestamp) {
 
 /**
  * useDashboardData Hook
- * Separates data fetching logic (news, indices, market status) out of Dashboard UI.
- * This makes the frontend codebase cleaner and shareable for iOS mobile client data services.
+ * Uses TanStack Query to manage fetching, caching, and auto-polling of data.
+ * Eliminates race conditions and reduces boilerplate of manual useEffects.
  */
 export function useDashboardData() {
-  const [indices, setIndices] = useState(() =>
-    indicesCache || INDEX_SYMBOLS.map((s) => fallbackIndex(normalizeIndexSymbol(s)))
-  );
-  const [indicesLoading, setIndicesLoading] = useState(!indicesCache);
+  // 1. Market Status (Polls every 60s, cached globally)
+  const { data: marketStatus = null } = useQuery({
+    queryKey: ['dashboard', 'marketStatus'],
+    queryFn: fetchMarketStatus,
+    refetchInterval: 60000,
+    staleTime: 30000,
+  });
 
-  const [newsItems, setNewsItems] = useState(() => newsCache?.items || []);
-  const [newsLoading, setNewsLoading] = useState(!newsCache);
+  // 2. Market Indices (Adaptive Polling: 30s open / 60s closed)
+  const isMarketOpen = marketStatus?.market === 'open' ||
+    (marketStatus && !marketStatus.afterHours && !marketStatus.earlyHours && marketStatus.market !== 'closed');
 
-  const marketStatusRef = useRef(null);
-  const [marketStatus, setMarketStatus] = useState(null);
+  const { data: indices, isLoading: indicesLoading } = useQuery({
+    queryKey: ['dashboard', 'indices', INDEX_SYMBOLS],
+    queryFn: async () => {
+      const { indices: next } = await getIndices(INDEX_SYMBOLS);
+      return next;
+    },
+    // Using initialData provides standard fallback values instantly
+    initialData: () => INDEX_SYMBOLS.map((s) => fallbackIndex(normalizeIndexSymbol(s))),
+    refetchInterval: isMarketOpen ? 30000 : 60000,
+    staleTime: 10000,
+  });
 
-  const fetchNews = useCallback(async () => {
-    setNewsLoading(true);
-    try {
+  // 3. News Feed (Fetched once, cached for 5 minutes)
+  const { data: newsItems = [], isLoading: newsLoading } = useQuery({
+    queryKey: ['dashboard', 'news'],
+    queryFn: async () => {
       const data = await getNews({ limit: 50 });
       if (data.results && data.results.length > 0) {
-        const mapped = data.results.map((r) => ({
+        return data.results.map((r) => ({
           id: r.id,
           title: r.title,
           time: formatRelativeTime(r.published_at),
@@ -59,79 +65,19 @@ export function useDashboardData() {
           image: r.image_url || null,
           tickers: r.tickers || [],
         }));
-        setNewsItems(mapped);
-        newsCache = { items: mapped };
       }
-    } catch {
-      // Keep existing items on error; empty array if first load
-    } finally {
-      setNewsLoading(false);
-    }
-  }, []);
+      return [];
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes fresh cache
+  });
 
-  useEffect(() => {
-    if (!newsCache) fetchNews();
-  }, [fetchNews]);
-
-  const fetchIndices = useCallback(async () => {
-    if (!indicesCache) setIndicesLoading(true);
-    try {
-      const { indices: next } = await getIndices(INDEX_SYMBOLS);
-      setIndices(next);
-      indicesCache = next;
-    } catch (error) {
-      console.error('[Dashboard] Error fetching indices:', error?.message);
-      if (!indicesCache) {
-        setIndices(INDEX_SYMBOLS.map((s) => fallbackIndex(normalizeIndexSymbol(s))));
-      }
-    } finally {
-      setIndicesLoading(false);
-    }
-  }, []);
-
-  // Adaptive polling: 30s during market hours, 60s during extended/closed
-  useEffect(() => {
-    const pollMarketStatus = () =>
-      fetchMarketStatus()
-        .then((s) => { 
-          marketStatusRef.current = s; 
-          setMarketStatus(s); 
-        })
-        .catch(() => {});
-    
-    pollMarketStatus();
-    const statusId = setInterval(pollMarketStatus, 60000);
-    return () => clearInterval(statusId);
-  }, []);
-
-  useEffect(() => {
-    fetchIndices();
-    let intervalId = null;
-    const schedule = () => {
-      const status = marketStatusRef.current;
-      const isMarketOpen = status?.market === 'open' || 
-                           (status && !status.afterHours && !status.earlyHours && status.market !== 'closed');
-      
-      const delay = isMarketOpen ? 30000 : 60000;
-      intervalId = setTimeout(() => {
-        // Efficiency note: Checking document.hidden prevents useless background fetches!
-        if (!document.hidden) fetchIndices();
-        schedule();
-      }, delay);
-    };
-    schedule();
-    
-    return () => { 
-      if (intervalId) clearTimeout(intervalId); 
-    };
-  }, [fetchIndices]);
-
-  return { 
-    indices, 
-    indicesLoading, 
-    newsItems, 
-    newsLoading, 
-    marketStatus, 
-    marketStatusRef 
+  return {
+    indices,
+    indicesLoading,
+    newsItems,
+    newsLoading,
+    marketStatus,
+    // Kept for backward compatibility with components that might use MarketStatusRef
+    marketStatusRef: { current: marketStatus }
   };
 }

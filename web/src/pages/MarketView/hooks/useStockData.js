@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { fetchStockQuote, fetchCompanyOverview, fetchAnalystData } from '../utils/api';
 import { fetchMarketStatus } from '@/lib/marketUtils';
 
@@ -6,12 +7,8 @@ import { fetchMarketStatus } from '@/lib/marketUtils';
  * useStockData Hook
  * 
  * Extracts data fetching logic out of MarketView to improve modularity.
- * Manages fetching of stock quotes, company overview, analyst data (targets/grades),
- * and the polling of market status.
- * 
- * Future efficiency note: Implementing a data-fetching library (e.g. React Query / SWR)
- * would automatically handle the AbortControllers, polling intervals, and cache invalidation
- * used here, making this codebase considerably leaner.
+ * Uses TanStack Query to automatically handle AbortControllers, background refetching,
+ * polling intervals, and aggressive caching out-of-the-box.
  */
 export function useStockData({
     selectedStock,
@@ -23,122 +20,89 @@ export function useStockData({
     const [realTimePrice, setRealTimePrice] = useState(null);
     const [snapshotData, setSnapshotData] = useState(null);
 
-    const [overviewData, setOverviewData] = useState(null);
-    const [overviewLoading, setOverviewLoading] = useState(false);
-    const [overlayData, setOverlayData] = useState(null);
-    const [marketStatus, setMarketStatus] = useState(null);
-
-    // Consolidated fetch: stockInfo + realTimePrice from a single API call
-    // with AbortController and Page Visibility API.
-    // When WS is connected, only fetch once (for stockInfo/name/exchange) — skip polling.
-    useEffect(() => {
-        if (!selectedStock) return;
-
-        const abortController = new AbortController();
-
-        const loadStockQuote = async () => {
+    // 1. Stock Quote & Snapshot
+    const { data: quoteResponse } = useQuery({
+        queryKey: ['stockQuote', selectedStock],
+        queryFn: async ({ signal }) => {
+            if (!selectedStock) return null;
             try {
-                const { stockInfo: info, realTimePrice: price, snapshot } = await fetchStockQuote(
-                    selectedStock,
-                    { signal: abortController.signal }
-                );
-                setStockInfo(info);
-                if (price) setRealTimePrice(price);
-                // Seed WS refs from snapshot for accurate change% calculation
-                if (snapshot) {
-                    setSnapshotData(snapshot);
-                    if (snapshot.previous_close != null && setPreviousClose) setPreviousClose(selectedStock, snapshot.previous_close);
-                    if (snapshot.open != null && setDayOpen) setDayOpen(selectedStock, snapshot.open);
+                const data = await fetchStockQuote(selectedStock, { signal });
+
+                // Side effects mapping for WS refs
+                if (data.snapshot) {
+                    if (data.snapshot.previous_close != null && setPreviousClose) {
+                        setPreviousClose(selectedStock, data.snapshot.previous_close);
+                    }
+                    if (data.snapshot.open != null && setDayOpen) {
+                        setDayOpen(selectedStock, data.snapshot.open);
+                    }
                 }
+                return data;
             } catch (error) {
-                if (error?.name === 'CanceledError' || error?.name === 'AbortError') return;
-                console.error('Error loading stock quote:', error);
-                setStockInfo({
-                    Symbol: selectedStock,
-                    Name: `${selectedStock} Corp`,
-                    Exchange: 'NASDAQ',
-                });
+                // If the stock is bogus or fetch fails, fallback so UI has skeleton data
+                return {
+                    stockInfo: {
+                        Symbol: selectedStock,
+                        Name: `${selectedStock} Corp`,
+                        Exchange: 'NASDAQ',
+                    },
+                    realTimePrice: null,
+                    snapshot: null,
+                };
             }
-        };
+        },
+        // Polling: disabled if WS is streaming real-time, otherwise poll every 60s
+        refetchInterval: wsStatus === 'connected' ? false : 60000,
+        enabled: !!selectedStock,
+        staleTime: 1000 * 10, // 10s fresh cache 
+    });
 
-        loadStockQuote();
-
-        // Suppress 60s polling when WS is connected — WS provides sub-second updates
-        if (wsStatus === 'connected') {
-            return () => abortController.abort();
+    // Isolate pure UI state for the realtime bar updates 
+    // This allows WebSocket to update local state extremely fast 
+    // without triggering React Query cache updates on every tick.
+    useEffect(() => {
+        if (!selectedStock) {
+            setStockInfo(null);
+            setRealTimePrice(null);
+            setSnapshotData(null);
+        } else if (quoteResponse) {
+            setStockInfo(quoteResponse.stockInfo);
+            setRealTimePrice(quoteResponse.realTimePrice);
+            setSnapshotData(quoteResponse.snapshot);
         }
+    }, [quoteResponse, selectedStock]);
 
-        // Refresh price every 60s, but skip when tab is hidden (Page Visibility API)
-        let cancelled = false;
-        const priceInterval = setInterval(async () => {
-            if (document.hidden) return; // Skip fetch when tab is not visible
-            try {
-                const { stockInfo: info, realTimePrice: price, snapshot } = await fetchStockQuote(selectedStock);
-                if (cancelled) return;
-                setStockInfo(info);
-                if (price) setRealTimePrice(price);
-                if (snapshot) {
-                    setSnapshotData(snapshot);
-                    if (snapshot.previous_close != null && setPreviousClose) setPreviousClose(selectedStock, snapshot.previous_close);
-                    if (snapshot.open != null && setDayOpen) setDayOpen(selectedStock, snapshot.open);
-                }
-            } catch (error) {
-                console.error('Error refreshing stock quote:', error);
-            }
-        }, 60000);
+    // 2. Company Overview
+    const { data: overviewData = null, isLoading: overviewLoading } = useQuery({
+        queryKey: ['companyOverview', selectedStock],
+        queryFn: ({ signal }) => fetchCompanyOverview(selectedStock, { signal }),
+        enabled: !!selectedStock,
+        staleTime: 5 * 60 * 1000, // 5 minutes fresh
+    });
 
-        return () => {
-            cancelled = true;
-            abortController.abort();
-            clearInterval(priceInterval);
-        };
-    }, [selectedStock, wsStatus, setPreviousClose, setDayOpen]);
+    // 3. Analyst Data
+    const { data: overlayData = null } = useQuery({
+        queryKey: ['analystData', selectedStock],
+        queryFn: async ({ signal }) => {
+            const analyst = await fetchAnalystData(selectedStock, { signal });
+            return analyst ? {
+                priceTargets: analyst.priceTargets || null,
+                grades: analyst.grades || [],
+            } : null;
+        },
+        enabled: !!selectedStock,
+        staleTime: 5 * 60 * 1000, // 5 minutes fresh
+    });
 
-    // Fetch company overview data
-    useEffect(() => {
-        if (!selectedStock) return;
-        const ac = new AbortController();
-        setOverviewLoading(true);
-        fetchCompanyOverview(selectedStock, { signal: ac.signal })
-            .then((result) => {
-                setOverviewData(result);
-            })
-            .catch((err) => {
-                if (err?.name === 'CanceledError' || err?.name === 'AbortError') return;
-                console.error('Error fetching company overview:', err);
-                setOverviewData(null);
-            })
-            .finally(() => setOverviewLoading(false));
-        return () => ac.abort();
-    }, [selectedStock]);
+    // 4. Market Status
+    const { data: marketStatus = null } = useQuery({
+        queryKey: ['dashboard', 'marketStatus'], // Matches cached value from useDashboardData
+        queryFn: fetchMarketStatus,
+        refetchInterval: 60000,
+        staleTime: 30000,
+    });
 
-    // Fetch analyst data (price targets + grades) for chart overlays
-    useEffect(() => {
-        if (!selectedStock) return;
-        const ac = new AbortController();
-        fetchAnalystData(selectedStock, { signal: ac.signal })
-            .then((analyst) => {
-                setOverlayData(analyst ? {
-                    priceTargets: analyst.priceTargets || null,
-                    grades: analyst.grades || [],
-                } : null);
-            })
-            .catch((err) => {
-                if (err?.name === 'CanceledError' || err?.name === 'AbortError') return;
-                setOverlayData(null);
-            });
-        return () => ac.abort();
-    }, [selectedStock]);
-
-    // Poll market status (60s interval)
-    useEffect(() => {
-        const loadStatus = () => fetchMarketStatus().then(setMarketStatus).catch(() => { });
-        loadStatus();
-        const id = setInterval(() => { if (!document.hidden) loadStatus(); }, 60000);
-        return () => clearInterval(id);
-    }, []);
-
-    // Handler for latest WS bar data, updating the realtime price
+    // WebSocket Update Handler (mutates local realTimePrice state)
     const stockInfoRef = useRef(stockInfo);
     useEffect(() => { stockInfoRef.current = stockInfo; }, [stockInfo]);
 
