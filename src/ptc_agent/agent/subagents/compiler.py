@@ -17,7 +17,6 @@ from ptc_agent.agent.middleware.skills.content import load_skill_content
 from ptc_agent.agent.middleware.skills.registry import SKILL_REGISTRY
 from ptc_agent.agent.prompts import build_tool_summary_from_registry, get_loader
 from ptc_agent.agent.subagents.definition import SubagentDefinition
-from src.utils.storage import is_storage_enabled
 
 logger = structlog.get_logger(__name__)
 
@@ -121,7 +120,6 @@ class SubagentCompiler:
             "current_time": self._current_time,
             "thread_id": self._thread_id,
             "max_iterations": defn.max_iterations,
-            "storage_enabled": is_storage_enabled(),
             "user_profile": self._user_profile,
         }
 
