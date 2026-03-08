@@ -30,6 +30,7 @@ export function useDashboardData() {
     queryKey: ['dashboard', 'marketStatus'],
     queryFn: fetchMarketStatus,
     refetchInterval: 60000,
+    refetchIntervalInBackground: false,
     staleTime: 30000,
   });
 
@@ -47,6 +48,7 @@ export function useDashboardData() {
     // without populating the cache as "fresh", thereby triggering an immediate background fetch
     placeholderData: () => INDEX_SYMBOLS.map((s) => fallbackIndex(normalizeIndexSymbol(s))),
     refetchInterval: isMarketOpen ? 30000 : 60000,
+    refetchIntervalInBackground: false,
     staleTime: 10000,
   });
 

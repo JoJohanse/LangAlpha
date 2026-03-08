@@ -25,34 +25,22 @@ export function useStockData({
         queryKey: ['stockQuote', selectedStock],
         queryFn: async ({ signal }) => {
             if (!selectedStock) return null;
-            try {
-                const data = await fetchStockQuote(selectedStock, { signal });
+            const data = await fetchStockQuote(selectedStock, { signal });
 
-                // Side effects mapping for WS refs
-                if (data.snapshot) {
-                    if (data.snapshot.previous_close != null && setPreviousClose) {
-                        setPreviousClose(selectedStock, data.snapshot.previous_close);
-                    }
-                    if (data.snapshot.open != null && setDayOpen) {
-                        setDayOpen(selectedStock, data.snapshot.open);
-                    }
+            // Side effects mapping for WS refs
+            if (data.snapshot) {
+                if (data.snapshot.previous_close != null && setPreviousClose) {
+                    setPreviousClose(selectedStock, data.snapshot.previous_close);
                 }
-                return data;
-            } catch (error) {
-                // If the stock is bogus or fetch fails, fallback so UI has skeleton data
-                return {
-                    stockInfo: {
-                        Symbol: selectedStock,
-                        Name: `${selectedStock} Corp`,
-                        Exchange: 'NASDAQ',
-                    },
-                    realTimePrice: null,
-                    snapshot: null,
-                };
+                if (data.snapshot.open != null && setDayOpen) {
+                    setDayOpen(selectedStock, data.snapshot.open);
+                }
             }
+            return data;
         },
         // Polling: disabled if WS is streaming real-time, otherwise poll every 60s
         refetchInterval: wsStatus === 'connected' ? false : 60000,
+        refetchIntervalInBackground: false,
         enabled: !!selectedStock,
         staleTime: 1000 * 10, // 10s fresh cache 
     });
@@ -99,6 +87,7 @@ export function useStockData({
         queryKey: ['dashboard', 'marketStatus'], // Matches cached value from useDashboardData
         queryFn: fetchMarketStatus,
         refetchInterval: 60000,
+        refetchIntervalInBackground: false,
         staleTime: 30000,
     });
 

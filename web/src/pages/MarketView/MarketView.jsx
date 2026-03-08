@@ -401,6 +401,7 @@ function MarketViewInner() {
               earningsData={overviewData?.earningsSurprises || null}
               overlayData={overlayData}
               stockMeta={chartMeta}
+              snapshot={snapshotData}
               liveTick={wsPrices.get(selectedStock)?.barData || null}
               wsStatus={wsStatus}
               ginlixDataEnabled={ginlixDataEnabled}

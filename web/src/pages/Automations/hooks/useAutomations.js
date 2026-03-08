@@ -13,6 +13,7 @@ export function useAutomations({ status } = {}) {
       return { automations: data.automations, total: data.total };
     },
     refetchInterval: POLL_INTERVAL,
+    refetchIntervalInBackground: false,
     staleTime: 5000,
   });
 

@@ -60,6 +60,7 @@ export function usePortfolioData() {
       return { rows: [], hasRealHoldings: false };
     },
     refetchInterval: 60000,
+    refetchIntervalInBackground: false,
     staleTime: 1000 * 30, // 30s fresh cache
   });
 

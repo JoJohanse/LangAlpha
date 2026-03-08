@@ -12,6 +12,7 @@ export function useExecutions(automationId) {
     },
     enabled: !!automationId,
     refetchInterval: POLL_INTERVAL,
+    refetchIntervalInBackground: false,
     staleTime: 5000,
   });
 

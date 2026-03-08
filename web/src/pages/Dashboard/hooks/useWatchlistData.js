@@ -52,6 +52,7 @@ export function useWatchlistData() {
       return { rows: combined, currentWatchlistId: watchlistId };
     },
     refetchInterval: 60000,
+    refetchIntervalInBackground: false,
     staleTime: 1000 * 30, // 30s fresh
   });
 
