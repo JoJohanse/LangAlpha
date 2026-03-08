@@ -3216,7 +3216,7 @@ export function useChatMessages(workspaceId, initialThreadId = null, updateTodoL
    * Helper: run a checkpoint-based stream (shared by edit, regenerate, retry).
    * Sets up assistant placeholder, event processor, and handles the stream lifecycle.
    */
-  const streamFromCheckpoint = useCallback(async (message, checkpointId, truncateIndex, forkFromTurn = null) => {
+  const streamFromCheckpoint = useCallback(async (message, checkpointId, truncateIndex, forkFromTurn = null, modelOptions = {}) => {
     if (isLoading) return;
 
     setIsLoading(true);
@@ -3278,7 +3278,10 @@ export function useChatMessages(workspaceId, initialThreadId = null, updateTodoL
         undefined, // locale
         undefined, // timezone
         checkpointId,
-        forkFromTurn
+        forkFromTurn,
+        modelOptions.model || null,
+        modelOptions.reasoningEffort || null,
+        modelOptions.fastMode || null
       );
 
       if (result?.disconnected) {
@@ -3324,7 +3327,7 @@ export function useChatMessages(workspaceId, initialThreadId = null, updateTodoL
    * Edit a user message: truncate to before that message, send modified content
    * from the checkpoint before the original message was added.
    */
-  const handleEditMessage = useCallback(async (messageId, newContent) => {
+  const handleEditMessage = useCallback(async (messageId, newContent, modelOptions = {}) => {
     if (!newContent?.trim()) return;
 
     const msgIndex = messages.findIndex((m) => m.id === messageId);
@@ -3346,14 +3349,14 @@ export function useChatMessages(workspaceId, initialThreadId = null, updateTodoL
       return;
     }
 
-    await streamFromCheckpoint(newContent, checkpointId, msgIndex, turnIndex);
+    await streamFromCheckpoint(newContent, checkpointId, msgIndex, turnIndex, modelOptions);
   }, [messages, getTurnCheckpoints, streamFromCheckpoint]);
 
   /**
    * Regenerate an assistant response: truncate the assistant message,
    * re-run from the checkpoint that has the user message but before AI response.
    */
-  const handleRegenerate = useCallback(async (messageId) => {
+  const handleRegenerate = useCallback(async (messageId, modelOptions = {}) => {
     const msgIndex = messages.findIndex((m) => m.id === messageId);
     if (msgIndex === -1) return;
 
@@ -3369,13 +3372,13 @@ export function useChatMessages(workspaceId, initialThreadId = null, updateTodoL
 
     const checkpointId = turnsData.turns[turnIndex].regenerate_checkpoint_id;
     // Truncate at the assistant message (keep everything before it, including user msg)
-    await streamFromCheckpoint(null, checkpointId, msgIndex, turnIndex);
+    await streamFromCheckpoint(null, checkpointId, msgIndex, turnIndex, modelOptions);
   }, [messages, getTurnCheckpoints, streamFromCheckpoint]);
 
   /**
    * Retry the last failed/errored turn from the latest checkpoint.
    */
-  const handleRetry = useCallback(async () => {
+  const handleRetry = useCallback(async (modelOptions = {}) => {
     const turnsData = await getTurnCheckpoints();
     const checkpointId = turnsData?.retry_checkpoint_id;
     if (!checkpointId) {
@@ -3394,7 +3397,7 @@ export function useChatMessages(workspaceId, initialThreadId = null, updateTodoL
 
     // Retry overwrites the last turn
     const forkFromTurn = turnsData.turns.length - 1;
-    await streamFromCheckpoint(null, checkpointId, truncateIndex, forkFromTurn);
+    await streamFromCheckpoint(null, checkpointId, truncateIndex, forkFromTurn, modelOptions);
   }, [messages, getTurnCheckpoints, streamFromCheckpoint]);
 
   // ==================== Feedback ====================

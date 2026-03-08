@@ -233,6 +233,9 @@ const ChatInput = forwardRef(function ChatInput({
 
   // Expose addContext method for external callers (e.g. FilePanel, message selection)
   useImperativeHandle(ref, () => ({
+    getModelOptions() {
+      return { model: selectedModel, reasoningEffort, fastMode };
+    },
     addContext({ path, snippet, label, lineStart, lineEnd, lineCount, source }) {
       if (snippet) {
         // Snippet context — add pill with snippet data, don't modify textarea
@@ -261,7 +264,7 @@ const ChatInput = forwardRef(function ChatInput({
       setMessage(text);
       setTimeout(() => textareaRef.current?.focus(), 0);
     },
-  }), []);
+  }), [selectedModel, reasoningEffort, fastMode]);
 
   // Workspace dropdown
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
