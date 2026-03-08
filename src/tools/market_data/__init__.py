@@ -17,6 +17,9 @@ from .tool import (
     get_stock_daily_prices,
     get_company_overview,
     get_market_indices,
+    get_market_movers,
+    get_options_chain,
+    get_options_prices,
     get_sector_performance,
     screen_stocks,
 )
@@ -25,6 +28,9 @@ __all__ = [
     "get_stock_daily_prices",
     "get_company_overview",
     "get_market_indices",
+    "get_market_movers",
+    "get_options_chain",
+    "get_options_prices",
     "get_sector_performance",
     "screen_stocks",
 ]

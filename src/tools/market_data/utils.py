@@ -18,7 +18,7 @@ def get_market_session() -> Tuple[str, datetime]:
 
     Returns:
         Tuple of (session_name, current_et_time)
-        session_name: "REGULAR_HOURS", "AFTER_HOURS", or "CLOSED"
+        session_name: "PRE_MARKET", "REGULAR_HOURS", "AFTER_HOURS", or "CLOSED"
     """
     # Get current time in US Eastern Time
     et_tz = pytz.timezone("US/Eastern")
@@ -32,18 +32,17 @@ def get_market_session() -> Tuple[str, datetime]:
     current_time = now_et.time()
 
     # Market hours in ET
-    # Pre-market: 4:00 AM - 9:30 AM
-    # Regular hours: 9:30 AM - 4:00 PM
-    # After hours: 4:00 PM - 8:00 PM
-
-    market_open = time(9, 30)  # 9:30 AM
-    market_close = time(16, 0)  # 4:00 PM
+    pre_market_open = time(4, 0)   # 4:00 AM
+    market_open = time(9, 30)      # 9:30 AM
+    market_close = time(16, 0)     # 4:00 PM
     after_hours_close = time(20, 0)  # 8:00 PM
 
     if market_open <= current_time < market_close:
         return "REGULAR_HOURS", now_et
     elif market_close <= current_time < after_hours_close:
         return "AFTER_HOURS", now_et
+    elif pre_market_open <= current_time < market_open:
+        return "PRE_MARKET", now_et
     else:
         return "CLOSED", now_et
 

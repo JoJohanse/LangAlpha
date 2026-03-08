@@ -7,11 +7,15 @@ The actual business logic is implemented in implementations.py.
 
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
 from .implementations import (
     fetch_company_overview,
     fetch_market_indices,
+    fetch_market_movers,
+    fetch_options_chain,
+    fetch_options_prices,
     fetch_sector_performance,
     fetch_stock_daily_prices,
     fetch_stock_screener,
@@ -21,6 +25,7 @@ from .implementations import (
 @tool(response_format="content_and_artifact")
 async def get_stock_daily_prices(
     symbol: str,
+    config: RunnableConfig,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     limit: Optional[int] = None,
@@ -70,7 +75,7 @@ async def get_stock_daily_prices(
         tencent = get_stock_daily_prices("0700.HK", limit=60)
     """
     content, artifact = await fetch_stock_daily_prices(
-        symbol, start_date, end_date, limit
+        symbol, start_date, end_date, limit, config=config
     )
     return content, artifact
 
@@ -78,6 +83,7 @@ async def get_stock_daily_prices(
 @tool(response_format="content_and_artifact")
 async def get_company_overview(
     symbol: str,
+    config: RunnableConfig,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Get comprehensive investment analysis overview for a company.
@@ -97,7 +103,9 @@ async def get_company_overview(
 
     Returns:
         Formatted string with comprehensive investment intelligence including:
-        - Real-time quote (market status, price, day range, 52-week range, volume, after-hours)
+        - Real-time quote with market status (Pre-Market / Regular / After-Hours / Closed)
+        - Regular session close price and extended-hours current price (when applicable)
+        - Share structure: float shares, short interest, short % of float, days to cover
         - Company basic information (name, sector, market cap, price)
         - Stock price performance (1D, 5D, 1M, 3M, 6M, YTD, 1Y, 3Y, 5Y returns)
         - Key financial metrics (valuation, profitability, leverage ratios)
@@ -117,12 +125,13 @@ async def get_company_overview(
         # Get overview for Alibaba (HK)
         baba_overview = get_company_overview("9988.HK")
     """
-    content, artifact = await fetch_company_overview(symbol)
+    content, artifact = await fetch_company_overview(symbol, config=config)
     return content, artifact
 
 
 @tool(response_format="content_and_artifact")
 async def get_market_indices(
+    config: RunnableConfig,
     indices: Optional[List[str]] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -176,7 +185,9 @@ async def get_market_indices(
             end_date="2024-12-31"
         )
     """
-    content, artifact = await fetch_market_indices(indices, start_date, end_date, limit)
+    content, artifact = await fetch_market_indices(
+        indices, start_date, end_date, limit, config=config
+    )
     return content, artifact
 
 
@@ -303,4 +314,111 @@ async def screen_stocks(
         is_actively_trading=is_actively_trading,
         limit=limit,
     )
+    return content, artifact
+
+
+@tool(response_format="content_and_artifact")
+async def get_options_chain(
+    underlying: str,
+    config: RunnableConfig,
+    contract_type: Optional[str] = None,
+    expiration_date: Optional[str] = None,
+    strike_min: Optional[float] = None,
+    strike_max: Optional[float] = None,
+    limit: int = 20,
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Get options contracts for an underlying ticker.
+
+    Retrieves available options contracts with filtering by type, expiration, and strike price.
+
+    Args:
+        underlying: Underlying ticker symbol (e.g., "AAPL", "TSLA")
+        contract_type: Filter by "call" or "put" (default: both)
+        expiration_date: Filter by exact expiration date (YYYY-MM-DD)
+        strike_min: Minimum strike price filter
+        strike_max: Maximum strike price filter
+        limit: Maximum number of contracts to return (default 20)
+
+    Returns:
+        Formatted markdown table of options contracts with ticker, type, strike,
+        expiry, and exercise style.
+
+    Example:
+        # Get AAPL call options
+        get_options_chain("AAPL", contract_type="call", limit=10)
+
+        # Get TSLA options with strike between $200-$300
+        get_options_chain("TSLA", strike_min=200, strike_max=300)
+    """
+    content, artifact = await fetch_options_chain(
+        underlying, contract_type, expiration_date, strike_min, strike_max, limit,
+        config=config,
+    )
+    return content, artifact
+
+
+@tool(response_format="content_and_artifact")
+async def get_options_prices(
+    options_ticker: str,
+    config: RunnableConfig,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    interval: str = "1hour",
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Get OHLCV price data for a specific options contract.
+
+    Retrieves historical price bars for an options contract ticker.
+
+    Args:
+        options_ticker: Options contract ticker (e.g., "O:AAPL251219C00150000")
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        interval: Bar interval - "1min", "5min", "15min", "30min", "1hour", "4hour"
+            (default "1hour")
+
+    Returns:
+        - Short series (<=20 bars): Markdown table with time, OHLCV
+        - Long series (>20 bars): Summary with open/close, high/low, avg volume, change%
+
+    Example:
+        # Get hourly prices for an AAPL call option
+        get_options_prices("O:AAPL251219C00150000")
+
+        # Get 5-minute bars for a specific date range
+        get_options_prices("O:TSLA260116P00200000", start_date="2025-12-01",
+                          end_date="2025-12-05", interval="5min")
+    """
+    content, artifact = await fetch_options_prices(
+        options_ticker, start_date, end_date, interval, config=config,
+    )
+    return content, artifact
+
+
+@tool(response_format="content_and_artifact")
+async def get_market_movers(
+    config: RunnableConfig,
+    direction: str = "gainers",
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Get top market movers - biggest gainers or losers.
+
+    Returns the top 20 stocks with the largest percentage change in the US market.
+    Results are filtered to include only tickers with significant trading volume.
+
+    Args:
+        direction: Either "gainers" or "losers" (default "gainers")
+
+    Returns:
+        Ranked markdown table with symbol, name, price, and change percentage.
+
+    Example:
+        # Get today's biggest gainers
+        get_market_movers("gainers")
+
+        # Get today's biggest losers
+        get_market_movers("losers")
+    """
+    content, artifact = await fetch_market_movers(direction, config=config)
     return content, artifact

@@ -23,7 +23,14 @@ import importlib
 from typing import Any
 
 from .fmp import FMPClient
-from .base import MarketDataSource, NewsDataSource, PriceDataProvider  # noqa: F401 — re-export alias
+from .base import (  # noqa: F401 — re-export
+    FinancialDataSource,
+    MarketDataSource,
+    MarketIntelSource,
+    NewsDataSource,
+    PriceDataProvider,
+)
+from .financial_data_provider import FinancialDataProvider  # noqa: F401 — re-export
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +189,52 @@ async def get_news_data_provider():
 
         _news_data_provider = NewsDataProvider(sources)
         return _news_data_provider
+
+
+# ---------------------------------------------------------------------------
+# Financial data provider factory
+# ---------------------------------------------------------------------------
+
+_financial_data_provider: FinancialDataProvider | None = None
+_financial_data_provider_lock = asyncio.Lock()
+
+
+async def get_financial_data_provider() -> FinancialDataProvider:
+    """Return the active :class:`FinancialDataProvider` singleton.
+
+    Builds the composite from available backends:
+    - :class:`FMPFinancialSource` if ``FMP_API_KEY`` is set.
+    - :class:`GinlixMarketIntelSource` if ``GINLIX_DATA_URL`` is configured.
+    """
+    global _financial_data_provider
+    if _financial_data_provider is not None:
+        return _financial_data_provider
+
+    async with _financial_data_provider_lock:
+        if _financial_data_provider is not None:
+            return _financial_data_provider
+
+        financial: FinancialDataSource | None = None
+        intel: MarketIntelSource | None = None
+
+        if _fmp_available():
+            from .fmp import get_fmp_client
+            from .fmp.financial_source import FMPFinancialSource
+
+            fmp_client = await get_fmp_client()
+            financial = FMPFinancialSource(fmp_client)
+            logger.info("financial_data.source.registered | name=fmp (FinancialDataSource)")
+
+        if _ginlix_data_available():
+            from .ginlix_data import get_ginlix_data_client
+            from .ginlix_data.market_intel_source import GinlixMarketIntelSource
+
+            client = await get_ginlix_data_client()
+            intel = GinlixMarketIntelSource(client)
+            logger.info("financial_data.source.registered | name=ginlix-data (MarketIntelSource)")
+
+        _financial_data_provider = FinancialDataProvider(financial=financial, intel=intel)
+        return _financial_data_provider
 
 
 class FinancialDataBackendError(RuntimeError):

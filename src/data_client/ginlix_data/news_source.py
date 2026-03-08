@@ -1,4 +1,4 @@
-"""News data source backed by ginlix-data (Polygon.io)."""
+"""News data source backed by ginlix-data."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize_article(raw: dict[str, Any]) -> dict[str, Any]:
-    """Map Polygon article schema → common NewsArticle dict."""
+    """Map ginlix-data article schema → common NewsArticle dict."""
     publisher = raw.get("publisher") or {}
     return {
         "id": str(raw.get("id", "")),
