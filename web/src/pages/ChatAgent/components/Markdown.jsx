@@ -10,7 +10,7 @@ import SyntaxHighlighter, { oneDark, oneLight } from './SyntaxHighlighter';
 import { Copy, Check } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 import WorkspaceImage from './WorkspaceImage';
-import { isFilePath, normalizeFilePath } from './FileCard';
+import { isFilePath, isImagePath, normalizeFilePath } from './FileCard';
 
 // --- CodeBlock component ---
 function CodeBlock({ language, code, compact = false }) {
@@ -494,8 +494,12 @@ function Markdown({ content, variant = 'panel', className = '', style, onOpenFil
 
   const components = useMemo(() => {
     if (!onOpenFile && variant !== 'chat') return config.components;
-    const fileAwareA = ({ node, href, ...props }) => {
+    const fileAwareA = ({ node, href, children, ...props }) => {
       if (isFilePath(href)) {
+        // Image file linked as [name](path.png) — render as embedded image
+        if (isImagePath(href)) {
+          return <WorkspaceImage src={normalizeFilePath(href)} alt={typeof children === 'string' ? children : ''} />;
+        }
         if (onOpenFile) {
           return (
             <a
@@ -503,14 +507,14 @@ function Markdown({ content, variant = 'panel', className = '', style, onOpenFil
               style={{ color: 'var(--color-accent-primary)' }}
               onClick={(e) => { e.preventDefault(); onOpenFile(normalizeFilePath(href)); }}
               {...props}
-            />
+            >{children}</a>
           );
         }
         // No onOpenFile handler — render as non-clickable text
-        return <span {...props} />;
+        return <span {...props}>{children}</span>;
       }
       // External URL — default behavior
-      return config.components.a({ node, href, ...props });
+      return config.components.a({ node, href, children, ...props });
     };
     return { ...config.components, a: fileAwareA };
   }, [onOpenFile, variant, config.components]);

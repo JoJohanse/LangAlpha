@@ -750,6 +750,7 @@ class BackgroundTaskManager:
         user_id: str,
         timeout: float = 120.0,
         is_byok: bool = False,
+        sandbox=None,
     ) -> None:
         """Collect subagent results for a specific turn's tasks.
 
@@ -797,7 +798,7 @@ class BackgroundTaskManager:
             if all_subagent_events:
                 await self._persist_collected_events(
                     main_chunks, all_subagent_events, response_id,
-                    thread_id, workspace_id, user_id,
+                    thread_id, workspace_id, user_id, sandbox=sandbox,
                 )
 
             if not pending:
@@ -851,7 +852,7 @@ class BackgroundTaskManager:
                 if all_subagent_events:
                     await self._persist_collected_events(
                         main_chunks, all_subagent_events, response_id,
-                        thread_id, workspace_id, user_id,
+                        thread_id, workspace_id, user_id, sandbox=sandbox,
                     )
 
             # Release claim on tasks that timed out so a future collector can retry
@@ -1084,6 +1085,7 @@ class BackgroundTaskManager:
                                 workspace_id=workspace_id,
                                 user_id=user_id,
                                 is_byok=metadata.get("is_byok", False),
+                                sandbox=metadata.get("sandbox"),
                             ),
                             name=f"subagent-collector-{thread_id}-post-tail",
                         )
@@ -1460,6 +1462,7 @@ class BackgroundTaskManager:
         thread_id: str,
         workspace_id: str,
         user_id: str,
+        sandbox=None,
     ) -> None:
         """Clean and persist main + subagent events to DB.
 
@@ -1478,6 +1481,21 @@ class BackgroundTaskManager:
             cleaned.append(e)
 
         updated_chunks = main_chunks + cleaned
+
+        # Capture sandbox images from subagent events → upload to cloud storage
+        if sandbox:
+            try:
+                from src.server.services.persistence.image_capture import (
+                    capture_and_rewrite_images,
+                )
+
+                await capture_and_rewrite_images(
+                    updated_chunks, sandbox, thread_id=thread_id,
+                )
+            except Exception:
+                logger.warning(
+                    "[IMAGE_CAPTURE] Hook B failed", exc_info=True,
+                )
 
         from src.server.services.persistence.conversation import (
             ConversationPersistenceService,

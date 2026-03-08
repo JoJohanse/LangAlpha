@@ -2003,6 +2003,22 @@ async def astream_ptc_workflow(
 
                 # Persist completion to database
                 _sse_events = _handler.get_sse_events() if _handler else None
+
+                # Capture sandbox images → upload to cloud storage → rewrite storage URLs
+                if _sse_events and session and session.sandbox:
+                    try:
+                        from src.server.services.persistence.image_capture import (
+                            capture_and_rewrite_images,
+                        )
+
+                        await capture_and_rewrite_images(
+                            _sse_events, session.sandbox, thread_id=thread_id,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "[IMAGE_CAPTURE] Hook A failed", exc_info=True,
+                        )
+
                 await _persistence_service.persist_completion(
                     metadata={
                         "workspace_id": request.workspace_id,
@@ -2068,6 +2084,7 @@ async def astream_ptc_workflow(
                 "workspace_id": workspace_id,
                 "user_id": user_id,
                 "sandbox_id": sandbox_id,
+                "sandbox": session.sandbox if session else None,
                 "started_at": datetime.now().isoformat(),
                 "start_time": start_time,
                 "msg_type": "ptc",

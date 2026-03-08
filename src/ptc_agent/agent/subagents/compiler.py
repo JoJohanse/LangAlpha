@@ -17,7 +17,7 @@ from ptc_agent.agent.middleware.skills.content import load_skill_content
 from ptc_agent.agent.middleware.skills.registry import SKILL_REGISTRY
 from ptc_agent.agent.prompts import build_tool_summary_from_registry, get_loader
 from ptc_agent.agent.subagents.definition import SubagentDefinition
-from ptc_agent.utils.storage.storage_uploader import is_storage_enabled
+from src.utils.storage import is_storage_enabled
 
 logger = structlog.get_logger(__name__)
 

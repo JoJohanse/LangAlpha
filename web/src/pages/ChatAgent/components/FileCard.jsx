@@ -32,6 +32,17 @@ export function normalizeFilePath(path) {
   return path.replace(/^\/home\/daytona\//, '');
 }
 
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp']);
+
+/**
+ * Check if an href points to an image file.
+ */
+export function isImagePath(href) {
+  if (!href) return false;
+  const ext = href.split('.').pop()?.split(/[?#]/)[0]?.toLowerCase();
+  return ext && IMAGE_EXTS.has(ext);
+}
+
 /**
  * Extract file paths from message text.
  * Matches patterns like dir/file.ext, dir/subdir/file.ext, /home/daytona/results/file.ext.
