@@ -20,7 +20,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi import File, UploadFile
 from pydantic import BaseModel
-from src.ptc_agent.utils.storage.r2_uploader import upload_bytes, get_public_url
+from src.utils.storage import get_public_url, upload_bytes
 
 from src.server.auth.jwt_bearer import get_current_auth_info, AuthInfo
 from src.server.database.user import (

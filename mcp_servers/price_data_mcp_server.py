@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Price Data MCP Server.
 
-Provides normalized OHLCV time series data via MCP.
+Provides normalized OHLCV time series data and short sale analytics via MCP.
 
 Design goals:
 - Small, stable tool surface (high PTC value)
@@ -12,19 +12,53 @@ Design goals:
 Tools:
 - get_stock_data: stock OHLCV
 - get_asset_data: stock/commodity/crypto/forex OHLCV
+- get_short_data: short interest (bi-monthly) and short volume (daily)
 """
 
 from __future__ import annotations
 
+import os
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
+import httpx
 from mcp.server.fastmcp import FastMCP
 
-from data_client.fmp import get_fmp_client, fmp_lifespan
+from data_client.fmp import get_fmp_client, close_fmp_client
 
 
-mcp = FastMCP("PriceDataMCP", lifespan=fmp_lifespan)
+# ---------------------------------------------------------------------------
+# Ginlix-data client (optional — for short data)
+# ---------------------------------------------------------------------------
+
+_ginlix_http: httpx.AsyncClient | None = None
+
+
+@asynccontextmanager
+async def _lifespan(app):
+    global _ginlix_http
+    ginlix_url = os.getenv("GINLIX_DATA_URL", "")
+    if ginlix_url:
+        headers: dict[str, str] = {}
+        token = os.getenv("INTERNAL_SERVICE_TOKEN", "")
+        if token:
+            headers["X-Service-Token"] = token
+        _ginlix_http = httpx.AsyncClient(
+            base_url=ginlix_url.rstrip("/"),
+            headers=headers,
+            timeout=30.0,
+        )
+    try:
+        yield
+    finally:
+        if _ginlix_http:
+            await _ginlix_http.aclose()
+            _ginlix_http = None
+        await close_fmp_client()
+
+
+mcp = FastMCP("PriceDataMCP", lifespan=_lifespan)
 
 
 _INTRADAY_INTERVALS_STOCK = {"1min", "5min", "15min", "30min", "1hour", "4hour"}
@@ -250,6 +284,75 @@ async def get_asset_data(
         "rows": normalized,
         "source": "fmp",
     }
+
+
+@mcp.tool()
+async def get_short_data(
+    symbol: str,
+    data_type: Literal["short_interest", "short_volume", "both"] = "both",
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    limit: int = 20,
+) -> dict:
+    """Get short interest and/or short volume data for a stock.
+
+    Short interest is reported bi-monthly by FINRA (settlement_date).
+    Short volume is reported daily from off-exchange venues (date).
+
+    Args:
+        symbol: Stock ticker (e.g., AAPL, GME, AMC)
+        data_type: "short_interest", "short_volume", or "both" (default)
+        from_date: YYYY-MM-DD start date filter (optional)
+        to_date: YYYY-MM-DD end date filter (optional)
+        limit: Max records per type (default 20, max 50000)
+
+    Returns:
+        dict with short_interest and/or short_volume arrays (newest first).
+        short_interest fields: ticker, settlement_date, short_interest, avg_daily_volume, days_to_cover
+        short_volume fields: ticker, date, short_volume, total_volume, short_volume_ratio, exempt_volume, non_exempt_volume
+    """
+    if _ginlix_http is None:
+        return {"error": "Short data requires ginlix-data. Set GINLIX_DATA_URL to enable."}
+
+    result: dict[str, Any] = {"symbol": symbol, "source": "ginlix-data"}
+
+    if data_type in ("short_interest", "both"):
+        params: dict[str, Any] = {
+            "ticker": symbol, "limit": limit, "sort": "settlement_date.desc",
+        }
+        if from_date:
+            params["settlement_date.gte"] = from_date
+        if to_date:
+            params["settlement_date.lte"] = to_date
+        try:
+            resp = await _ginlix_http.get(
+                "/api/v1/data/stocks/short-interest", params=params,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            result["short_interest"] = body.get("results", [])
+        except Exception as e:  # noqa: BLE001
+            result["short_interest_error"] = str(e)
+
+    if data_type in ("short_volume", "both"):
+        params = {
+            "ticker": symbol, "limit": limit, "sort": "date.desc",
+        }
+        if from_date:
+            params["date.gte"] = from_date
+        if to_date:
+            params["date.lte"] = to_date
+        try:
+            resp = await _ginlix_http.get(
+                "/api/v1/data/stocks/short-volume", params=params,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            result["short_volume"] = body.get("results", [])
+        except Exception as e:  # noqa: BLE001
+            result["short_volume_error"] = str(e)
+
+    return result
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import {
 } from 'recharts';
 import { fetchStockData } from '../../../MarketView/utils/api';
 import { utcMsToChartSec } from '@/lib/utils';
+import { Sunrise, Sunset } from 'lucide-react';
 import { useTheme } from '../../../../contexts/ThemeContext';
 import { useTranslation } from 'react-i18next';
 
@@ -58,6 +59,10 @@ const formatPct = (val) => {
 const toChartTime = (val) => {
   if (val == null) return val;
   if (typeof val === 'number') return utcMsToChartSec(val); // Unix ms → ET chart seconds
+  // Intraday datetime string "YYYY-MM-DD HH:MM:SS" → Unix seconds
+  if (val.includes(' ') || val.includes('T')) {
+    return Math.floor(new Date(val + 'Z').getTime() / 1000);
+  }
   return val; // daily date string, lightweight-charts handles it natively
 };
 
@@ -360,7 +365,7 @@ export function StockPriceChart({ data }) {
         )}
         <OpenInMarketLink symbol={data.symbol} />
       </div>
-      <div ref={containerRef} style={{ width: '100%', height: 360 }} />
+      <div ref={containerRef} className="[&_*]:outline-none" style={{ width: '100%', height: 360 }} />
       <StockStatsCard stats={data.stats} />
     </div>
   );
@@ -767,13 +772,56 @@ export function CashFlowChart({ data }) {
 
 // ─── CompanyOverviewCard ────────────────────────────────────────────
 
+const DETAIL_STATUS_ICONS = {
+  early_trading: Sunrise,
+  late_trading: Sunset,
+};
+const DETAIL_STATUS_LABELS = {
+  early_trading: 'Pre-Market',
+  open: 'Regular Hours',
+  late_trading: 'After-Hours',
+  closed: 'Market Closed',
+};
+const DETAIL_STATUS_COLORS = {
+  early_trading: '#f59e0b',
+  open: GREEN,
+  late_trading: '#3b82f6',
+  closed: TEXT_COLOR,
+};
+
 export function CompanyOverviewCard({ data }) {
   const { t } = useTranslation();
   const {
     symbol, name, quote, performance, analystRatings,
     revenueByProduct, revenueByGeo,
     quarterlyFundamentals, earningsSurprises, cashFlow,
+    float: floatData, shortInterest, shortVolume,
   } = data || {};
+
+  // Resolve display price: snapshot → regularClose, FMP fallback → price
+  const displayPrice = quote?.regularClose ?? quote?.price;
+  const displayChange = quote?.regularChange ?? quote?.change;
+  const displayChangePct = quote?.regularChangePct ?? quote?.changePct;
+  const changeColor = (displayChange ?? 0) >= 0 ? GREEN : RED;
+
+  // Extended hours
+  const marketStatus = quote?.marketStatus;
+  const isExtended = marketStatus === 'early_trading' || marketStatus === 'late_trading';
+  const extPrice = quote?.lastTradePrice;
+  const hasExtPrice = isExtended && extPrice != null && displayPrice != null && extPrice !== displayPrice;
+  const extDiff = hasExtPrice ? extPrice - displayPrice : 0;
+  const extDiffPct = hasExtPrice && displayPrice ? (extDiff / displayPrice * 100) : 0;
+
+  // Float / short interest / short volume
+  const hasFloat = floatData && typeof floatData === 'object' && floatData.free_float != null;
+  // shortInterest: single object (new) or array (legacy backward compat)
+  const latestSI = Array.isArray(shortInterest)
+    ? (shortInterest.length ? shortInterest[shortInterest.length - 1] : null)
+    : (shortInterest || null);
+  const hasSI = latestSI && latestSI.short_interest != null;
+  const siPctOfFloat = (hasSI && hasFloat && floatData.free_float)
+    ? (latestSI.short_interest / floatData.free_float * 100) : null;
+  const hasSV = shortVolume && typeof shortVolume === 'object' && shortVolume.short_volume_ratio != null;
 
   return (
     <div className="space-y-5">
@@ -786,17 +834,55 @@ export function CompanyOverviewCard({ data }) {
             </span>
             <span style={{ fontSize: 14, color: TEXT_COLOR }}>{symbol}</span>
             <OpenInMarketLink symbol={symbol} />
+            {marketStatus && (() => {
+              const StatusIcon = DETAIL_STATUS_ICONS[marketStatus];
+              return (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
+                  color: DETAIL_STATUS_COLORS[marketStatus] || TEXT_COLOR,
+                  border: `1px solid ${DETAIL_STATUS_COLORS[marketStatus] || TEXT_COLOR}`,
+                  whiteSpace: 'nowrap', marginLeft: 'auto',
+                }}>
+                  {StatusIcon && <StatusIcon size={11} />}
+                  {DETAIL_STATUS_LABELS[marketStatus] || marketStatus}
+                </span>
+              );
+            })()}
           </div>
-          <div className="flex items-baseline gap-3 mb-3">
+
+          {/* Regular close price */}
+          <div className="flex items-baseline gap-3 mb-1">
             <span style={{ fontSize: 24, fontWeight: 700, color: 'var(--color-text-primary)' }}>
-              ${quote.price?.toFixed(2) || 'N/A'}
+              ${displayPrice?.toFixed(2) || 'N/A'}
             </span>
-            {quote.change != null && (
-              <span style={{ fontSize: 14, color: quote.change >= 0 ? GREEN : RED }}>
-                {quote.change >= 0 ? '+' : ''}{quote.change?.toFixed(2)} ({quote.changePct?.toFixed(2)}%)
+            {displayChange != null && (
+              <span style={{ fontSize: 14, color: changeColor }}>
+                {displayChange >= 0 ? '+' : ''}{displayChange?.toFixed(2)} ({displayChangePct?.toFixed(2)}%)
               </span>
             )}
+            {marketStatus && hasExtPrice && (
+              <span style={{ fontSize: 11, color: TEXT_COLOR }}>Close</span>
+            )}
           </div>
+
+          {/* Extended-hours price */}
+          {hasExtPrice && (
+            <div className="flex items-center gap-2 mb-3" style={{ fontSize: 14 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', color: DETAIL_STATUS_COLORS[marketStatus] || TEXT_COLOR }}>
+                {marketStatus === 'early_trading' ? <Sunrise size={14} /> : <Sunset size={14} />}
+              </span>
+              <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                ${extPrice.toFixed(2)}
+              </span>
+              <span style={{ color: extDiff >= 0 ? GREEN : RED, fontWeight: 500 }}>
+                {extDiff >= 0 ? '+' : ''}{extDiff.toFixed(2)} ({extDiffPct >= 0 ? '+' : ''}{extDiffPct.toFixed(2)}%)
+              </span>
+            </div>
+          )}
+
+          {!hasExtPrice && <div className="mb-3" />}
+
           <div
             className="grid grid-cols-2 gap-x-6 gap-y-1"
             style={{ fontSize: 12, color: TEXT_COLOR }}
@@ -811,6 +897,44 @@ export function CompanyOverviewCard({ data }) {
             )}
             {quote.volume != null && <QuoteStat label={t('toolArtifact.volume')} value={formatNumber(quote.volume).replace('$', '')} />}
             {quote.marketCap != null && <QuoteStat label={t('toolArtifact.marketCap')} value={formatNumber(quote.marketCap)} />}
+          </div>
+        </div>
+      )}
+
+      {/* Float & Short Data */}
+      {(hasFloat || hasSI || hasSV) && (
+        <div>
+          <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 8 }}>
+            {t('toolArtifact.shareStructure', 'Share Structure')}
+          </h4>
+          <div
+            className="grid grid-cols-2 gap-x-6 gap-y-1"
+            style={{ fontSize: 12, color: TEXT_COLOR }}
+          >
+            {hasFloat && (
+              <QuoteStat label={t('toolArtifact.float', 'Float')} value={formatNumber(floatData.free_float).replace('$', '')} />
+            )}
+            {hasFloat && floatData.free_float_percent != null && (
+              <QuoteStat label={t('toolArtifact.floatPct', 'Float %')} value={`${floatData.free_float_percent.toFixed(1)}%`} />
+            )}
+            {hasSI && (
+              <QuoteStat
+                label={`${t('toolArtifact.shortInterest', 'Short Interest')}${latestSI.settlement_date ? ` (${latestSI.settlement_date})` : ''}`}
+                value={latestSI.short_interest.toLocaleString()}
+              />
+            )}
+            {siPctOfFloat != null && (
+              <QuoteStat label={t('toolArtifact.shortPctFloat', 'SI % of Float')} value={`${siPctOfFloat.toFixed(2)}%`} />
+            )}
+            {latestSI?.days_to_cover != null && (
+              <QuoteStat label={t('toolArtifact.daysToCover', 'Days to Cover')} value={latestSI.days_to_cover.toFixed(2)} />
+            )}
+            {hasSV && (
+              <QuoteStat
+                label={`${t('toolArtifact.shortVolRatio', 'Short Vol Ratio')}${shortVolume.date ? ` (${shortVolume.date})` : ''}`}
+                value={`${shortVolume.short_volume_ratio.toFixed(1)}%`}
+              />
+            )}
           </div>
         </div>
       )}
@@ -1075,7 +1199,8 @@ function MiniCandlestick({ ohlcv, height = 180 }) {
 
   // Detect if data is intraday (numeric timestamps are always intraday from our API)
   const firstBar = ohlcv?.[0];
-  const isIntraday = firstBar && (typeof (firstBar.time ?? firstBar.date) === 'number');
+  const firstTime = firstBar && (firstBar.time ?? firstBar.date);
+  const isIntraday = typeof firstTime === 'number' || (typeof firstTime === 'string' && (firstTime.includes(' ') || firstTime.includes('T')));
 
   useEffect(() => {
     if (!containerRef.current || !ohlcv?.length) return;
@@ -1138,5 +1263,5 @@ function MiniCandlestick({ ohlcv, height = 180 }) {
   }, [ohlcv, height, theme]);
 
   if (!ohlcv?.length) return null;
-  return <div ref={containerRef} style={{ width: '100%', height }} />;
+  return <div ref={containerRef} className="[&_*]:outline-none" style={{ width: '100%', height }} />;
 }

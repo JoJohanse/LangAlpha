@@ -405,6 +405,7 @@ function MarketViewInner() {
               liveTick={wsPrices.get(selectedStock)?.barData || null}
               wsStatus={wsStatus}
               ginlixDataEnabled={ginlixDataEnabled}
+              snapshot={snapshotData}
             />
           </div>
         </div>

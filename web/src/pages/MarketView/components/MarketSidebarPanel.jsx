@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { X, ChevronLeft, ChevronRight, BarChart3 } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, BarChart3, Sunrise, Sunset } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useWatchlistData } from '../../Dashboard/hooks/useWatchlistData';
 import { usePortfolioData } from '../../Dashboard/hooks/usePortfolioData';
@@ -76,7 +76,9 @@ function MarketSidebarPanel({ activeSymbol, onSymbolClick, marketStatus }) {
   const renderRows = (items, keyField, changeField, onDelete) => {
     return items.map((row) => {
       const isActive = activeSymbol && row.symbol === activeSymbol.toUpperCase();
-      const { extPct, extLabel } = getExtendedHours(row);
+      const { extPct, extType } = getExtendedHours(row);
+      // During extended hours, show close price as main; live price goes in ext line
+      const mainPrice = extType && row.previousClose != null ? row.previousClose : row.price;
       return (
         <div
           key={row[keyField]}
@@ -84,12 +86,13 @@ function MarketSidebarPanel({ activeSymbol, onSymbolClick, marketStatus }) {
           onClick={() => onSymbolClick?.(row.symbol)}
         >
           <span className="market-sidebar-row-symbol">{row.symbol}</span>
-          <span className="market-sidebar-row-price">{formatPrice(row.price)}</span>
+          <span className="market-sidebar-row-price">{formatPrice(mainPrice)}</span>
           <span className={`market-sidebar-row-change ${changeClass(row.isPositive, row[changeField])}`}>
             {formatChange(row[changeField])}
-            {extLabel && extPct != null && (
-              <span className="market-sidebar-row-ext" style={{ color: extLabel === 'PM' ? EXT_COLOR_PRE : EXT_COLOR_POST }}>
-                {extLabel}: {extPct >= 0 ? '+' : ''}{extPct.toFixed(2)}%
+            {extType && extPct != null && (
+              <span className="market-sidebar-row-ext" style={{ display: 'inline-flex', alignItems: 'center', gap: 2, color: extType === 'pre' ? EXT_COLOR_PRE : EXT_COLOR_POST }}>
+                {extType === 'pre' ? <Sunrise size={10} /> : <Sunset size={10} />}
+                {formatPrice(row.price)} {extPct >= 0 ? '+' : ''}{extPct.toFixed(2)}%
               </span>
             )}
           </span>

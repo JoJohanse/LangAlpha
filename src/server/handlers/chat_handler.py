@@ -55,6 +55,7 @@ from src.server.utils.skill_context import (
     build_skill_content,
 )
 from src.server.utils.multimodal_context import (
+    build_attachment_metadata,
     parse_multimodal_contexts,
     inject_multimodal_context,
 )
@@ -511,6 +512,7 @@ async def resolve_oauth_llm_client(
     user_id: str,
     model_name: str,
     reasoning_effort: str | None = None,
+    service_tier: str | None = None,
 ):
     """Resolve OAuth-connected LLM client. Independent of BYOK toggle."""
     from src.llms.llm import LLM as LLMFactory, create_llm
@@ -561,6 +563,7 @@ async def resolve_oauth_llm_client(
         api_key=access_token,
         default_headers=headers if headers else None,
         reasoning_effort=reasoning_effort,
+        **({"service_tier": service_tier} if service_tier and provider != "claude-oauth" else {}),
     )
 
 
@@ -599,6 +602,7 @@ async def resolve_llm_config(
     is_byok: bool,
     mode: str = "ptc",
     reasoning_effort: str | None = None,
+    fast_mode: bool | None = None,
 ):
     """
     Resolve final LLM config with priority:
@@ -673,9 +677,16 @@ async def resolve_llm_config(
     if not effective_reasoning:
         effective_reasoning = model_pref.get("reasoning_effort")
 
+    # Resolve fast mode: per-request > user pref > None
+    effective_fast = fast_mode
+    if effective_fast is None:
+        effective_fast = model_pref.get("fast_mode")
+    effective_service_tier = "priority" if effective_fast else None
+
     # Try OAuth-connected providers first (independent of BYOK toggle)
     oauth_client = await resolve_oauth_llm_client(
-        user_id, effective_model, effective_reasoning
+        user_id, effective_model, effective_reasoning,
+        service_tier=effective_service_tier,
     )
     if oauth_client:
         if config is base_config:
@@ -786,19 +797,9 @@ async def astream_flash_workflow(
         if request.additional_context:
             multimodal_ctxs = parse_multimodal_contexts(request.additional_context)
             if multimodal_ctxs:
-                att_meta = [
-                    {
-                        "name": ctx.description or "file",
-                        "type": "image"
-                        if not ctx.data.startswith("data:application/pdf")
-                        else "pdf",
-                        "size": len(ctx.data.split(",", 1)[1]) * 3 // 4
-                        if "," in ctx.data
-                        else 0,
-                    }
-                    for ctx in multimodal_ctxs
-                ]
-                query_metadata["attachments"] = att_meta
+                query_metadata["attachments"] = await build_attachment_metadata(
+                    multimodal_ctxs, thread_id
+                )
 
             # Persist lightweight additional_context (skip heavy multimodal data)
             serialized_ctx = []
@@ -864,6 +865,7 @@ async def astream_flash_workflow(
             config = await resolve_llm_config(
                 setup.agent_config, user_id, request.llm_model, is_byok, mode="flash",
                 reasoning_effort=getattr(request, "reasoning_effort", None),
+                fast_mode=getattr(request, "fast_mode", None),
             )
 
         # Propagate fetch model override to tool context
@@ -1472,19 +1474,9 @@ async def astream_ptc_workflow(
         if request.additional_context and not request.hitl_response:
             multimodal_ctxs = parse_multimodal_contexts(request.additional_context)
             if multimodal_ctxs:
-                att_meta = [
-                    {
-                        "name": ctx.description or "file",
-                        "type": "image"
-                        if not ctx.data.startswith("data:application/pdf")
-                        else "pdf",
-                        "size": len(ctx.data.split(",", 1)[1]) * 3 // 4
-                        if "," in ctx.data
-                        else 0,
-                    }
-                    for ctx in multimodal_ctxs
-                ]
-                query_metadata["attachments"] = att_meta
+                query_metadata["attachments"] = await build_attachment_metadata(
+                    multimodal_ctxs, thread_id
+                )
 
             # Persist lightweight additional_context (skip heavy multimodal data)
             serialized_ctx = []
@@ -1619,6 +1611,7 @@ async def astream_ptc_workflow(
             config = await resolve_llm_config(
                 setup.agent_config, user_id, request.llm_model, is_byok, mode="ptc",
                 reasoning_effort=getattr(request, "reasoning_effort", None),
+                fast_mode=getattr(request, "fast_mode", None),
             )
 
         # Propagate fetch model override to tool context
@@ -1991,6 +1984,22 @@ async def astream_ptc_workflow(
 
                 # Persist completion to database
                 _sse_events = _handler.get_sse_events() if _handler else None
+
+                # Capture sandbox images → upload to cloud storage → rewrite storage URLs
+                if _sse_events and session and session.sandbox:
+                    try:
+                        from src.server.services.persistence.image_capture import (
+                            capture_and_rewrite_images,
+                        )
+
+                        await capture_and_rewrite_images(
+                            _sse_events, session.sandbox, thread_id=thread_id,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "[IMAGE_CAPTURE] Hook A failed", exc_info=True,
+                        )
+
                 await _persistence_service.persist_completion(
                     metadata={
                         "workspace_id": request.workspace_id,
@@ -2056,6 +2065,7 @@ async def astream_ptc_workflow(
                 "workspace_id": workspace_id,
                 "user_id": user_id,
                 "sandbox_id": sandbox_id,
+                "sandbox": session.sandbox if session else None,
                 "started_at": datetime.now().isoformat(),
                 "start_time": start_time,
                 "msg_type": "ptc",

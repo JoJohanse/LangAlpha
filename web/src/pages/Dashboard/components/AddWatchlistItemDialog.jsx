@@ -113,25 +113,10 @@ function AddWatchlistItemDialog({
   const handleAdd = () => {
     if (!selectedStock) return;
 
-    // Validate required fields
-    if (!notes.trim()) {
-      alert('Please enter notes for this stock.');
-      return;
-    }
-    if (!priceAbove.trim() || !priceBelow.trim()) {
-      alert('Please enter both price above and price below values.');
-      return;
-    }
+    const priceAboveNum = priceAbove.trim() ? parseFloat(priceAbove) : null;
+    const priceBelowNum = priceBelow.trim() ? parseFloat(priceBelow) : null;
 
-    const priceAboveNum = parseFloat(priceAbove);
-    const priceBelowNum = parseFloat(priceBelow);
-
-    if (isNaN(priceAboveNum) || isNaN(priceBelowNum)) {
-      alert('Please enter valid numbers for price alerts.');
-      return;
-    }
-
-    if (priceAboveNum <= priceBelowNum) {
+    if (priceAboveNum != null && priceBelowNum != null && priceAboveNum <= priceBelowNum) {
       alert('Price above must be greater than price below.');
       return;
     }
@@ -141,11 +126,13 @@ function AddWatchlistItemDialog({
       instrument_type: 'stock',
       exchange: selectedStock.exchangeShortName || '',
       name: selectedStock.name || '',
-      notes: notes.trim(),
-      alert_settings: {
-        price_above: priceAboveNum,
-        price_below: priceBelowNum,
-      },
+      notes: notes.trim() || undefined,
+      alert_settings: priceAboveNum != null || priceBelowNum != null
+        ? {
+            ...(priceAboveNum != null && { price_above: priceAboveNum }),
+            ...(priceBelowNum != null && { price_below: priceBelowNum }),
+          }
+        : undefined,
     };
 
     onAdd(itemData, watchlistId);
@@ -261,7 +248,7 @@ function AddWatchlistItemDialog({
                 {/* Notes Input */}
                 <div>
                   <label className="block text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    Notes <span style={{ color: 'var(--color-loss)' }}>*</span>
+                    Notes
                   </label>
                   <Input
                     placeholder="Enter notes about this stock..."
@@ -275,7 +262,7 @@ function AddWatchlistItemDialog({
                 {/* Alert Settings */}
                 <div className="space-y-2">
                   <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                    Alert Settings <span style={{ color: 'var(--color-loss)' }}>*</span>
+                    Alert Settings
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>

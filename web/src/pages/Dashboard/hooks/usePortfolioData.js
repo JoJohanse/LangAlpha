@@ -51,6 +51,7 @@ export function usePortfolioData() {
             marketValue,
             unrealizedPlPercent: plPct,
             isPositive: plPct == null ? true : plPct >= 0,
+            previousClose: p.previousClose ?? null,
             earlyTradingChangePercent: p.earlyTradingChangePercent ?? null,
             lateTradingChangePercent: p.lateTradingChangePercent ?? null,
           };

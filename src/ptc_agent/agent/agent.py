@@ -28,6 +28,7 @@ from ptc_agent.agent.middleware import (
     create_plan_mode_interrupt_config,
     # Tool middleware
     EmptyToolCallRetryMiddleware,
+    LeakDetectionMiddleware,
     ToolArgumentParsingMiddleware,
     ToolErrorHandlingMiddleware,
     ToolResultNormalizationMiddleware,
@@ -84,7 +85,6 @@ from src.tools.market_data.tool import (
 from ptc_agent.config import AgentConfig
 from ptc_agent.core.mcp_registry import MCPRegistry
 from ptc_agent.core.sandbox import PTCSandbox
-from ptc_agent.utils.storage.storage_uploader import is_storage_enabled
 
 # Import HITL middleware for plan mode
 try:
@@ -188,7 +188,6 @@ class PTCAgent:
             user_profile=user_profile,
             max_concurrent_task_units=DEFAULT_MAX_CONCURRENT_TASK_UNITS,
             max_task_iterations=DEFAULT_MAX_TASK_ITERATIONS,
-            storage_enabled=is_storage_enabled(),
             ask_user_enabled=True,
             plan_mode=plan_mode,
             include_examples=True,
@@ -360,6 +359,7 @@ class PTCAgent:
             [
                 ToolArgumentParsingMiddleware(),
                 ToolErrorHandlingMiddleware(),
+                LeakDetectionMiddleware(mcp_servers=self.config.mcp.servers),
                 ToolResultNormalizationMiddleware(),
             ]
         )

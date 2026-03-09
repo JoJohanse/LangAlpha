@@ -15,7 +15,7 @@ import { parseErrorMessage } from '../utils/parseErrorMessage';
  * @param {boolean} props.isStreaming - Whether the message is currently streaming
  * @param {boolean} props.hasError - Whether the message has an error
  */
-function TextMessageContent({ content, isStreaming, hasError }) {
+function TextMessageContent({ content, isStreaming, hasError, onOpenFile }) {
   const displayText = useAnimatedText(content || '', { enabled: isStreaming });
 
   if (!content) {
@@ -28,7 +28,7 @@ function TextMessageContent({ content, isStreaming, hasError }) {
   }
 
   return (
-    <Markdown variant="chat" content={displayText} className="text-base" />
+    <Markdown variant="chat" content={displayText} className="text-base" onOpenFile={onOpenFile} />
   );
 }
 

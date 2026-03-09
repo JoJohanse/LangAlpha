@@ -31,7 +31,18 @@ export function getExtendedHoursInfo(marketStatus, data, { shortLabels = false }
       ? (shortLabels ? 'AH' : 'After-Hours')
       : null;
 
-  return { extPct, extLabel };
+  const extType = extLabel ? (isPreMarket && earlyPct != null ? 'pre' : 'post') : null;
+
+  // Compute extended-hours price from previousClose + extPct when available
+  const prevClose = data?.previousClose ?? data?.previous_close ?? null;
+  const extPrice = extPct != null && prevClose != null
+    ? Math.round(prevClose * (1 + extPct / 100) * 100) / 100
+    : null;
+  const extChange = extPrice != null && prevClose != null
+    ? Math.round((extPrice - prevClose) * 100) / 100
+    : null;
+
+  return { extPct, extLabel, extType, extPrice, extChange, prevClose };
 }
 
 /**

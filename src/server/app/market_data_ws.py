@@ -95,7 +95,7 @@ def _parse_ws_bar(raw_msg: str) -> Optional[dict]:
     if isinstance(msg, dict):
         ev = msg.get("ev")
         if ev in ("AM", "A"):
-            # Raw Polygon-style aggregate
+            # Raw ginlix-data aggregate
             symbol = msg.get("sym")
             o, h, l, c, v = msg.get("o"), msg.get("h"), msg.get("l"), msg.get("c"), msg.get("v")
             ts = msg.get("s") or msg.get("e")

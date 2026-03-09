@@ -199,6 +199,7 @@ class GinlixDataSource:
     def _normalize_snapshot(raw: dict[str, Any], asset_type: str = "stocks") -> dict[str, Any]:
         """Normalize a ginlix-data snapshot to the unified snapshot shape."""
         session = raw.get("session", {})
+        last_trade = raw.get("last_trade", {})
         ticker = raw.get("ticker", "")
         # For indices, reverse-map I:SPX → GSPC etc.
         if asset_type == "indices":
@@ -215,7 +216,12 @@ class GinlixDataSource:
             "low": session.get("low"),
             "volume": int(session["volume"]) if session.get("volume") is not None else None,
             "market_status": raw.get("market_status"),
+            "last_trade_price": last_trade.get("price") if last_trade else None,
+            "regular_trading_change": session.get("regular_trading_change"),
+            "regular_trading_change_percent": session.get("regular_trading_change_percent"),
+            "early_trading_change": session.get("early_trading_change"),
             "early_trading_change_percent": session.get("early_trading_change_percent"),
+            "late_trading_change": session.get("late_trading_change"),
             "late_trading_change_percent": session.get("late_trading_change_percent"),
         }
 

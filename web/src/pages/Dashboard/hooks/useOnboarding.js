@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '@/components/ui/use-toast';
-import { getCurrentUser } from '../utils/api';
+import { useAuth } from '@/contexts/AuthContext';
 import { getFlashWorkspace } from '../../ChatAgent/utils/api';
 
 const ONBOARDING_IGNORE_STORAGE_KEY = 'langalpha-onboarding-ignored-at';
@@ -38,30 +38,22 @@ export function useOnboarding() {
     const { t } = useTranslation();
     const { toast } = useToast();
 
+    const { user: authUser } = useAuth();
+
     const [showOnboardingDialog, setShowOnboardingDialog] = useState(false);
     const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
 
-    // Checks onboarding completion status strictly once at mount.
+    // Check onboarding completion reactively from auth context user data
     useEffect(() => {
-        const checkOnboarding = async () => {
-            try {
-                const userData = await getCurrentUser();
-                const onboardingCompleted = userData?.user?.onboarding_completed;
-
-                if (onboardingCompleted === true) {
-                    setShowOnboardingDialog(false);
-                    return;
-                }
-                if (onboardingCompleted === false && !isOnboardingIgnoredFor24h()) {
-                    setShowOnboardingDialog(true);
-                }
-            } catch (error) {
-                console.error('[Dashboard] Error checking onboarding status:', error);
-            }
-        };
-
-        checkOnboarding();
-    }, []);
+        if (!authUser) return;
+        if (authUser.onboarding_completed === true) {
+            setShowOnboardingDialog(false);
+            return;
+        }
+        if (authUser.onboarding_completed === false && !isOnboardingIgnoredFor24h()) {
+            setShowOnboardingDialog(true);
+        }
+    }, [authUser]);
 
     const navigateToOnboarding = useCallback(async () => {
         setIsCreatingWorkspace(true);

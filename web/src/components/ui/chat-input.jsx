@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo, forwardRef, u
 import {
   Plus, ArrowUp, X, FileText, Loader2, Archive, Square,
   ScrollText, ChartCandlestick, Zap, FileStack, ChevronDown, ChevronRight, FolderOpen, TextSelect,
-  Terminal, Bot, Shrink, HardDriveDownload, Check, Brain, Flame,
+  Terminal, Bot, Shrink, HardDriveDownload, Check, Brain, Flame, Rocket, CircleHelp,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -189,6 +189,7 @@ const ChatInput = forwardRef(function ChatInput({
   const effectiveInitialModel = initialModel || preferredModel;
   const [selectedModel, setSelectedModel] = useState(effectiveInitialModel);
   const [reasoningEffort, setReasoningEffort] = useState(null);
+  const [fastMode, setFastMode] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [showMoreModels, setShowMoreModels] = useState(false);
   const moreModelsTimeout = useRef(null);
@@ -203,6 +204,8 @@ const ChatInput = forwardRef(function ChatInput({
 
   // Fetch model metadata for compatibility checking (eager prefetch, resolves instantly after first load)
   useEffect(() => { getModelMetadata().then(setModelMetadata).catch(() => {}); }, []);
+
+  const isCodexModel = modelMetadata[selectedModel]?.sdk === 'codex';
 
   // @file mention state
   const [mentionedFiles, setMentionedFiles] = useState([]);
@@ -230,6 +233,9 @@ const ChatInput = forwardRef(function ChatInput({
 
   // Expose addContext method for external callers (e.g. FilePanel, message selection)
   useImperativeHandle(ref, () => ({
+    getModelOptions() {
+      return { model: selectedModel, reasoningEffort, fastMode };
+    },
     addContext({ path, snippet, label, lineStart, lineEnd, lineCount, source }) {
       if (snippet) {
         // Snippet context — add pill with snippet data, don't modify textarea
@@ -258,7 +264,7 @@ const ChatInput = forwardRef(function ChatInput({
       setMessage(text);
       setTimeout(() => textareaRef.current?.focus(), 0);
     },
-  }), []);
+  }), [selectedModel, reasoningEffort, fastMode]);
 
   // Workspace dropdown
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
@@ -293,6 +299,20 @@ const ChatInput = forwardRef(function ChatInput({
     if (reasoningEffort) localStorage.setItem(`reasoning_effort:${selectedModel}`, reasoningEffort);
     else localStorage.removeItem(`reasoning_effort:${selectedModel}`);
   }, [reasoningEffort, selectedModel]);
+
+  // Load per-model fast mode from localStorage
+  useEffect(() => {
+    if (!selectedModel) { setFastMode(false); return; }
+    const saved = localStorage.getItem(`fast_mode:${selectedModel}`);
+    setFastMode(saved === 'true');
+  }, [selectedModel]);
+
+  // Persist fast mode per model
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (fastMode) localStorage.setItem(`fast_mode:${selectedModel}`, 'true');
+    else localStorage.removeItem(`fast_mode:${selectedModel}`);
+  }, [fastMode, selectedModel]);
 
   // Reset isStopping when loading finishes
   useEffect(() => {
@@ -675,7 +695,7 @@ const ChatInput = forwardRef(function ChatInput({
       });
       finalMessage = finalMessage.trimEnd() + '\n' + blocks.join('\n');
     }
-    onSend(finalMessage, planMode, readyAttachments, slashCommands, { model: selectedModel, reasoningEffort });
+    onSend(finalMessage, planMode, readyAttachments, slashCommands, { model: selectedModel, reasoningEffort, fastMode });
     setMessage('');
     attachedFiles.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview); });
     setAttachedFiles([]);
@@ -973,10 +993,10 @@ const ChatInput = forwardRef(function ChatInput({
                     if (mode !== 'deep') e.currentTarget.style.background = 'transparent';
                   }}
                   type="button"
-                  title={mode === 'fast' ? 'Flash — quick answer using fast model' : 'Deep — full agent with workspace and tools'}
+                  title={mode === 'fast' ? 'Flash — quick answer using flash model' : 'Deep — full agent with workspace and tools'}
                 >
                   {mode === 'fast' ? <Zap className="h-4 w-4" /> : <FileStack className="h-4 w-4" />}
-                  <span>{mode === 'fast' ? 'Fast' : 'Deep'}</span>
+                  <span>{mode === 'fast' ? 'Flash' : 'Deep'}</span>
                 </button>
               )}
 
@@ -1089,11 +1109,13 @@ const ChatInput = forwardRef(function ChatInput({
                     title="Select model"
                   >
                     <span className="max-w-[120px] truncate">{getModelDisplayName(selectedModel) || 'Model'}</span>
+                    {fastMode && isCodexModel && <Rocket className="h-3 w-3" style={{ color: 'var(--color-accent-light)' }} />}
                     <ChevronDown className="h-3 w-3" />
                   </button>
                   {showModelMenu && (
                     <div className={`model-dropdown ${dropdownDirection === 'down' ? 'model-dropdown-down' : 'model-dropdown-up'}`}>
-                      {/* Primary menu: thread models + reasoning + "More models" */}
+                      {/* Primary menu: thread models + reasoning + "More models"
+                         Submenu direction: open left if dropdown is near right edge of viewport */}
                       {(() => {
                         const primaryModels = threadModelsProp.length > 0
                           ? [...new Set([...threadModelsProp, selectedModel].filter(Boolean))]
@@ -1135,6 +1157,27 @@ const ChatInput = forwardRef(function ChatInput({
                           ))}
                         </div>
                       </div>
+                      {isCodexModel && (
+                        <div className="model-effort-section">
+                          <span className="model-effort-label">
+                            <Rocket className="h-3.5 w-3.5" style={{ marginRight: 4, verticalAlign: '-2px', display: 'inline' }} />
+                            {t('chat.modelSelector.fastMode')}
+                            <span className="fast-mode-help-wrap">
+                              <CircleHelp className="fast-mode-help-icon" />
+                              <span className="fast-mode-help-tooltip">{t('chat.modelSelector.fastModeHelpLine1')}<br />{t('chat.modelSelector.fastModeHelpLine2')}</span>
+                            </span>
+                          </span>
+                          <button
+                            className={`fast-mode-switch ${fastMode ? 'active' : ''}`}
+                            onMouseDown={(e) => { e.preventDefault(); setFastMode((v) => !v); }}
+                            title={t('chat.modelSelector.fastModeDesc')}
+                            role="switch"
+                            aria-checked={fastMode}
+                          >
+                            <span className="fast-mode-switch-thumb" />
+                          </button>
+                        </div>
+                      )}
                       <div className="model-dropdown-separator" />
                       {/* "More models" with hover submenu */}
                       <div
@@ -1144,10 +1187,13 @@ const ChatInput = forwardRef(function ChatInput({
                       >
                         <span>{t('chat.modelSelector.moreModels')}</span>
                         <ChevronRight className="h-3.5 w-3.5" />
-                        {/* Submenu — appears on hover */}
-                        {showMoreModels && (
+                        {/* Submenu — appears on hover; opens left if near right edge */}
+                        {showMoreModels && (() => {
+                          const menuRect = modelMenuRef.current?.getBoundingClientRect();
+                          const openLeft = menuRect && menuRect.right + 244 > window.innerWidth;
+                          return (
                           <div
-                            className={`model-dropdown-submenu ${dropdownDirection === 'down' ? 'model-dropdown-submenu-down' : 'model-dropdown-submenu-up'}`}
+                            className={`model-dropdown-submenu ${dropdownDirection === 'down' ? 'model-dropdown-submenu-down' : 'model-dropdown-submenu-up'} ${openLeft ? 'model-dropdown-submenu-left' : 'model-dropdown-submenu-right'}`}
                             onMouseEnter={() => clearTimeout(moreModelsTimeout.current)}
                             onMouseLeave={() => { moreModelsTimeout.current = setTimeout(() => setShowMoreModels(false), 150); }}
                           >
@@ -1185,7 +1231,8 @@ const ChatInput = forwardRef(function ChatInput({
                               {t('chat.modelSelector.manageModels')}
                             </div>
                           </div>
-                        )}
+                          );
+                        })()}
                       </div>
                     </div>
                   )}

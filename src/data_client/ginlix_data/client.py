@@ -174,5 +174,155 @@ class GinlixDataClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def get_options_contracts(
+        self,
+        underlying_ticker: str,
+        contract_type: str | None = None,
+        expiration_date: str | None = None,
+        expiration_date_gte: str | None = None,
+        expiration_date_lte: str | None = None,
+        strike_price_gte: float | None = None,
+        strike_price_lte: float | None = None,
+        order: str | None = None,
+        sort: str | None = None,
+        limit: int = 10,
+        cursor: str | None = None,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Fetch options contracts for an underlying ticker.
+
+        ``GET /api/v1/data/options/contracts``
+        """
+        params: dict[str, Any] = {
+            "underlying_ticker": underlying_ticker,
+            "limit": limit,
+        }
+        if contract_type:
+            params["contract_type"] = contract_type
+        if expiration_date:
+            params["expiration_date"] = expiration_date
+        if expiration_date_gte:
+            params["expiration_date.gte"] = expiration_date_gte
+        if expiration_date_lte:
+            params["expiration_date.lte"] = expiration_date_lte
+        if strike_price_gte is not None:
+            params["strike_price.gte"] = strike_price_gte
+        if strike_price_lte is not None:
+            params["strike_price.lte"] = strike_price_lte
+        if order:
+            params["order"] = order
+        if sort:
+            params["sort"] = sort
+        if cursor:
+            params["cursor"] = cursor
+
+        resp = await self.http.get(
+            "/api/v1/data/options/contracts",
+            params=params,
+            headers=self._user_headers(user_id),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_option_contract(
+        self,
+        options_ticker: str,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Fetch a single options contract by ticker.
+
+        ``GET /api/v1/data/options/contracts/{options_ticker}``
+        """
+        resp = await self.http.get(
+            f"/api/v1/data/options/contracts/{options_ticker}",
+            headers=self._user_headers(user_id),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_short_interest(
+        self,
+        symbol: str,
+        limit: int = 500,
+        sort: str = "settlement_date.asc",
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch short interest data for a symbol.
+
+        ``GET /api/v1/data/stocks/short-interest``
+
+        Results are returned ascending by settlement date (default sort).
+        Use ``[-1]`` for the latest.
+        """
+        resp = await self.http.get(
+            "/api/v1/data/stocks/short-interest",
+            params={"ticker": symbol, "limit": limit, "sort": sort},
+            headers=self._user_headers(user_id),
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        return body.get("results", [])
+
+    async def get_short_volume(
+        self,
+        symbol: str,
+        limit: int = 500,
+        sort: str = "date.asc",
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch short volume data for a symbol.
+
+        ``GET /api/v1/data/stocks/short-volume``
+
+        Results are returned ascending by date (default sort).
+        Use ``[-1]`` for the latest.
+        """
+        resp = await self.http.get(
+            "/api/v1/data/stocks/short-volume",
+            params={"ticker": symbol, "limit": limit, "sort": sort},
+            headers=self._user_headers(user_id),
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        return body.get("results", [])
+
+    async def get_float(
+        self,
+        symbol: str,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Fetch float data for a symbol.
+
+        ``GET /api/v1/data/stocks/float``
+
+        Returns the first result dict (or empty dict if none).
+        """
+        resp = await self.http.get(
+            "/api/v1/data/stocks/float",
+            params={"ticker": symbol},
+            headers=self._user_headers(user_id),
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        results = body.get("results", []) if isinstance(body, dict) else []
+        return results[0] if results else {}
+
+    async def get_movers(
+        self,
+        direction: str = "gainers",
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch market movers (gainers or losers).
+
+        ``GET /api/v1/data/snapshots/movers/{direction}``
+        """
+        resp = await self.http.get(
+            f"/api/v1/data/snapshots/movers/{direction}",
+            headers=self._user_headers(user_id),
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        return body.get("results", [])
+
     async def close(self) -> None:
         await self.http.aclose()

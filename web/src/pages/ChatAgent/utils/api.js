@@ -188,7 +188,8 @@ export async function sendChatMessageStream(
   checkpointId = null,
   forkFromTurn = null,
   llmModel = null,
-  reasoningEffort = null
+  reasoningEffort = null,
+  fastMode = null
 ) {
   // For checkpoint replay (regenerate/retry), send empty messages
   const messages = checkpointId && !message
@@ -213,6 +214,7 @@ export async function sendChatMessageStream(
   }
   if (llmModel) body.llm_model = llmModel;
   if (reasoningEffort) body.reasoning_effort = reasoningEffort;
+  if (fastMode) body.fast_mode = true;
   // Use /threads/{id}/messages for existing thread, /threads/messages for new
   const isNewThread = !threadId || threadId === '__default__';
   const url = isNewThread
@@ -400,13 +402,16 @@ export async function triggerFileDownload(workspaceId, filePath) {
  * @param {Function} onEvent - Callback for each SSE event
  * @param {boolean} planMode - Whether plan mode is active (to preserve SubmitPlan tool)
  */
-export async function sendHitlResponse(workspaceId, threadId, hitlResponse, onEvent = () => {}, planMode = false) {
+export async function sendHitlResponse(workspaceId, threadId, hitlResponse, onEvent = () => {}, planMode = false, modelOptions = {}) {
   const body = {
     workspace_id: workspaceId,
     messages: [],
     hitl_response: hitlResponse,
     plan_mode: planMode,
   };
+  if (modelOptions?.model) body.llm_model = modelOptions.model;
+  if (modelOptions?.reasoningEffort) body.reasoning_effort = modelOptions.reasoningEffort;
+  if (modelOptions?.fastMode) body.fast_mode = true;
   const authHeaders = await getAuthHeaders();
   return await streamFetch(
     `/api/v1/threads/${threadId}/messages`,

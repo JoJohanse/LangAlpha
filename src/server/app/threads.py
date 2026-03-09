@@ -297,6 +297,7 @@ async def _handle_send_message(request: ChatRequest, auth: ChatRateLimited, thre
     config = await resolve_llm_config(
         setup.agent_config, user_id, request.llm_model, is_byok, mode=agent_mode,
         reasoning_effort=getattr(request, "reasoning_effort", None),
+        fast_mode=getattr(request, "fast_mode", None),
     )
 
     # is_byok reflects whether THIS request actually uses a user-provided key

@@ -101,13 +101,13 @@ const formatFileSize = (bytes) => {
 function AttachmentCard({ attachment }) {
   const att = attachment;
   const isImage = att.type?.startsWith('image/') || att.type === 'image';
-  const hasPreview = att.preview || att.dataUrl;
+  const hasPreview = att.preview || att.dataUrl || att.url;
   const ext = att.name?.split('.').pop() || '';
 
   if (isImage && hasPreview) {
     return (
       <div className="relative group flex-shrink-0 w-24 h-24 rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border-muted)', background: 'var(--color-bg-input)' }}>
-        <img src={att.preview || att.dataUrl} alt={att.name} className="w-full h-full object-cover" />
+        <img src={att.preview || att.dataUrl || att.url} alt={att.name} className="w-full h-full object-cover" />
         <div className="absolute inset-0 bg-black/20" />
       </div>
     );
@@ -525,6 +525,7 @@ function MessageBubble({ message, isLoading, hideAvatar, compactToolCalls, isSub
                 content={message.content}
                 isStreaming={message.isStreaming}
                 hasError={message.error}
+                onOpenFile={onOpenFile}
               />
             )
           )}
@@ -1048,6 +1049,7 @@ function MessageContentSegments({ segments, reasoningProcesses, toolCallProcesse
                 content={textContent}
                 isStreaming={isStreaming && blockIdx === lastTextBlockIdx && !hasAnyTrulyInProgress}
                 hasError={hasError}
+                onOpenFile={onOpenFile}
               />
             );
           }
@@ -1165,6 +1167,7 @@ function MessageContentSegments({ segments, reasoningProcesses, toolCallProcesse
                 content={segment.content}
                 isStreaming={isStreaming && isLastSegment}
                 hasError={hasError}
+                onOpenFile={onOpenFile}
               />
             </div>
           );

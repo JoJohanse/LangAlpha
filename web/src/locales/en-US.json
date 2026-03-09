@@ -314,10 +314,14 @@
       "moreModels": "More models",
       "configureModels": "Configure models →",
       "reasoningEffort": "Reasoning",
-      "effortLow": "L",
-      "effortMedium": "M",
-      "effortHigh": "H",
-      "incompatibleSdk": "Cannot switch to this model in the current session (different provider)"
+      "effortLow": "Low",
+      "effortMedium": "Medium",
+      "effortHigh": "High",
+      "incompatibleSdk": "Cannot switch to this model in the current session (different provider)",
+      "fastMode": "Fast",
+      "fastModeDesc": "Priority routing for faster responses",
+      "fastModeHelpLine1": "Equivalent to /fast in Codex",
+      "fastModeHelpLine2": "2× credit usage, priority service tier"
     }
   },
   "context": {

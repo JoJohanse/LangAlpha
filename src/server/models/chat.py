@@ -250,6 +250,11 @@ class ChatRequest(BaseModel):
         description="Override reasoning effort for this request (low/medium/high)",
     )
 
+    fast_mode: Optional[bool] = Field(
+        default=None,
+        description="When True, enables priority service tier for faster responses (Codex OAuth models only)",
+    )
+
     # External thread identity (for channel integrations like Telegram, Slack)
     external_thread_id: Optional[str] = Field(
         default=None,

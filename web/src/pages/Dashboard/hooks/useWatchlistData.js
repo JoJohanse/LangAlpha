@@ -43,6 +43,7 @@ export function useWatchlistData() {
             change: p.change ?? 0,
             changePercent: p.changePercent ?? 0,
             isPositive: p.isPositive ?? true,
+            previousClose: p.previousClose ?? null,
             earlyTradingChangePercent: p.earlyTradingChangePercent ?? null,
             lateTradingChangePercent: p.lateTradingChangePercent ?? null,
           };

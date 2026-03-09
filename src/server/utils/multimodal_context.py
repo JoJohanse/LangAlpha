@@ -5,10 +5,13 @@ Parses MultimodalContext items from additional_context and injects image/PDF
 content blocks into user messages so the LLM receives native multimodal input.
 """
 
+import asyncio
 import logging
+import uuid
 from typing import Any, Dict, List, Optional
 
 from src.server.models.additional_context import MultimodalContext
+from src.utils.storage import get_public_url, is_storage_enabled, upload_base64
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,39 @@ def parse_multimodal_contexts(
             )
 
     return contexts
+
+
+async def build_attachment_metadata(
+    contexts: List[MultimodalContext],
+    thread_id: str = "",
+) -> List[Dict[str, Any]]:
+    """Build attachment metadata dicts, uploading to storage when enabled.
+
+    Returns list of {name, type, size, url?} dicts.
+    Uploads run concurrently via asyncio.gather.
+    """
+    batch_id = uuid.uuid4().hex[:12]
+    prefix = f"attachments/{thread_id}/{batch_id}" if thread_id else f"attachments/{batch_id}"
+
+    async def _process(ctx: MultimodalContext) -> Dict[str, Any]:
+        is_pdf = ctx.data.startswith("data:application/pdf")
+        name = ctx.description or "file"
+        meta: Dict[str, Any] = {
+            "name": name,
+            "type": "pdf" if is_pdf else "image",
+            "size": len(ctx.data.split(",", 1)[1]) * 3 // 4 if "," in ctx.data else 0,
+        }
+        if is_storage_enabled():
+            try:
+                storage_key = f"{prefix}/{name}"
+                success = await asyncio.to_thread(upload_base64, storage_key, ctx.data)
+                if success:
+                    meta["url"] = get_public_url(storage_key)
+            except Exception:
+                logger.warning(f"Failed to upload attachment {name}", exc_info=True)
+        return meta
+
+    return list(await asyncio.gather(*(_process(ctx) for ctx in contexts)))
 
 
 def inject_multimodal_context(

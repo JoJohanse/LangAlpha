@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../../components/ui/dialog';
 import { Input } from '../../components/ui/input';
 import DashboardHeader from './components/DashboardHeader';
@@ -25,6 +26,7 @@ import './Dashboard.css';
 function Dashboard() {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { user: authUser } = useAuth();
 
   // News modal state
   const [selectedNewsId, setSelectedNewsId] = useState(null);
@@ -112,7 +114,6 @@ function Dashboard() {
             {/* Right 1/3 — sticky sidebar */}
             <div className="lg:col-span-1">
               <div className="lg:sticky lg:top-24 space-y-6">
-                <EarningsCalendarCard />
                 <div className="lg:h-[calc(100vh-420px)]">
                   <PortfolioWatchlistCard
                     watchlistRows={watchlist.rows}
@@ -128,6 +129,7 @@ function Dashboard() {
                     marketStatus={marketStatus}
                   />
                 </div>
+                <EarningsCalendarCard />
               </div>
             </div>
           </div>

@@ -317,7 +317,11 @@
       "effortLow": "低",
       "effortMedium": "中",
       "effortHigh": "高",
-      "incompatibleSdk": "当前会话无法切换到此模型（提供商不同）"
+      "incompatibleSdk": "当前会话无法切换到此模型（提供商不同）",
+      "fastMode": "快速",
+      "fastModeDesc": "优先路由以获得更快响应",
+      "fastModeHelpLine1": "等同于 Codex 中的 /fast",
+      "fastModeHelpLine2": "消耗 2 倍积分，优先服务层级"
     }
   },
   "context": {

@@ -5,8 +5,6 @@ defaults:
   # Runtime variables (set at render time, these are just documentation)
   # NOTE: date/datetime are auto-injected by PromptLoader - do NOT set here
   tool_summary: ""  # Set at runtime with formatted tool summary
-  storage_enabled: false  # Set at runtime based on storage config
-
   # Task workflow defaults
   max_concurrent_task_units: 3
   max_task_iterations: 10
@@ -53,9 +51,7 @@ components:
       - tool_summary
 
   visualizations:
-    description: Visualization instructions (cloud upload or inline sandbox rendering)
-    optional_vars:
-      - storage_enabled
+    description: Visualization instructions
 
   output_guidelines:
     description: Output formatting guidelines

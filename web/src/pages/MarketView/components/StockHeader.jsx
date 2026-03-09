@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Info } from 'lucide-react';
+import { Info, Sunrise, Sunset } from 'lucide-react';
 import './StockHeader.css';
 import { isUSEquity, EXT_COLOR_PRE, EXT_COLOR_POST } from '../utils/chartConstants';
 import { getExtendedHoursInfo } from '@/lib/marketUtils';
@@ -46,7 +46,7 @@ const StockHeader = ({ symbol, stockInfo, realTimePrice, chartMeta, displayOverr
   const displayExchange = displayOverride?.exchange ?? stockInfo?.Exchange ?? '';
 
   // Pre/post-market extended hours data
-  const { extPct: extendedChangePercent, extLabel: extendedLabel } = getExtendedHoursInfo(marketStatus, snapshot);
+  const { extPct: extendedChangePercent, extType: extendedType } = getExtendedHoursInfo(marketStatus, snapshot);
 
   // Live = WS connected AND actually delivering aggregate data for this symbol
   const usSymbol = isUSEquity(symbol);
@@ -96,21 +96,43 @@ const StockHeader = ({ symbol, stockInfo, realTimePrice, chartMeta, displayOverr
           </button>
         </div>
         <div className="stock-price-section">
-          <div className={`stock-price ${priceColorClass}`}>{price != null ? price.toFixed(2) : '—'}</div>
-          <div className={`stock-change ${priceColorClass}`}>
-            {isPositive ? '+' : ''}{change.toFixed(2)} {isPositive ? '+' : ''}{changePercent.toFixed(2)}%
-          </div>
-          {extendedLabel && extendedChangePercent != null && (
-            <div
-              className="stock-extended-hours"
-              style={{
-                fontSize: 11,
-                marginTop: 2,
-                color: extendedLabel === 'Pre-Market' ? EXT_COLOR_PRE : EXT_COLOR_POST,
-              }}
-            >
-              {extendedLabel}: {extendedChangePercent >= 0 ? '+' : ''}{extendedChangePercent.toFixed(2)}%
-            </div>
+          {extendedType && extendedChangePercent != null ? (
+            <>
+              {/* Extended hours price — prominent, in session color */}
+              <div className="stock-price" style={{ color: extendedType === 'pre' ? EXT_COLOR_PRE : EXT_COLOR_POST }}>
+                {price != null ? price.toFixed(2) : '—'}
+              </div>
+              <div
+                className="stock-extended-hours"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 13,
+                  color: extendedType === 'pre' ? EXT_COLOR_PRE : EXT_COLOR_POST,
+                }}
+              >
+                {extendedType === 'pre' ? <Sunrise size={13} /> : <Sunset size={13} />}
+                {change >= 0 ? '+' : ''}{change.toFixed(2)} ({extendedChangePercent >= 0 ? '+' : ''}{extendedChangePercent.toFixed(2)}%)
+              </div>
+              {/* Regular session close — during after-hours show today's 4 PM close, during pre-market show prev close */}
+              {extendedType === 'post' && previousClose != null && snapshot?.regular_trading_change != null ? (
+                <div style={{ fontSize: 11, marginTop: 2, color: 'var(--color-text-tertiary, #8b8fa3)' }}>
+                  Close {(previousClose + snapshot.regular_trading_change).toFixed(2)}
+                </div>
+              ) : extendedType === 'pre' && previousClose != null ? (
+                <div style={{ fontSize: 11, marginTop: 2, color: 'var(--color-text-tertiary, #8b8fa3)' }}>
+                  Close {previousClose.toFixed(2)}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <div className={`stock-price ${priceColorClass}`}>{price != null ? price.toFixed(2) : '—'}</div>
+              <div className={`stock-change ${priceColorClass}`}>
+                {isPositive ? '+' : ''}{change.toFixed(2)} {isPositive ? '+' : ''}{changePercent.toFixed(2)}%
+              </div>
+            </>
           )}
         </div>
       </div>

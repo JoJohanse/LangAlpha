@@ -10,10 +10,19 @@ from datetime import datetime, timedelta, timezone
 import logging
 import asyncio
 
+from langchain_core.runnables import RunnableConfig
+
 from .utils import format_number, format_percentage, get_market_session
-from src.data_client.fmp import get_fmp_client
+from src.data_client import get_financial_data_provider, get_market_data_provider
 
 logger = logging.getLogger(__name__)
+
+
+def _get_user_id(config: Optional[RunnableConfig] = None) -> Optional[str]:
+    """Extract user_id from RunnableConfig, or return None."""
+    if config is None:
+        return None
+    return config.get("configurable", {}).get("user_id")
 
 
 def _safe_result(result, default=None):
@@ -21,6 +30,72 @@ def _safe_result(result, default=None):
     if isinstance(result, Exception):
         return default
     return result if result is not None else default
+
+
+def _normalize_market_bars(
+    bars: list, symbol: str, datetime_format: bool = False
+) -> List[Dict[str, Any]]:
+    """Convert MarketDataSource bars to the format expected by formatting helpers.
+
+    MarketDataSource returns ``{time, open, high, low, close, volume}``.
+    Formatters expect ``{date, open, high, low, close, volume, change,
+    changePercent, symbol}``.  Returns newest-first.
+    """
+    if not bars:
+        return []
+
+    # Sort ascending for correct change computation
+    sorted_bars = sorted(bars, key=lambda b: b.get("time", 0))
+    result: List[Dict[str, Any]] = []
+    prev_close: Optional[float] = None
+
+    for bar in sorted_bars:
+        ts = bar.get("time")
+        if ts is not None and isinstance(ts, (int, float)) and ts > 0:
+            dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
+            date_str = (
+                dt.strftime("%Y-%m-%d %H:%M:%S")
+                if datetime_format
+                else dt.strftime("%Y-%m-%d")
+            )
+        else:
+            date_str = bar.get("date", "N/A")
+
+        close = bar.get("close")
+        change: Optional[float] = None
+        change_pct: Optional[float] = None
+        if close is not None and prev_close is not None and prev_close != 0:
+            change = close - prev_close
+            change_pct = (change / prev_close) * 100
+
+        result.append(
+            {
+                "date": date_str,
+                "open": bar.get("open"),
+                "high": bar.get("high"),
+                "low": bar.get("low"),
+                "close": close,
+                "volume": bar.get("volume"),
+                "change": change,
+                "changePercent": change_pct,
+                "symbol": symbol,
+            }
+        )
+
+        if close is not None:
+            prev_close = close
+
+    # Return newest-first (matching FMP's original order)
+    result.reverse()
+    return result
+
+
+async def _fmp_request(method: str, *args: Any, **kwargs: Any) -> Any:
+    """Make a direct FMP API call for methods not in the protocol."""
+    from src.data_client.fmp import get_fmp_client
+
+    client = await get_fmp_client()
+    return await getattr(client, method)(*args, **kwargs)
 
 
 # Constants for fiscal period matching
@@ -700,6 +775,7 @@ async def fetch_stock_daily_prices(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     limit: Optional[int] = None,
+    config: Optional[RunnableConfig] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Fetch historical daily OHLCV price data for a stock.
@@ -712,42 +788,44 @@ async def fetch_stock_daily_prices(
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
         limit: Limit number of records (if not using date range)
+        config: LangChain RunnableConfig (injected by @tool decorator)
 
     Returns:
         Tuple of (content string, artifact dict with structured data for charts)
     """
     try:
-        # Get FMP client (async to handle event loop properly)
-        fmp_client = await get_fmp_client()
+        provider = await get_market_data_provider()
+        user_id = _get_user_id(config)
 
         # Default to last 60 trading days if no parameters
         if not start_date and not end_date and not limit:
             limit = 60
 
-        # Use FMP client's get_stock_price method
+        # Fetch daily bars via provider chain (ginlix-data → FMP fallback)
         if start_date or end_date:
-            # Use date range
-            results = await fmp_client.get_stock_price(
-                symbol=symbol, from_date=start_date, to_date=end_date
+            raw_bars = await provider.get_daily(
+                symbol, from_date=start_date, to_date=end_date, user_id=user_id
             )
+            results = _normalize_market_bars(raw_bars, symbol)
         else:
-            # Use limit - need to calculate date range
             if limit:
                 end = datetime.now().date()
                 # Estimate: ~252 trading days per year, add 50% buffer for weekends/holidays
                 days_back = int(limit * 1.5)
                 start = end - timedelta(days=days_back)
 
-                results = await fmp_client.get_stock_price(
-                    symbol=symbol, from_date=start.isoformat(), to_date=end.isoformat()
+                raw_bars = await provider.get_daily(
+                    symbol, from_date=start.isoformat(), to_date=end.isoformat(),
+                    user_id=user_id,
                 )
+                results = _normalize_market_bars(raw_bars, symbol)
 
-                # Apply limit after fetching
+                # Apply limit after fetching (results are newest-first)
                 if results and len(results) > limit:
                     results = results[:limit]
             else:
-                # Get recent data (default behavior)
-                results = await fmp_client.get_stock_price(symbol=symbol)
+                raw_bars = await provider.get_daily(symbol, user_id=user_id)
+                results = _normalize_market_bars(raw_bars, symbol)
 
         if not results:
             logger.warning(f"No price data found for {symbol}")
@@ -821,16 +899,20 @@ No price data available for the specified period."""
                 intraday_interval = "4hour"
 
             try:
-                intraday_data = await fmp_client.get_intraday_chart(
-                    symbol=symbol,
+                intraday_bars = await provider.get_intraday(
+                    symbol,
                     interval=intraday_interval,
                     from_date=actual_start,
                     to_date=actual_end,
+                    user_id=user_id,
                 )
-                if intraday_data and len(intraday_data) > 5:
-                    # Sort oldest-first for charting
+                if intraday_bars and len(intraday_bars) > 5:
+                    # Normalize and sort oldest-first for charting
+                    intraday_norm = _normalize_market_bars(
+                        intraday_bars, symbol, datetime_format=True
+                    )
                     intraday_sorted = sorted(
-                        intraday_data,
+                        intraday_norm,
                         key=lambda x: x.get("date", ""),
                         reverse=False,
                     )
@@ -911,9 +993,12 @@ async def fetch_company_overview_data(symbol: str) -> Dict[str, Any]:
     Returns:
         Dict with structured data for charts (same shape as agent artifact)
     """
-    fmp_client = await get_fmp_client()
+    provider = await get_financial_data_provider()
+    financial = provider.financial
+    if financial is None:
+        return {"type": "company_overview", "symbol": symbol}
 
-    profile_data = await fmp_client.get_profile(symbol)
+    profile_data = await financial.get_company_profile(symbol)
     if not profile_data:
         return {"type": "company_overview", "symbol": symbol}
 
@@ -934,21 +1019,21 @@ async def fetch_company_overview_data(symbol: str) -> Dict[str, Any]:
         quote_result,
         cash_flow_result,
     ) = await asyncio.gather(
-        fmp_client.get_income_statement(symbol, period="quarter", limit=8),
-        fmp_client.get_historical_earnings_calendar(symbol, limit=10),
-        fmp_client.get_stock_price_change(symbol),
-        fmp_client.get_key_metrics_ttm(symbol),
-        fmp_client.get_ratios_ttm(symbol),
-        fmp_client.get_price_target_consensus(symbol),
-        fmp_client.get_grades_summary(symbol),
-        fmp_client.get_revenue_product_segmentation(
-            symbol, period="quarter", structure="flat"
+        financial.get_income_statements(symbol, period="quarter", limit=8),
+        financial.get_earnings_history(symbol, limit=10),
+        financial.get_price_performance(symbol),
+        financial.get_key_metrics(symbol),
+        financial.get_financial_ratios(symbol),
+        financial.get_analyst_price_targets(symbol),
+        financial.get_analyst_ratings(symbol),
+        financial.get_revenue_by_segment(
+            symbol, segment_type="product", period="quarter", structure="flat"
         ),
-        fmp_client.get_revenue_geographic_segmentation(
-            symbol, period="quarter", structure="flat"
+        financial.get_revenue_by_segment(
+            symbol, segment_type="geography", period="quarter", structure="flat"
         ),
-        fmp_client.get_quote(symbol),
-        fmp_client.get_cash_flow(symbol, period="quarter", limit=8),
+        financial.get_realtime_quote(symbol),
+        financial.get_cash_flows(symbol, period="quarter", limit=8),
         return_exceptions=True,
     )
 
@@ -1012,25 +1097,21 @@ async def fetch_company_overview_data(symbol: str) -> Dict[str, Any]:
         }
 
     # Revenue by product
-    has_product_data = False
     if product_data and len(product_data) > 0:
         latest_product_record = product_data[0]
         if latest_product_record and isinstance(latest_product_record, dict):
             fiscal_date = list(latest_product_record.keys())[0]
             product_revenues = latest_product_record[fiscal_date]
             if product_revenues and isinstance(product_revenues, dict) and len(product_revenues) > 0:
-                has_product_data = True
                 artifact["revenueByProduct"] = product_revenues
 
     # Revenue by geography
-    has_geo_data = False
     if geo_data and len(geo_data) > 0:
         latest_geo_record = geo_data[0]
         if latest_geo_record and isinstance(latest_geo_record, dict):
             geo_date = list(latest_geo_record.keys())[0]
             geo_revenues = latest_geo_record[geo_date]
             if geo_revenues and isinstance(geo_revenues, dict) and len(geo_revenues) > 0:
-                has_geo_data = True
                 artifact["revenueByGeo"] = geo_revenues
 
     # Quarterly fundamentals from income statement (oldest-first for charting)
@@ -1089,6 +1170,7 @@ async def fetch_company_overview_data(symbol: str) -> Dict[str, Any]:
 
 async def fetch_company_overview(
     symbol: str,
+    config: Optional[RunnableConfig] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Fetch comprehensive investment analysis overview for a company.
@@ -1098,18 +1180,28 @@ async def fetch_company_overview(
 
     Args:
         symbol: Stock ticker symbol (e.g., "AAPL", "600519.SS", "0700.HK")
+        config: LangChain RunnableConfig (injected by @tool decorator)
 
     Returns:
         Tuple of (content string, artifact dict with structured data for charts)
     """
     try:
-        # Get FMP client (async to handle event loop properly)
-        fmp_client = await get_fmp_client()
+        provider = await get_financial_data_provider()
+        financial = provider.financial
+        user_id = _get_user_id(config)
+        if financial is None:
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            content = f"""## Company Overview: {symbol}
+**Retrieved:** {timestamp}
+**Status:** Error
+
+No financial data source configured"""
+            return content, {"type": "company_overview", "symbol": symbol}
 
         output_lines = []
 
         # ═══ BASIC INFORMATION ═══
-        profile_data = await fmp_client.get_profile(symbol)
+        profile_data = await financial.get_company_profile(symbol)
         if not profile_data:
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
             content = f"""## Company Overview: {symbol}
@@ -1146,6 +1238,37 @@ No data found for symbol {symbol}"""
 
         # === PARALLEL DATA FETCH ===
         # Fetch all data in parallel for performance optimization
+        # Build optional intel/snapshot calls
+        async def _fetch_snapshot():
+            """Fetch ginlix-data snapshot for real-time extended-hours data."""
+            try:
+                mdp = await get_market_data_provider()
+                snaps = await mdp.get_snapshots([symbol], asset_type="stocks", user_id=user_id)
+                return snaps[0] if snaps else None
+            except Exception:
+                return None
+
+        async def _fetch_float():
+            if provider.intel is None:
+                return None
+            return await provider.intel.get_float_shares(symbol, user_id=user_id)
+
+        async def _fetch_short_interest():
+            if provider.intel is None:
+                return None
+            result = await provider.intel.get_short_interest(
+                symbol, limit=1, sort="settlement_date.desc", user_id=user_id,
+            )
+            return result[0] if result else None
+
+        async def _fetch_short_volume():
+            if provider.intel is None:
+                return None
+            result = await provider.intel.get_short_volume(
+                symbol, limit=1, sort="date.desc", user_id=user_id,
+            )
+            return result[0] if result else None
+
         (
             income_stmt_result,
             earnings_calendar_result,
@@ -1162,26 +1285,34 @@ No data found for symbol {symbol}"""
             geo_data_result,
             quote_result,
             cash_flow_result,
+            snapshot_result,
+            float_result,
+            short_interest_result,
+            short_volume_result,
         ) = await asyncio.gather(
-            fmp_client.get_income_statement(symbol, period="quarter", limit=8),
-            fmp_client.get_historical_earnings_calendar(symbol, limit=10),
-            fmp_client.get_stock_price_change(symbol),
-            fmp_client.get_key_metrics_ttm(symbol),
-            fmp_client.get_ratios_ttm(symbol),
-            fmp_client.get_sec_filings(symbol, filing_type="10-Q", limit=3),
-            fmp_client.get_sec_filings(symbol, filing_type="10-K", limit=2),
-            fmp_client.get_price_target_consensus(symbol),
-            fmp_client.get_grades_summary(symbol),
-            fmp_client.get_stock_grades(symbol, limit=10),
-            fmp_client.get_price_target_summary(symbol),
-            fmp_client.get_revenue_product_segmentation(
-                symbol, period="quarter", structure="flat"
+            financial.get_income_statements(symbol, period="quarter", limit=8),
+            financial.get_earnings_history(symbol, limit=10),
+            financial.get_price_performance(symbol),
+            financial.get_key_metrics(symbol),
+            financial.get_financial_ratios(symbol),
+            _fmp_request("get_sec_filings", symbol, filing_type="10-Q", limit=3),
+            _fmp_request("get_sec_filings", symbol, filing_type="10-K", limit=2),
+            financial.get_analyst_price_targets(symbol),
+            financial.get_analyst_ratings(symbol),
+            _fmp_request("get_stock_grades", symbol, limit=10),
+            _fmp_request("get_price_target_summary", symbol),
+            financial.get_revenue_by_segment(
+                symbol, segment_type="product", period="quarter", structure="flat"
             ),
-            fmp_client.get_revenue_geographic_segmentation(
-                symbol, period="quarter", structure="flat"
+            financial.get_revenue_by_segment(
+                symbol, segment_type="geography", period="quarter", structure="flat"
             ),
-            fmp_client.get_quote(symbol),
-            fmp_client.get_cash_flow(symbol, period="quarter", limit=8),
+            financial.get_realtime_quote(symbol),
+            financial.get_cash_flows(symbol, period="quarter", limit=8),
+            _fetch_snapshot(),
+            _fetch_float(),
+            _fetch_short_interest(),
+            _fetch_short_volume(),
             return_exceptions=True,
         )
 
@@ -1201,85 +1332,211 @@ No data found for symbol {symbol}"""
         geo_data = _safe_result(geo_data_result, [])
         quote_data = _safe_result(quote_result, [])
         cash_flow_data = _safe_result(cash_flow_result, [])
+        snapshot_data = _safe_result(snapshot_result, None)
+        float_data = _safe_result(float_result, None)
+        short_interest_data = _safe_result(short_interest_result, None)
+        short_volume_data = _safe_result(short_volume_result, None)
 
         # Build fiscal_period_lookup using helper function
         fiscal_period_lookup = _build_fiscal_period_lookup(income_stmt)
 
         # === REAL-TIME QUOTE ===
-        if quote_data and len(quote_data) > 0:
-            quote = quote_data[0]
-            session, current_time_et = get_market_session()
+        # Prefer ginlix-data snapshot (has extended-hours breakdown), fall back to FMP quote
+        _has_snapshot = snapshot_data is not None and snapshot_data.get("price") is not None
+        _has_fmp_quote = quote_data and len(quote_data) > 0
 
+        if _has_snapshot or _has_fmp_quote:
+            session_name, current_time_et = get_market_session()
             output_lines.append("### Real-Time Quote")
-            session_str = session.replace("_", " ").title()
-            output_lines.append(
-                f"**Market Status:** {session_str} | **As of:** {current_time_et.strftime('%H:%M ET')}"
-            )
-            output_lines.append("")
 
-            # Current price with change
-            q_price = quote.get("price", 0)
-            q_change = quote.get("change", 0)
-            q_change_pct = quote.get("changesPercentage", 0)
-            change_sign = "+" if q_change >= 0 else ""
-            output_lines.append(
-                f"**Price:** ${q_price:.2f} ({change_sign}{q_change:.2f} / {change_sign}{q_change_pct:.2f}%)"
-            )
-
-            # After-hours (if applicable) - separate async call only when needed
-            if session == "AFTER_HOURS":
-                try:
-                    ah_data = await fmp_client.get_aftermarket_quote(symbol)
-                    if ah_data and len(ah_data) > 0:
-                        ah = ah_data[0]
-                        ah_price = ah.get("price")
-                        if ah_price and ah_price != q_price:
-                            ah_change = ah_price - q_price
-                            ah_change_pct = (
-                                (ah_change / q_price * 100) if q_price > 0 else 0
-                            )
-                            ah_sign = "+" if ah_change >= 0 else ""
-                            output_lines.append(
-                                f"**After-Hours:** ${ah_price:.2f} ({ah_sign}{ah_change:.2f} / {ah_sign}{ah_change_pct:.2f}%)"
-                            )
-                except Exception:
-                    pass
-
-            output_lines.append("")
-
-            # Build quote table
-            quote_rows = []
-            open_price = quote.get("open")
-            day_low = quote.get("dayLow")
-            day_high = quote.get("dayHigh")
-            year_low = quote.get("yearLow")
-            year_high = quote.get("yearHigh")
-            volume = quote.get("volume")
-            avg_volume = quote.get("avgVolume")
-            previous_close = quote.get("previousClose")
-
-            if open_price:
-                quote_rows.append(("Open", f"${open_price:.2f}"))
-            if previous_close:
-                quote_rows.append(("Previous Close", f"${previous_close:.2f}"))
-            if day_low and day_high:
-                quote_rows.append(("Day Range", f"${day_low:.2f} - ${day_high:.2f}"))
-            if year_low and year_high:
-                quote_rows.append(
-                    ("52-Week Range", f"${year_low:.2f} - ${year_high:.2f}")
+            if _has_snapshot:
+                snap = snapshot_data
+                # Map ginlix-data market_status to display label
+                _STATUS_LABELS = {
+                    "early_trading": "Pre-Market",
+                    "open": "Regular Hours",
+                    "late_trading": "After-Hours",
+                    "closed": "Market Closed",
+                }
+                market_status_raw = snap.get("market_status", "")
+                market_label = _STATUS_LABELS.get(market_status_raw, session_name.replace("_", " ").title())
+                output_lines.append(
+                    f"**Market Status:** {market_label} | **As of:** {current_time_et.strftime('%H:%M ET')}"
                 )
-            if volume:
-                vol_str = format_number(volume).replace("$", "")
-                if avg_volume:
-                    avg_str = format_number(avg_volume).replace("$", "")
-                    quote_rows.append(("Volume", f"{vol_str} (Avg: {avg_str})"))
-                else:
-                    quote_rows.append(("Volume", vol_str))
+                output_lines.append("")
 
-            if quote_rows:
+                prev_close = snap.get("previous_close")
+                reg_close = snap.get("price")  # session.close = regular session close
+                last_price = snap.get("last_trade_price")  # actual current price
+
+                # Regular session close with change from previous close
+                reg_change = snap.get("regular_trading_change")
+                reg_change_pct = snap.get("regular_trading_change_percent")
+
+                if reg_close is not None:
+                    if reg_change is not None and reg_change_pct is not None:
+                        sign = "+" if reg_change >= 0 else ""
+                        output_lines.append(
+                            f"**Regular Close:** ${reg_close:.2f} ({sign}{reg_change:.2f} / {sign}{reg_change_pct:.3f}%)"
+                        )
+                    else:
+                        output_lines.append(f"**Regular Close:** ${reg_close:.2f}")
+
+                # Extended-hours current price (if different from regular close)
+                is_extended = market_status_raw in ("early_trading", "late_trading")
+                if is_extended and last_price is not None and reg_close is not None and last_price != reg_close:
+                    ext_label = "Pre-Market" if market_status_raw == "early_trading" else "After-Hours"
+                    if market_status_raw == "early_trading":
+                        ext_change = snap.get("early_trading_change")
+                        ext_change_pct = snap.get("early_trading_change_percent")
+                    else:
+                        ext_change = snap.get("late_trading_change")
+                        ext_change_pct = snap.get("late_trading_change_percent")
+
+                    if ext_change is not None and ext_change_pct is not None:
+                        ext_sign = "+" if ext_change >= 0 else ""
+                        output_lines.append(
+                            f"**{ext_label} Price:** ${last_price:.2f} ({ext_sign}{ext_change:.2f} / {ext_sign}{ext_change_pct:.3f}% from close)"
+                        )
+                    else:
+                        # Compute from regular close
+                        diff = last_price - reg_close
+                        diff_pct = (diff / reg_close * 100) if reg_close else 0
+                        diff_sign = "+" if diff >= 0 else ""
+                        output_lines.append(
+                            f"**{ext_label} Price:** ${last_price:.2f} ({diff_sign}{diff:.2f} / {diff_sign}{diff_pct:.2f}% from close)"
+                        )
+
+                # Total day change (from previous close)
+                total_change = snap.get("change")
+                total_change_pct = snap.get("change_percent")
+                if total_change is not None and total_change_pct is not None:
+                    t_sign = "+" if total_change >= 0 else ""
+                    output_lines.append(
+                        f"**Day Change (from prev close):** {t_sign}{total_change:.2f} / {t_sign}{total_change_pct:.3f}%"
+                    )
+
+                output_lines.append("")
+
+                # Build quote detail table from snapshot + FMP (FMP has 52-week range)
+                quote_rows = []
+                if snap.get("open"):
+                    quote_rows.append(("Open", f"${snap['open']:.2f}"))
+                if prev_close:
+                    quote_rows.append(("Previous Close", f"${prev_close:.2f}"))
+                if snap.get("low") and snap.get("high"):
+                    quote_rows.append(("Day Range", f"${snap['low']:.2f} - ${snap['high']:.2f}"))
+                # 52-week range from FMP quote
+                fmp_quote = quote_data[0] if _has_fmp_quote else {}
+                year_low = fmp_quote.get("yearLow")
+                year_high = fmp_quote.get("yearHigh")
+                if year_low and year_high:
+                    quote_rows.append(("52-Week Range", f"${year_low:.2f} - ${year_high:.2f}"))
+                if snap.get("volume"):
+                    vol_str = format_number(snap["volume"]).replace("$", "")
+                    avg_volume = fmp_quote.get("avgVolume") if _has_fmp_quote else None
+                    if avg_volume:
+                        avg_str = format_number(avg_volume).replace("$", "")
+                        quote_rows.append(("Volume", f"{vol_str} (Avg: {avg_str})"))
+                    else:
+                        quote_rows.append(("Volume", vol_str))
+
+                if quote_rows:
+                    output_lines.append("| Metric | Value |")
+                    output_lines.append("|--------|-------|")
+                    for metric, value in quote_rows:
+                        output_lines.append(f"| {metric} | {value} |")
+                    output_lines.append("")
+
+            else:
+                # FMP-only fallback (no extended-hours breakdown available)
+                quote = quote_data[0]
+                session_str = session_name.replace("_", " ").title()
+                output_lines.append(
+                    f"**Market Status:** {session_str} | **As of:** {current_time_et.strftime('%H:%M ET')}"
+                )
+                output_lines.append("")
+
+                q_price = quote.get("price", 0)
+                q_change = quote.get("change", 0)
+                q_change_pct = quote.get("changesPercentage", 0)
+                change_sign = "+" if q_change >= 0 else ""
+                output_lines.append(
+                    f"**Price:** ${q_price:.2f} ({change_sign}{q_change:.2f} / {change_sign}{q_change_pct:.2f}%)"
+                )
+                output_lines.append("")
+
+                quote_rows = []
+                open_price = quote.get("open")
+                day_low = quote.get("dayLow")
+                day_high = quote.get("dayHigh")
+                year_low = quote.get("yearLow")
+                year_high = quote.get("yearHigh")
+                volume = quote.get("volume")
+                avg_volume = quote.get("avgVolume")
+                previous_close = quote.get("previousClose")
+
+                if open_price:
+                    quote_rows.append(("Open", f"${open_price:.2f}"))
+                if previous_close:
+                    quote_rows.append(("Previous Close", f"${previous_close:.2f}"))
+                if day_low and day_high:
+                    quote_rows.append(("Day Range", f"${day_low:.2f} - ${day_high:.2f}"))
+                if year_low and year_high:
+                    quote_rows.append(("52-Week Range", f"${year_low:.2f} - ${year_high:.2f}"))
+                if volume:
+                    vol_str = format_number(volume).replace("$", "")
+                    if avg_volume:
+                        avg_str = format_number(avg_volume).replace("$", "")
+                        quote_rows.append(("Volume", f"{vol_str} (Avg: {avg_str})"))
+                    else:
+                        quote_rows.append(("Volume", vol_str))
+
+                if quote_rows:
+                    output_lines.append("| Metric | Value |")
+                    output_lines.append("|--------|-------|")
+                    for metric, value in quote_rows:
+                        output_lines.append(f"| {metric} | {value} |")
+                    output_lines.append("")
+
+        # === FLOAT & SHORT DATA ===
+        _has_float = float_data is not None and isinstance(float_data, dict) and float_data.get("free_float") is not None
+        _has_si = short_interest_data is not None and isinstance(short_interest_data, dict) and short_interest_data.get("short_interest") is not None
+        _has_sv = short_volume_data is not None and isinstance(short_volume_data, dict) and short_volume_data.get("short_volume_ratio") is not None
+
+        if _has_float or _has_si or _has_sv:
+            output_lines.append("### Share Structure")
+            output_lines.append("")
+
+            struct_rows = []
+            if _has_float:
+                free_float = float_data.get("free_float")
+                if free_float:
+                    struct_rows.append(("Float", format_number(free_float).replace("$", "")))
+                ff_pct = float_data.get("free_float_percent")
+                if ff_pct is not None:
+                    struct_rows.append(("Float %", f"{ff_pct:.1f}%"))
+
+            if _has_si:
+                si_val = short_interest_data["short_interest"]
+                si_date = short_interest_data.get("settlement_date", "")
+                struct_rows.append(("Short Interest", f"{si_val:,} (as of {si_date})" if si_date else f"{si_val:,}"))
+                if _has_float and float_data.get("free_float"):
+                    si_pct = si_val / float_data["free_float"] * 100
+                    struct_rows.append(("Short % of Float", f"{si_pct:.2f}%"))
+                dtc = short_interest_data.get("days_to_cover")
+                if dtc:
+                    struct_rows.append(("Days to Cover", f"{dtc:.2f}"))
+
+            if _has_sv:
+                sv_ratio = short_volume_data["short_volume_ratio"]
+                sv_date = short_volume_data.get("date", "")
+                struct_rows.append(("Short Volume Ratio", f"{sv_ratio:.1f}% (as of {sv_date})" if sv_date else f"{sv_ratio:.1f}%"))
+
+            if struct_rows:
                 output_lines.append("| Metric | Value |")
                 output_lines.append("|--------|-------|")
-                for metric, value in quote_rows:
+                for metric, value in struct_rows:
                     output_lines.append(f"| {metric} | {value} |")
                 output_lines.append("")
 
@@ -1854,8 +2111,31 @@ No data found for symbol {symbol}"""
             "name": company_name,
         }
 
-        # Quote data for artifact
-        if quote_data and len(quote_data) > 0:
+        # Quote data for artifact — prefer snapshot for extended-hours detail
+        if _has_snapshot:
+            snap = snapshot_data
+            fmp_quote = quote_data[0] if _has_fmp_quote else {}
+            artifact["quote"] = {
+                "regularClose": snap.get("price"),
+                "lastTradePrice": snap.get("last_trade_price"),
+                "marketStatus": snap.get("market_status"),
+                "change": snap.get("change"),
+                "changePct": snap.get("change_percent"),
+                "regularChange": snap.get("regular_trading_change"),
+                "regularChangePct": snap.get("regular_trading_change_percent"),
+                "earlyTradingChangePct": snap.get("early_trading_change_percent"),
+                "lateTradingChangePct": snap.get("late_trading_change_percent"),
+                "dayHigh": snap.get("high"),
+                "dayLow": snap.get("low"),
+                "yearHigh": fmp_quote.get("yearHigh"),
+                "yearLow": fmp_quote.get("yearLow"),
+                "open": snap.get("open"),
+                "previousClose": snap.get("previous_close"),
+                "volume": snap.get("volume"),
+                "avgVolume": fmp_quote.get("avgVolume"),
+                "marketCap": fmp_quote.get("marketCap"),
+            }
+        elif _has_fmp_quote:
             quote = quote_data[0]
             artifact["quote"] = {
                 "price": quote.get("price"),
@@ -1871,6 +2151,14 @@ No data found for symbol {symbol}"""
                 "avgVolume": quote.get("avgVolume"),
                 "marketCap": quote.get("marketCap"),
             }
+
+        # Float & short data for artifact (single latest records, not full arrays)
+        if _has_float:
+            artifact["float"] = float_data
+        if _has_si:
+            artifact["shortInterest"] = short_interest_data
+        if _has_sv:
+            artifact["shortVolume"] = short_volume_data
 
         # Performance data
         if price_change_data:
@@ -1974,6 +2262,7 @@ async def fetch_market_indices(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     limit: int = 60,
+    config: Optional[RunnableConfig] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Fetch market indices data (S&P 500, NASDAQ, Dow Jones).
@@ -1986,13 +2275,14 @@ async def fetch_market_indices(
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
         limit: Number of records per index (default 60)
+        config: LangChain RunnableConfig (injected by @tool decorator)
 
     Returns:
         Tuple of (content string, artifact dict with structured data for charts)
     """
     try:
-        # Get FMP client (async to handle event loop properly)
-        fmp_client = await get_fmp_client()
+        provider = await get_market_data_provider()
+        user_id = _get_user_id(config)
 
         # Default indices if not specified
         if indices is None:
@@ -2014,10 +2304,12 @@ async def fetch_market_indices(
         async def fetch_single_index(index_symbol: str):
             """Fetch data for a single index with error handling."""
             try:
-                index_data = await fmp_client.get_stock_price(
-                    symbol=index_symbol, from_date=fetch_start, to_date=fetch_end
+                raw_bars = await provider.get_daily(
+                    index_symbol, from_date=fetch_start, to_date=fetch_end,
+                    is_index=True, user_id=user_id,
                 )
-                # Apply limit if not using explicit date range
+                index_data = _normalize_market_bars(raw_bars, index_symbol)
+                # Apply limit if not using explicit date range (newest-first)
                 if apply_limit and index_data and len(index_data) > limit:
                     index_data = index_data[:limit]
                 return (index_symbol, index_data)
@@ -2115,13 +2407,15 @@ No index data available for the specified period."""
         if intraday_interval and actual_start != "N/A" and actual_end != "N/A":
             async def fetch_intraday(sym):
                 try:
-                    data = await fmp_client.get_intraday_chart(
-                        symbol=sym,
+                    raw = await provider.get_intraday(
+                        sym,
                         interval=intraday_interval,
                         from_date=actual_start,
                         to_date=actual_end,
+                        is_index=True,
+                        user_id=user_id,
                     )
-                    return (sym, data)
+                    return (sym, _normalize_market_bars(raw, sym, datetime_format=True))
                 except Exception as e:
                     logger.warning(f"Failed to fetch intraday for index {sym}: {e}")
                     return (sym, None)
@@ -2257,8 +2551,7 @@ async def fetch_sector_performance(
         return {"type": "sector_performance", "sectors": sectors}
 
     try:
-        # Get FMP client (async to handle event loop properly)
-        fmp_client = await get_fmp_client()
+        provider = await get_financial_data_provider()
 
         # Generate file-ready header
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -2269,30 +2562,32 @@ async def fetch_sector_performance(
 
 """
 
-        # Try the standard v3 endpoint first (more widely available)
-        try:
-            results = await fmp_client._make_request(
-                "sectors-performance", params={}, version="v3"
-            )
-
-            if results:
-                logger.debug(f"Retrieved performance data for {len(results)} sectors")
-                content = header + _format_sectors_as_table(results)
-                return content, _build_sector_artifact(results)
-        except Exception:
-            pass
+        # Try protocol-based provider first
+        if provider.financial is not None:
+            try:
+                results = await provider.financial.get_sector_performance()
+                if results:
+                    logger.debug(f"Retrieved performance data for {len(results)} sectors")
+                    content = header + _format_sectors_as_table(results)
+                    return content, _build_sector_artifact(results)
+            except Exception:
+                pass
 
         # Fallback to stable version with date if provided
         if date:
-            params = {"date": date}
-            results = await fmp_client._make_request(
-                "sector-performance-snapshot", params=params, version="stable"
-            )
-
-            if results:
-                logger.debug(f"Retrieved performance data for {len(results)} sectors")
-                content = header + _format_sectors_as_table(results)
-                return content, _build_sector_artifact(results)
+            try:
+                results = await _fmp_request(
+                    "_make_request",
+                    "sector-performance-snapshot",
+                    params={"date": date},
+                    version="stable",
+                )
+                if results:
+                    logger.debug(f"Retrieved performance data for {len(results)} sectors")
+                    content = header + _format_sectors_as_table(results)
+                    return content, _build_sector_artifact(results)
+            except Exception:
+                pass
 
         logger.warning(
             "No sector performance data found - endpoint may not be available on this FMP plan"
@@ -2339,14 +2634,11 @@ async def fetch_earnings_transcript(symbol: str, year: int, quarter: int) -> str
         Formatted string with earnings call transcript
     """
     try:
-        # Get FMP client (async to handle event loop properly)
-        fmp_client = await get_fmp_client()
-
         output_lines = []
 
-        # Fetch transcript data
-        transcript_data = await fmp_client.get_earnings_call_transcript(
-            symbol=symbol, year=year, quarter=quarter
+        # Fetch transcript data (FMP-specific, not in generic protocol)
+        transcript_data = await _fmp_request(
+            "get_earnings_call_transcript", symbol=symbol, year=year, quarter=quarter
         )
 
         if not transcript_data or len(transcript_data) == 0:
@@ -2468,7 +2760,8 @@ async def fetch_stock_screener(
         Tuple of (markdown content, artifact dict for frontend rendering)
     """
     try:
-        fmp_client = await get_fmp_client()
+        provider = await get_financial_data_provider()
+        financial = provider.financial
 
         # Build API params with camelCase conversion
         local_params = {
@@ -2504,7 +2797,14 @@ async def fetch_stock_screener(
         if limit:
             api_params["limit"] = limit
 
-        results = await fmp_client.get_company_screener(**api_params)
+        if financial is None:
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            return (
+                f"## Stock Screener\n**Retrieved:** {timestamp}\n\nNo financial data source configured.",
+                {"type": "stock_screener", "results": [], "filters": {}, "count": 0},
+            )
+
+        results = await financial.screen_stocks(**api_params)
 
         if not results or not isinstance(results, list):
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -2599,3 +2899,249 @@ async def fetch_stock_screener(
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         error_content = f"## Stock Screener\n**Retrieved:** {timestamp}\n**Status:** Error\n\nError screening stocks: {str(e)}"
         return error_content, {"type": "stock_screener", "results": [], "filters": {}, "count": 0}
+
+
+# ---------------------------------------------------------------------------
+# Market intel tools (options, short data, movers)
+# ---------------------------------------------------------------------------
+
+
+async def fetch_options_chain(
+    underlying: str,
+    contract_type: Optional[str] = None,
+    expiration_date: Optional[str] = None,
+    strike_min: Optional[float] = None,
+    strike_max: Optional[float] = None,
+    limit: int = 20,
+    config: Optional[RunnableConfig] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    """Fetch options chain for an underlying ticker.
+
+    Returns:
+        Tuple of (markdown content, artifact dict)
+    """
+    try:
+        provider = await get_financial_data_provider()
+        user_id = _get_user_id(config)
+        if provider.intel is None:
+            return (
+                "Options chain data is not available"
+                " (no MarketIntelSource configured).",
+                {"type": "options_chain", "results": []},
+            )
+
+        filters: Dict[str, Any] = {"limit": limit}
+        if contract_type:
+            filters["contract_type"] = contract_type
+        if expiration_date:
+            filters["expiration_date"] = expiration_date
+        if strike_min is not None:
+            filters["strike_price_gte"] = strike_min
+        if strike_max is not None:
+            filters["strike_price_lte"] = strike_max
+
+        data = await provider.intel.get_options_chain(underlying, user_id=user_id, **filters)
+        results = data.get("results", [])
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        lines: List[str] = []
+        lines.append(f"## Options Chain: {underlying} ({len(results)} contracts)")
+        lines.append(f"**Retrieved:** {timestamp}")
+        if contract_type:
+            lines.append(f"**Type:** {contract_type.upper()}")
+        lines.append("")
+
+        if not results:
+            lines.append("No contracts found matching the given criteria.")
+        else:
+            lines.append("| Ticker | Type | Strike | Expiry | Style |")
+            lines.append("|--------|------|--------|--------|-------|")
+            for c in results:
+                ticker = c.get("ticker", "N/A")
+                ctype = c.get("contract_type", "N/A")
+                strike = c.get("strike_price")
+                strike_str = f"${strike:.2f}" if strike is not None else "N/A"
+                expiry = c.get("expiration_date", "N/A")
+                style = c.get("exercise_style", "N/A")
+                lines.append(
+                    f"| {ticker} | {ctype} | {strike_str} | {expiry} | {style} |"
+                )
+
+            next_cursor = data.get("next_cursor")
+            if next_cursor:
+                lines.append(f"\n*More contracts available (cursor: `{next_cursor}`)*")
+
+        content = "\n".join(lines)
+        artifact = {
+            "type": "options_chain",
+            "results": results,
+            "underlying": underlying,
+        }
+        return content, artifact
+
+    except Exception as e:
+        logger.error(f"Error fetching options chain for {underlying}: {e}")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        err = (
+            f"## Options Chain: {underlying}\n"
+            f"**Retrieved:** {timestamp}\n"
+            f"**Status:** Error\n\nError: {e}"
+        )
+        return err, {
+            "type": "options_chain", "results": [],
+            "error": str(e),
+        }
+
+
+async def fetch_options_prices(
+    options_ticker: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    interval: str = "1hour",
+    config: Optional[RunnableConfig] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    """Fetch OHLCV price data for an options contract.
+
+    Returns:
+        Tuple of (markdown content, artifact dict)
+    """
+    try:
+        provider = await get_financial_data_provider()
+        user_id = _get_user_id(config)
+        if provider.intel is None:
+            return (
+                "Options price data is not available"
+                " (no MarketIntelSource configured).",
+                {"type": "options_prices", "results": []},
+            )
+
+        results = await provider.intel.get_options_ohlcv(
+            options_ticker, from_date=start_date, to_date=end_date,
+            interval=interval, user_id=user_id,
+        )
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        lines: List[str] = []
+        lines.append(
+            f"## Options Prices: {options_ticker}"
+            f" ({len(results)} bars, {interval})"
+        )
+        lines.append(f"**Retrieved:** {timestamp}")
+        lines.append("")
+
+        if not results:
+            lines.append("No price data available for this contract.")
+        elif len(results) <= 20:
+            lines.append("| Time | Open | High | Low | Close | Volume |")
+            lines.append("|------|------|------|-----|-------|--------|")
+            for bar in results:
+                t = bar.get("time", "")
+                if isinstance(t, (int, float)) and t > 1e10:
+                    dt = datetime.fromtimestamp(t / 1000, tz=timezone.utc)
+                    t = dt.strftime("%Y-%m-%d %H:%M")
+                o = bar.get("open", 0)
+                h = bar.get("high", 0)
+                lo = bar.get("low", 0)
+                c = bar.get("close", 0)
+                v = bar.get("volume", 0)
+                lines.append(
+                    f"| {t} | {o:.2f} | {h:.2f} | {lo:.2f} | {c:.2f} | {v:,} |"
+                )
+        else:
+            # Summary for long series
+            opens = [b.get("open", 0) for b in results]
+            highs = [b.get("high", 0) for b in results]
+            lows = [b.get("low", 0) for b in results]
+            closes = [b.get("close", 0) for b in results]
+            volumes = [b.get("volume", 0) for b in results]
+            lines.append(f"- **Bars:** {len(results)}")
+            lines.append(f"- **Open:** {opens[0]:.2f} → **Close:** {closes[-1]:.2f}")
+            lines.append(f"- **High:** {max(highs):.2f} | **Low:** {min(lows):.2f}")
+            lines.append(f"- **Avg Volume:** {sum(volumes) / len(volumes):,.0f}")
+            if opens[0] > 0:
+                change_pct = (closes[-1] - opens[0]) / opens[0] * 100
+                lines.append(f"- **Period Change:** {change_pct:+.2f}%")
+
+        content = "\n".join(lines)
+        artifact = {
+            "type": "options_prices",
+            "ticker": options_ticker,
+            "results": results,
+        }
+        return content, artifact
+
+    except Exception as e:
+        logger.error(f"Error fetching options prices for {options_ticker}: {e}")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        err = (
+            f"## Options Prices: {options_ticker}\n"
+            f"**Retrieved:** {timestamp}\n"
+            f"**Status:** Error\n\nError: {e}"
+        )
+        return err, {"type": "options_prices", "results": [], "error": str(e)}
+
+
+
+async def fetch_market_movers(
+    direction: str = "gainers",
+    config: Optional[RunnableConfig] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    """Fetch top market movers (gainers or losers).
+
+    Returns:
+        Tuple of (markdown content, artifact dict)
+    """
+    try:
+        provider = await get_financial_data_provider()
+        user_id = _get_user_id(config)
+        if provider.intel is None:
+            return (
+                "Market movers data is not available"
+                " (no MarketIntelSource configured).",
+                {"type": "market_movers", "results": []},
+            )
+
+        results = await provider.intel.get_movers(direction, user_id=user_id)
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        label = "Gainers" if direction == "gainers" else "Losers"
+        lines: List[str] = []
+        lines.append(f"## Market {label} ({len(results)} stocks)")
+        lines.append(f"**Retrieved:** {timestamp}")
+        lines.append("")
+
+        if not results:
+            lines.append(f"No {direction} data available.")
+        else:
+            lines.append("| # | Symbol | Name | Price | Change% |")
+            lines.append("|---|--------|------|-------|---------|")
+            for i, stock in enumerate(results, 1):
+                sym = stock.get("ticker", stock.get("symbol", "N/A"))
+                name = stock.get("name", "N/A")
+                if len(name) > 30:
+                    name = name[:27] + "..."
+                price = stock.get("price", stock.get("close"))
+                price_str = f"${price:.2f}" if price is not None else "N/A"
+                change_pct = stock.get("change_percent", stock.get("todaysChangePerc"))
+                if change_pct is not None:
+                    change_str = f"{change_pct:+.2f}%"
+                else:
+                    change_str = "N/A"
+                lines.append(f"| {i} | {sym} | {name} | {price_str} | {change_str} |")
+
+        content = "\n".join(lines)
+        artifact = {"type": "market_movers", "direction": direction, "results": results}
+        return content, artifact
+
+    except Exception as e:
+        logger.error(f"Error fetching market movers ({direction}): {e}")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        err = (
+            f"## Market Movers\n"
+            f"**Retrieved:** {timestamp}\n"
+            f"**Status:** Error\n\nError: {e}"
+        )
+        return err, {
+            "type": "market_movers", "results": [],
+            "error": str(e),
+        }

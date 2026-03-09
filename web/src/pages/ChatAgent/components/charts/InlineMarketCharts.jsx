@@ -62,6 +62,9 @@ const cardStyle = {
   padding: '12px 14px',
   cursor: 'pointer',
   transition: 'border-color 0.15s',
+  outline: 'none',
+  WebkitTapHighlightColor: 'transparent',
+  userSelect: 'none',
 };
 
 const ABBREVIATIONS = {
@@ -189,12 +192,37 @@ function formatMarketCap(num) {
   return `$${num.toLocaleString()}`;
 }
 
+const MARKET_STATUS_LABELS = {
+  early_trading: 'Pre-Market',
+  open: 'Regular',
+  late_trading: 'After-Hours',
+  closed: 'Closed',
+};
+const MARKET_STATUS_COLORS = {
+  early_trading: '#f59e0b',
+  open: GREEN,
+  late_trading: '#3b82f6',
+  closed: TEXT_COLOR,
+};
+
 export function InlineCompanyOverviewCard({ artifact, onClick }) {
   const { t } = useTranslation();
   const { symbol, name, quote } = artifact || {};
   if (!quote) return null;
 
-  const changeColor = (quote.change ?? 0) >= 0 ? GREEN : RED;
+  // Resolve display price: snapshot → regularClose, FMP fallback → price
+  const displayPrice = quote.regularClose ?? quote.price;
+  const displayChange = quote.regularChange ?? quote.change;
+  const displayChangePct = quote.regularChangePct ?? quote.changePct;
+  const changeColor = (displayChange ?? 0) >= 0 ? GREEN : RED;
+
+  // Extended hours
+  const marketStatus = quote.marketStatus;
+  const isExtended = marketStatus === 'early_trading' || marketStatus === 'late_trading';
+  const extPrice = quote.lastTradePrice;
+  const hasExtPrice = isExtended && extPrice != null && displayPrice != null && extPrice !== displayPrice;
+  const extDiff = hasExtPrice ? extPrice - displayPrice : 0;
+  const extDiffPct = hasExtPrice && displayPrice ? (extDiff / displayPrice * 100) : 0;
 
   return (
     <div
@@ -203,7 +231,7 @@ export function InlineCompanyOverviewCard({ artifact, onClick }) {
       onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-border-muted)')}
       onMouseLeave={(e) => (e.currentTarget.style.borderColor = CARD_BORDER)}
     >
-      {/* Company name + symbol */}
+      {/* Company name + symbol + market status */}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
         <span style={{ fontWeight: 700, color: 'var(--color-text-primary)', fontSize: 16 }}>
           {name || symbol}
@@ -211,21 +239,46 @@ export function InlineCompanyOverviewCard({ artifact, onClick }) {
         {name && (
           <span style={{ fontSize: 13, color: TEXT_COLOR }}>{symbol}</span>
         )}
+        {marketStatus && (
+          <span style={{
+            fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4,
+            color: MARKET_STATUS_COLORS[marketStatus] || TEXT_COLOR,
+            border: `1px solid ${MARKET_STATUS_COLORS[marketStatus] || TEXT_COLOR}`,
+            marginLeft: 'auto', whiteSpace: 'nowrap',
+          }}>
+            {MARKET_STATUS_LABELS[marketStatus] || marketStatus}
+          </span>
+        )}
       </div>
 
-      {/* Price + change */}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
-        {quote.price != null && (
+      {/* Regular close price + change */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: hasExtPrice ? 2 : 10 }}>
+        {displayPrice != null && (
           <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-text-primary)' }}>
-            ${quote.price.toFixed(2)}
+            ${displayPrice.toFixed(2)}
           </span>
         )}
-        {quote.change != null && (
+        {displayChange != null && (
           <span style={{ fontSize: 14, color: changeColor, fontWeight: 500 }}>
-            {quote.change >= 0 ? '+' : ''}{quote.change.toFixed(2)} ({quote.changePct?.toFixed(2)}%)
+            {displayChange >= 0 ? '+' : ''}{displayChange.toFixed(2)} ({displayChangePct?.toFixed(2)}%)
           </span>
         )}
       </div>
+
+      {/* Extended-hours price */}
+      {hasExtPrice && (
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10, fontSize: 13 }}>
+          <span style={{ color: TEXT_COLOR }}>
+            {marketStatus === 'early_trading' ? 'Pre-Mkt' : 'After-Hrs'}
+          </span>
+          <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
+            ${extPrice.toFixed(2)}
+          </span>
+          <span style={{ color: extDiff >= 0 ? GREEN : RED, fontWeight: 500 }}>
+            {extDiff >= 0 ? '+' : ''}{extDiff.toFixed(2)} ({extDiffPct >= 0 ? '+' : ''}{extDiffPct.toFixed(2)}%)
+          </span>
+        </div>
+      )}
 
       {/* Key stats grid */}
       <div

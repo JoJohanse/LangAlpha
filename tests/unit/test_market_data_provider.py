@@ -190,6 +190,7 @@ class TestMarketDataProvider:
             "symbol": "MSFT",
             "from_date": "2025-01-01",
             "to_date": "2025-06-01",
+            "is_index": False,
             "user_id": None,
         })
 

@@ -1275,9 +1275,9 @@ function ChatView({ workspaceId, threadId, onBack, workspaceName: initialWorkspa
                         onRejectCreateWorkspace={handleRejectCreateWorkspace}
                         onApproveStartQuestion={handleApproveStartQuestion}
                         onRejectStartQuestion={handleRejectStartQuestion}
-                        onEditMessage={handleEditMessage}
-                        onRegenerate={handleRegenerate}
-                        onRetry={handleRetry}
+                        onEditMessage={(id, content) => handleEditMessage(id, content, chatInputRef.current?.getModelOptions?.())}
+                        onRegenerate={(id) => handleRegenerate(id, chatInputRef.current?.getModelOptions?.())}
+                        onRetry={() => handleRetry(chatInputRef.current?.getModelOptions?.())}
                         onThumbUp={handleThumbUp}
                         onThumbDown={handleThumbDown}
                         getFeedbackForMessage={getFeedbackForMessage}

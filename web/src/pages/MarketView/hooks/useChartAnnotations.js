@@ -45,7 +45,7 @@ export function useChartAnnotations(candlestickSeriesRef, _stockMeta, quoteData,
     // Day range + previous close from quote data
     if (quoteData) {
       addLine(quoteData.dayHigh, 'Day High', 'rgba(34,211,238,0.4)', LineStyle.Dotted);
-      addLine(quoteData.dayLow, 'Day Low', 'rgba(251,191,36,0.4)', LineStyle.Dotted);
+      addLine(quoteData.dayLow, 'Day Low', 'rgba(239,68,68,0.4)', LineStyle.Dotted);
       addLine(quoteData.previousClose, 'Prev Close', 'rgba(139,143,163,0.5)', LineStyle.LargeDashed);
     }
 

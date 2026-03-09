@@ -8,13 +8,40 @@ const EXT_ICONS = {
   png: Image, jpg: Image, jpeg: Image, svg: Image, gif: Image, webp: Image,
 };
 
-const KNOWN_EXTS = new Set([
+export const KNOWN_EXTS = new Set([
   'md', 'txt', 'pdf', 'doc', 'docx', 'rtf',
   'py', 'js', 'jsx', 'ts', 'tsx', 'html', 'css', 'sh', 'bash', 'sql', 'r', 'ipynb',
   'csv', 'json', 'yaml', 'yml', 'xml', 'toml', 'ini', 'cfg', 'log', 'env', 'xlsx', 'xls',
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp',
   'zip', 'tar', 'gz',
 ]);
+
+/**
+ * Check if an href looks like a sandbox file path (not an external URL).
+ */
+export function isFilePath(href) {
+  if (!href || href.startsWith('http') || href.startsWith('//') || href.startsWith('mailto:') || href.startsWith('#')) return false;
+  const ext = href.split('.').pop()?.split(/[?#]/)[0]?.toLowerCase();
+  return ext && KNOWN_EXTS.has(ext);
+}
+
+/**
+ * Normalize a sandbox file path: strip /home/daytona/ prefix.
+ */
+export function normalizeFilePath(path) {
+  return path.replace(/^\/home\/daytona\//, '');
+}
+
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp']);
+
+/**
+ * Check if an href points to an image file.
+ */
+export function isImagePath(href) {
+  if (!href) return false;
+  const ext = href.split('.').pop()?.split(/[?#]/)[0]?.toLowerCase();
+  return ext && IMAGE_EXTS.has(ext);
+}
 
 /**
  * Extract file paths from message text.

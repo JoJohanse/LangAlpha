@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef, useCallback } from 'react';
-import { createChart, ColorType, CrosshairMode, PriceScaleMode, LineType } from 'lightweight-charts';
+import { createChart, ColorType, CrosshairMode, PriceScaleMode, LineType, LineStyle } from 'lightweight-charts';
 import html2canvas from 'html2canvas';
 import './MarketChart.css';
 import { fetchStockData } from '../utils/api';
@@ -8,10 +8,12 @@ import {
   getChartTheme,
   INTERVALS, PRIMARY_INTERVAL_KEYS, INITIAL_LOAD_DAYS, SCROLL_CHUNK_DAYS,
   SCROLL_LOAD_THRESHOLD, RANGE_CHANGE_DEBOUNCE_MS,
+  STAGE1_LOAD_DAYS, STAGE2_BACKFILL_DAYS, PREFETCH_ENABLED_INTERVALS, PREFETCH_THRESHOLD,
   MA_CONFIGS, DEFAULT_ENABLED_MA, RSI_PERIODS, BARS_PER_DAY, AUTO_FIT_BARS, TARGET_BAR_SPACING,
   OVERLAY_COLORS, OVERLAY_LABELS,
   EXTENDED_HOURS_INTERVALS, getExtendedHoursType, computeExtendedHoursRegions,
-  supports1sInterval,
+  EXT_COLOR_PRE, EXT_COLOR_POST,
+  isUSEquity, supports1sInterval,
 } from '../utils/chartConstants';
 import { ExtendedHoursBgPrimitive } from '../utils/extendedHoursBg';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -48,6 +50,7 @@ const MarketChart = React.memo(forwardRef(({
   liveTick,
   wsStatus,
   ginlixDataEnabled = true,
+  snapshot,
 }, ref) => {
   const { theme } = useTheme();
   const ct = getChartTheme(theme);
@@ -63,6 +66,10 @@ const MarketChart = React.memo(forwardRef(({
   const maSeriesRefs = useRef({});
   const baselineSeriesRef = useRef(null);
   const extHoursBgRef = useRef(null);
+  const extCloseLineRef = useRef(null);
+  const currentExtTypeRef = useRef(null);
+  const quoteDataRef = useRef(quoteData);
+  const snapshotRef = useRef(snapshot);
 
   const [loading, setLoading] = useState(true);
   const [scrollLoading, setScrollLoading] = useState(false);
@@ -129,6 +136,8 @@ const MarketChart = React.memo(forwardRef(({
   useEffect(() => { enabledMaPeriodsRef.current = enabledMaPeriods; }, [enabledMaPeriods]);
   useEffect(() => { rsiPeriodRef.current = rsiPeriod; }, [rsiPeriod]);
   useEffect(() => { intervalRef.current = interval; }, [interval]);
+  useEffect(() => { quoteDataRef.current = quoteData; }, [quoteData]);
+  useEffect(() => { snapshotRef.current = snapshot; }, [snapshot]);
   const symbolRef = useRef(symbol);
   useEffect(() => { symbolRef.current = symbol; }, [symbol]);
 
@@ -166,6 +175,12 @@ const MarketChart = React.memo(forwardRef(({
   const fetchingRef = useRef(false);
   const rangeChangeTimerRef = useRef(null);
   const rangeUnsubRef = useRef(null);
+
+  // Refs for staged loading and background prefetch
+  const stage2AbortRef = useRef(null);
+  const prefetchAbortRef = useRef(null);
+  const prefetchedDataRef = useRef(null);
+  const prefetchingRef = useRef(false);
 
   // Chart data state for hooks
   const [chartDataForHooks, setChartDataForHooks] = useState([]);
@@ -287,7 +302,7 @@ const MarketChart = React.memo(forwardRef(({
     // Update candlestick series in-place (same time = update, newer = append)
     candlestickSeriesRef.current.update({ time: barTime, open: barOpen, high: barHigh, low: barLow, close: barClose });
 
-    const ext = EXTENDED_HOURS_INTERVALS.has(interval) && getExtendedHoursType(barTime);
+    const ext = isUSEquity(symbolRef.current) && EXTENDED_HOURS_INTERVALS.has(interval) && getExtendedHoursType(barTime);
     const up = barClose >= barOpen;
     const ct = ctRef.current;
     if (volumeSeriesRef.current) {
@@ -312,6 +327,9 @@ const MarketChart = React.memo(forwardRef(({
     if (ext && extHoursBgRef.current) {
       extHoursBgRef.current.setRegions(computeExtendedHoursRegions(data));
     }
+
+    // Keep extended-hours price lines in sync with live bars
+    syncExtendedHoursLines(barTime);
 
     // Incremental RSI update
     if (rsiSmoothingRef.current && rsiSeriesRef.current) {
@@ -451,10 +469,73 @@ const MarketChart = React.memo(forwardRef(({
     },
   }));
 
+  // --- Extended-hours price lines (close line + colored current-price line) ---
+  const syncExtendedHoursLines = useCallback((lastBarTime) => {
+    const series = candlestickSeriesRef.current;
+    if (!series) return;
+
+    const isExtInterval = isUSEquity(symbolRef.current) && EXTENDED_HOURS_INTERVALS.has(intervalRef.current);
+    const extType = isExtInterval ? getExtendedHoursType(lastBarTime) : null;
+    const prevType = currentExtTypeRef.current;
+
+    if (extType === prevType) return;
+    currentExtTypeRef.current = extType;
+
+    if (extType) {
+      const color = extType === 'pre' ? EXT_COLOR_PRE : EXT_COLOR_POST;
+      const label = extType === 'pre' ? 'Pre' : 'After';
+      // Color the last-value price line amber/blue and label it "Pre"/"After"
+      series.applyOptions({ priceLineColor: color, title: label });
+
+      // After-hours: show today's regular session close (prev_close + regular_trading_change).
+      // Pre-market: skip — the "Prev Close" annotation already shows the same value.
+      if (extCloseLineRef.current) {
+        try { series.removePriceLine(extCloseLineRef.current); } catch (_) { /* ok */ }
+        extCloseLineRef.current = null;
+      }
+      if (extType === 'post') {
+        const snap = snapshotRef.current;
+        // Derive today's 4 PM close: previous_close (yesterday) + regular_trading_change
+        const prevClose = snap?.previous_close;
+        const regChange = snap?.regular_trading_change;
+        const closePrice = (prevClose != null && regChange != null)
+          ? prevClose + regChange
+          : null;
+        if (closePrice != null) {
+          extCloseLineRef.current = series.createPriceLine({
+            price: closePrice,
+            title: 'Close',
+            color: 'rgba(139,143,163,0.7)',
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+          });
+        }
+      }
+    } else {
+      // Regular hours — reset to defaults
+      series.applyOptions({ priceLineColor: undefined, title: '' });
+      if (extCloseLineRef.current) {
+        try { series.removePriceLine(extCloseLineRef.current); } catch (_) { /* ok */ }
+        extCloseLineRef.current = null;
+      }
+    }
+  }, []);
+
+  // Re-sync extended-hours close line when quoteData or snapshot changes
+  useEffect(() => {
+    if (currentExtTypeRef.current) {
+      // Force re-sync by temporarily clearing the cached type
+      currentExtTypeRef.current = null;
+      const data = allDataRef.current;
+      if (data.length > 0) syncExtendedHoursLines(data[data.length - 1].time);
+    }
+  }, [snapshot?.previous_close, snapshot?.regular_trading_change, syncExtendedHoursLines]);
+
   // --- Update series data helper (used by both initial load and scroll load) ---
   const updateSeriesData = useCallback((data) => {
     const ct = ctRef.current;
-    const applyExt = EXTENDED_HOURS_INTERVALS.has(intervalRef.current);
+    const applyExt = isUSEquity(symbolRef.current) && EXTENDED_HOURS_INTERVALS.has(intervalRef.current);
 
     // Candlestick
     if (candlestickSeriesRef.current) {
@@ -484,6 +565,11 @@ const MarketChart = React.memo(forwardRef(({
       } else {
         extHoursBgRef.current.setRegions([]);
       }
+    }
+
+    // Extended-hours price lines (close + colored current price)
+    if (data.length > 0) {
+      syncExtendedHoursLines(data[data.length - 1].time);
     }
 
     // All MAs — compute all enabled, clear disabled
@@ -569,13 +655,66 @@ const MarketChart = React.memo(forwardRef(({
     }
   };
 
+  // --- Background prefetch for 1s (pre-load next scroll chunk before user reaches edge) ---
+  const triggerPrefetch = () => {
+    if (!PREFETCH_ENABLED_INTERVALS.has(intervalRef.current)) return;
+    if (prefetchingRef.current || prefetchedDataRef.current) return;
+    if (!oldestDateRef.current) return;
+
+    prefetchingRef.current = true;
+    const capturedOldest = oldestDateRef.current;
+    const capturedSym = symbolRef.current;
+    const capturedInterval = intervalRef.current;
+    const days = SCROLL_CHUNK_DAYS[capturedInterval] || 0;
+
+    prefetchAbortRef.current?.abort();
+    const ac = new AbortController();
+    prefetchAbortRef.current = ac;
+
+    const oldest = new Date(capturedOldest * 1000);
+    const toDate = new Date(oldest);
+    toDate.setDate(toDate.getDate() - 1);
+    const fromDate = new Date(toDate);
+    fromDate.setDate(fromDate.getDate() - days);
+
+    fetchStockData(capturedSym, capturedInterval,
+      fromDate.toISOString().split('T')[0],
+      toDate.toISOString().split('T')[0],
+      { signal: ac.signal }
+    ).then(result => {
+      if (ac.signal.aborted || symbolRef.current !== capturedSym) return;
+      if (result?.data?.length > 0) {
+        prefetchedDataRef.current = { data: result.data, anchorOldest: capturedOldest };
+      }
+    }).catch(err => {
+      if (err?.name !== 'AbortError' && err?.name !== 'CanceledError') {
+        console.warn('Prefetch failed:', err);
+      }
+    }).finally(() => {
+      prefetchingRef.current = false;
+    });
+  };
+
   // --- Scroll-based lazy loading ---
   const handleScrollLoadMore = useCallback(async () => {
     if (fetchingRef.current || !oldestDateRef.current) return;
     fetchingRef.current = true;
     setScrollLoading(true);
     try {
-      await fetchAndPrepend(SCROLL_CHUNK_DAYS[interval]);
+      const buf = prefetchedDataRef.current;
+      if (buf && buf.anchorOldest === oldestDateRef.current && buf.data?.length > 0) {
+        // Instant merge from prefetch buffer — no network wait
+        mergePrependedData(buf.data);
+        prefetchedDataRef.current = null;
+        triggerPrefetch();
+      } else {
+        // Buffer miss — fall back to synchronous fetch
+        prefetchedDataRef.current = null;
+        await fetchAndPrepend(SCROLL_CHUNK_DAYS[interval] || 0);
+        if (PREFETCH_ENABLED_INTERVALS.has(interval)) {
+          triggerPrefetch();
+        }
+      }
     } catch (err) {
       console.warn('Scroll-load fetch failed:', err);
     } finally {
@@ -804,6 +943,8 @@ const MarketChart = React.memo(forwardRef(({
       clearTimeout(rangeChangeTimerRef.current);
 
       extHoursBgRef.current = null;
+      extCloseLineRef.current = null;
+      currentExtTypeRef.current = null;
       candlestickSeriesRef.current = null;
       volumeSeriesRef.current = null;
       baselineSeriesRef.current = null;
@@ -864,7 +1005,7 @@ const MarketChart = React.memo(forwardRef(({
       // Re-color volume bars (extended-hours aware)
       if (volumeSeriesRef.current && allDataRef.current.length > 0) {
         const data = allDataRef.current;
-        const applyExt = EXTENDED_HOURS_INTERVALS.has(intervalRef.current);
+        const applyExt = isUSEquity(symbolRef.current) && EXTENDED_HOURS_INTERVALS.has(intervalRef.current);
         volumeSeriesRef.current.setData(data.map((d, i) => {
           const up = i > 0 && d.close >= data[i - 1].close;
           const ext = applyExt && getExtendedHoursType(d.time);
@@ -989,6 +1130,12 @@ const MarketChart = React.memo(forwardRef(({
     gapFillInProgressRef.current = false;
     minuteAggRef.current = { time: 0, open: 0, high: 0, low: 0, close: 0, volume: 0 };
 
+    // Cancel any in-flight stage 2 / prefetch from previous symbol/interval
+    stage2AbortRef.current?.abort();
+    prefetchAbortRef.current?.abort();
+    prefetchedDataRef.current = null;
+    prefetchingRef.current = false;
+
     // Unsubscribe previous scroll listener
     if (rangeUnsubRef.current) {
       rangeUnsubRef.current();
@@ -997,6 +1144,16 @@ const MarketChart = React.memo(forwardRef(({
 
     // Reset baseline on symbol/interval change
     if (showBaseline) setShowBaseline(false);
+
+    // Reset extended-hours price lines on symbol/interval change
+    if (extCloseLineRef.current && candlestickSeriesRef.current) {
+      try { candlestickSeriesRef.current.removePriceLine(extCloseLineRef.current); } catch (_) { /* ok */ }
+    }
+    extCloseLineRef.current = null;
+    currentExtTypeRef.current = null;
+    if (candlestickSeriesRef.current) {
+      candlestickSeriesRef.current.applyOptions({ priceLineColor: undefined });
+    }
 
     // Clear stale chart data so previous interval/symbol doesn't linger under an error
     const clearChartSeries = () => {
@@ -1027,7 +1184,7 @@ const MarketChart = React.memo(forwardRef(({
       setError(null);
 
       try {
-        const loadDays = INITIAL_LOAD_DAYS[interval];
+        const loadDays = (interval in STAGE1_LOAD_DAYS) ? STAGE1_LOAD_DAYS[interval] : INITIAL_LOAD_DAYS[interval];
 
         let fromDate, toDate;
         if (loadDays > 0) {
@@ -1072,12 +1229,89 @@ const MarketChart = React.memo(forwardRef(({
             const unsubscribe = chartRef.current.timeScale().subscribeVisibleLogicalRangeChange((range) => {
               clearTimeout(rangeChangeTimerRef.current);
               rangeChangeTimerRef.current = setTimeout(() => {
-                if (range && range.from <= SCROLL_LOAD_THRESHOLD) {
+                if (!range) return;
+                // Prefetch: start loading next chunk early (150 bars from left)
+                if (range.from <= PREFETCH_THRESHOLD && PREFETCH_ENABLED_INTERVALS.has(intervalRef.current)) {
+                  triggerPrefetch();
+                }
+                // Scroll-load: merge when near edge (20 bars from left)
+                if (range.from <= SCROLL_LOAD_THRESHOLD) {
                   handleScrollLoadMore();
                 }
               }, RANGE_CHANGE_DEBOUNCE_MS);
             });
             rangeUnsubRef.current = unsubscribe;
+          }
+
+          // --- Stage 2: background backfill ---
+          const backfillDays = STAGE2_BACKFILL_DAYS[interval];
+          if (backfillDays > 0 && oldestDateRef.current) {
+            const stage2Abort = new AbortController();
+            stage2AbortRef.current = stage2Abort;
+            const capturedSym = symbol;
+
+            // Yield to rendering before starting background fetch
+            setTimeout(async () => {
+              if (stage2Abort.signal.aborted || symbolRef.current !== capturedSym) return;
+
+              // --- Today gap fill for 1s: fill missing morning bars ---
+              if (interval === '1s' && oldestDateRef.current) {
+                const firstBarDate = new Date(oldestDateRef.current * 1000);
+                const firstBarMins = firstBarDate.getUTCHours() * 60 + firstBarDate.getUTCMinutes();
+                const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+                const firstBarDateStr = firstBarDate.toISOString().split('T')[0];
+
+                // Fill if first bar is from today and starts after 4:30 AM ET (270 mins)
+                if (firstBarDateStr === todayStr && firstBarMins > 270) {
+                  try {
+                    const gapResult = await fetchStockData(capturedSym, '1s', todayStr, todayStr,
+                      { signal: stage2Abort.signal });
+                    if (stage2Abort.signal.aborted || symbolRef.current !== capturedSym) return;
+                    if (gapResult?.data?.length > 0) {
+                      const gapBars = gapResult.data.filter(b => b.time < oldestDateRef.current);
+                      if (gapBars.length > 0) {
+                        mergePrependedData(gapBars);
+                      }
+                    }
+                  } catch (err) {
+                    if (err?.name !== 'AbortError' && err?.name !== 'CanceledError') {
+                      console.warn('Today gap fill failed:', err);
+                    }
+                  }
+                }
+              }
+
+              if (stage2Abort.signal.aborted || symbolRef.current !== capturedSym) return;
+
+              // --- Backwards backfill: fetch prior days ---
+              const oldest = new Date(oldestDateRef.current * 1000);
+              const to = new Date(oldest);
+              to.setDate(to.getDate() - 1);
+              const from = new Date(to);
+              const maxMaPeriod = Math.max(...enabledMaPeriodsRef.current, 0);
+              const maOverhead = Math.ceil((maxMaPeriod / (BARS_PER_DAY[interval] || 1)) * 1.5);
+              from.setDate(from.getDate() - backfillDays - maOverhead);
+
+              try {
+                const result = await fetchStockData(capturedSym, interval,
+                  from.toISOString().split('T')[0],
+                  to.toISOString().split('T')[0],
+                  { signal: stage2Abort.signal });
+                if (stage2Abort.signal.aborted || symbolRef.current !== capturedSym) return;
+                if (result?.data?.length > 0) {
+                  mergePrependedData(result.data);
+                }
+              } catch (err) {
+                if (err?.name !== 'AbortError' && err?.name !== 'CanceledError') {
+                  console.warn('Stage 2 backfill failed:', err);
+                }
+              }
+
+              // Start prefetching the next scroll chunk for prefetch-enabled intervals
+              if (PREFETCH_ENABLED_INTERVALS.has(interval) && symbolRef.current === capturedSym) {
+                triggerPrefetch();
+              }
+            }, 50);
           }
 
         } else {
@@ -1119,6 +1353,8 @@ const MarketChart = React.memo(forwardRef(({
 
     return () => {
       abortController.abort();
+      stage2AbortRef.current?.abort();
+      prefetchAbortRef.current?.abort();
     };
   }, [symbol, interval, onStockMeta, updateSeriesData, handleScrollLoadMore]);
 
