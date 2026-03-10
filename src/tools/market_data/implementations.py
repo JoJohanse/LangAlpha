@@ -14,6 +14,7 @@ from langchain_core.runnables import RunnableConfig
 
 from .utils import format_number, format_percentage, get_market_session
 from src.data_client import get_financial_data_provider, get_market_data_provider
+from src.data_client.ginlix_data.pagination import paginate_cursor
 from src.data_client.market_data_provider import symbol_timezone
 
 logger = logging.getLogger(__name__)
@@ -2912,13 +2913,14 @@ async def fetch_stock_screener(
 async def fetch_options_chain(
     underlying: str,
     contract_type: Optional[str] = None,
-    expiration_date: Optional[str] = None,
+    expiration_date_gte: Optional[str] = None,
+    expiration_date_lte: Optional[str] = None,
     strike_min: Optional[float] = None,
     strike_max: Optional[float] = None,
     limit: int = 20,
     config: Optional[RunnableConfig] = None,
 ) -> Tuple[str, Dict[str, Any]]:
-    """Fetch options chain for an underlying ticker.
+    """Fetch options chain with snapshot pricing for an underlying ticker.
 
     Returns:
         Tuple of (markdown content, artifact dict)
@@ -2933,22 +2935,51 @@ async def fetch_options_chain(
                 {"type": "options_chain", "results": []},
             )
 
-        filters: Dict[str, Any] = {"limit": limit}
+        # Per-page size matches limit (API max 1000), paginate until we have enough
+        page_size = min(limit, 1000)
+        filters: Dict[str, Any] = {"limit": page_size}
         if contract_type:
             filters["contract_type"] = contract_type
-        if expiration_date:
-            filters["expiration_date"] = expiration_date
+        if expiration_date_gte:
+            filters["expiration_date_gte"] = expiration_date_gte
+        if expiration_date_lte:
+            filters["expiration_date_lte"] = expiration_date_lte
         if strike_min is not None:
             filters["strike_price_gte"] = strike_min
         if strike_max is not None:
             filters["strike_price_lte"] = strike_max
 
-        data = await provider.intel.get_options_chain(underlying, user_id=user_id, **filters)
-        results = data.get("results", [])
+        async def _fetch_page(p: Dict) -> Dict:
+            return await provider.intel.get_options_chain(
+                underlying, user_id=user_id, **p,
+            )
+
+        results = await paginate_cursor(_fetch_page, filters, limit=limit)
+
+        # Batch-fetch snapshots for pricing data
+        snapshot_map: Dict[str, Dict] = {}
+        market_status = None
+        if results:
+            tickers = [c.get("ticker") for c in results if c.get("ticker")]
+            try:
+                snapshots = await provider.intel.get_options_snapshot(
+                    tickers, user_id=user_id,
+                )
+                for snap in snapshots:
+                    snap_ticker = snap.get("ticker")
+                    if snap_ticker:
+                        snapshot_map[snap_ticker] = snap
+                        if market_status is None:
+                            market_status = snap.get("market_status")
+            except Exception:
+                logger.debug("Failed to fetch options snapshots", exc_info=True)
 
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         lines: List[str] = []
-        lines.append(f"## Options Chain: {underlying} ({len(results)} contracts)")
+        header = f"## Options Chain: {underlying} ({len(results)} contracts)"
+        if market_status:
+            header += f" | Market: {market_status}"
+        lines.append(header)
         lines.append(f"**Retrieved:** {timestamp}")
         if contract_type:
             lines.append(f"**Type:** {contract_type.upper()}")
@@ -2957,22 +2988,29 @@ async def fetch_options_chain(
         if not results:
             lines.append("No contracts found matching the given criteria.")
         else:
-            lines.append("| Ticker | Type | Strike | Expiry | Style |")
-            lines.append("|--------|------|--------|--------|-------|")
+            lines.append("| Ticker | Type | Strike | Expiry | Close | Chg% | Volume |")
+            lines.append("|--------|------|--------|--------|-------|------|--------|")
             for c in results:
                 ticker = c.get("ticker", "N/A")
                 ctype = c.get("contract_type", "N/A")
                 strike = c.get("strike_price")
                 strike_str = f"${strike:.2f}" if strike is not None else "N/A"
                 expiry = c.get("expiration_date", "N/A")
-                style = c.get("exercise_style", "N/A")
-                lines.append(
-                    f"| {ticker} | {ctype} | {strike_str} | {expiry} | {style} |"
-                )
 
-            next_cursor = data.get("next_cursor")
-            if next_cursor:
-                lines.append(f"\n*More contracts available (cursor: `{next_cursor}`)*")
+                # Merge snapshot session data
+                snap = snapshot_map.get(ticker, {})
+                session = snap.get("session", {})
+                close_val = session.get("close")
+                close_str = f"${close_val:.2f}" if close_val is not None else "—"
+                chg_pct = session.get("change_percent")
+                chg_str = f"{chg_pct:+.2f}%" if chg_pct is not None else "—"
+                vol = session.get("volume")
+                vol_str = f"{int(vol):,}" if vol is not None else "—"
+
+                lines.append(
+                    f"| {ticker} | {ctype} | {strike_str} | {expiry}"
+                    f" | {close_str} | {chg_str} | {vol_str} |"
+                )
 
         content = "\n".join(lines)
         artifact = {
@@ -2994,94 +3032,6 @@ async def fetch_options_chain(
             "type": "options_chain", "results": [],
             "error": str(e),
         }
-
-
-async def fetch_options_prices(
-    options_ticker: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    interval: str = "1hour",
-    config: Optional[RunnableConfig] = None,
-) -> Tuple[str, Dict[str, Any]]:
-    """Fetch OHLCV price data for an options contract.
-
-    Returns:
-        Tuple of (markdown content, artifact dict)
-    """
-    try:
-        provider = await get_financial_data_provider()
-        user_id = _get_user_id(config)
-        if provider.intel is None:
-            return (
-                "Options price data is not available"
-                " (no MarketIntelSource configured).",
-                {"type": "options_prices", "results": []},
-            )
-
-        results = await provider.intel.get_options_ohlcv(
-            options_ticker, from_date=start_date, to_date=end_date,
-            interval=interval, user_id=user_id,
-        )
-
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        lines: List[str] = []
-        lines.append(
-            f"## Options Prices: {options_ticker}"
-            f" ({len(results)} bars, {interval})"
-        )
-        lines.append(f"**Retrieved:** {timestamp}")
-        lines.append("")
-
-        if not results:
-            lines.append("No price data available for this contract.")
-        elif len(results) <= 20:
-            lines.append("| Time | Open | High | Low | Close | Volume |")
-            lines.append("|------|------|------|-----|-------|--------|")
-            for bar in results:
-                t = bar.get("time", "")
-                if isinstance(t, (int, float)) and t > 1e10:
-                    dt = datetime.fromtimestamp(t / 1000, tz=timezone.utc)
-                    t = dt.strftime("%Y-%m-%d %H:%M")
-                o = bar.get("open", 0)
-                h = bar.get("high", 0)
-                lo = bar.get("low", 0)
-                c = bar.get("close", 0)
-                v = bar.get("volume", 0)
-                lines.append(
-                    f"| {t} | {o:.2f} | {h:.2f} | {lo:.2f} | {c:.2f} | {v:,} |"
-                )
-        else:
-            # Summary for long series
-            opens = [b.get("open", 0) for b in results]
-            highs = [b.get("high", 0) for b in results]
-            lows = [b.get("low", 0) for b in results]
-            closes = [b.get("close", 0) for b in results]
-            volumes = [b.get("volume", 0) for b in results]
-            lines.append(f"- **Bars:** {len(results)}")
-            lines.append(f"- **Open:** {opens[0]:.2f} → **Close:** {closes[-1]:.2f}")
-            lines.append(f"- **High:** {max(highs):.2f} | **Low:** {min(lows):.2f}")
-            lines.append(f"- **Avg Volume:** {sum(volumes) / len(volumes):,.0f}")
-            if opens[0] > 0:
-                change_pct = (closes[-1] - opens[0]) / opens[0] * 100
-                lines.append(f"- **Period Change:** {change_pct:+.2f}%")
-
-        content = "\n".join(lines)
-        artifact = {
-            "type": "options_prices",
-            "ticker": options_ticker,
-            "results": results,
-        }
-        return content, artifact
-
-    except Exception as e:
-        logger.error(f"Error fetching options prices for {options_ticker}: {e}")
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        err = (
-            f"## Options Prices: {options_ticker}\n"
-            f"**Retrieved:** {timestamp}\n"
-            f"**Status:** Error\n\nError: {e}"
-        )
-        return err, {"type": "options_prices", "results": [], "error": str(e)}
 
 
 

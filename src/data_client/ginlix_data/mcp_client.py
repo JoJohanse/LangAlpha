@@ -17,6 +17,7 @@ import httpx
 
 from ..market_data_provider import is_us_symbol
 from ..normalize import normalize_bars
+from .pagination import paginate_cursor
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +196,31 @@ class GinlixMCPClient:
             logger.warning("Token refresh failed: %s", exc)
         return None
 
+    # -- shared helpers ------------------------------------------------------
+
+    async def _fetch_paginated_bars(
+        self, url: str, params: dict[str, Any],
+    ) -> list[dict]:
+        """Cursor-based pagination loop for aggregate bar endpoints."""
+        all_bars: list[dict] = []
+        multiplier = params["multiplier"]
+        timespan = params["timespan"]
+        for _page in range(_MAX_PAGES):
+            resp = await self.request("GET", url, params=params)
+            resp.raise_for_status()
+            body = resp.json()
+            all_bars.extend(body.get("results", []))
+            next_cursor = body.get("next_cursor")
+            if not next_cursor:
+                break
+            params = {
+                "multiplier": multiplier,
+                "timespan": timespan,
+                "limit": 50000,
+                "cursor": next_cursor,
+            }
+        return all_bars
+
     # -- data fetching -------------------------------------------------------
 
     async def fetch_stock_data(
@@ -244,27 +270,9 @@ class GinlixMCPClient:
         }
 
         try:
-            all_bars: list[dict] = []
-            for _page in range(_MAX_PAGES):
-                resp = await self.request(
-                    "GET",
-                    f"/api/v1/data/aggregates/stock/{symbol}",
-                    params=params,
-                )
-                resp.raise_for_status()
-                body = resp.json()
-                all_bars.extend(body.get("results", []))
-
-                next_cursor = body.get("next_cursor")
-                if not next_cursor:
-                    break
-                params = {
-                    "multiplier": multiplier,
-                    "timespan": timespan,
-                    "limit": 50000,
-                    "cursor": next_cursor,
-                }
-
+            all_bars = await self._fetch_paginated_bars(
+                f"/api/v1/data/aggregates/stock/{symbol}", params,
+            )
             normalized = normalize_bars(all_bars, symbol, intraday=intraday)
             if intraday:
                 normalized = filter_bars_by_time(normalized, start_time, end_time)
@@ -282,6 +290,131 @@ class GinlixMCPClient:
         except Exception:
             logger.debug("ginlix-data fetch failed for %s", symbol, exc_info=True)
             return None
+
+    async def fetch_options_chain(
+        self,
+        underlying_ticker: str,
+        contract_type: str | None = None,
+        expiration_date_gte: str | None = None,
+        expiration_date_lte: str | None = None,
+        strike_price_gte: float | None = None,
+        strike_price_lte: float | None = None,
+        limit: int = 50,
+    ) -> dict:
+        """Fetch options contracts with auto-pagination.
+
+        Returns a dict with ``results`` list of contracts, or an error dict.
+        """
+        if not await self.ensure():
+            return {"error": "Options data requires ginlix-data (not configured)."}
+
+        page_size = min(limit, 1000)
+        params: dict[str, Any] = {
+            "underlying_ticker": underlying_ticker,
+            "limit": page_size,
+        }
+        if contract_type:
+            params["contract_type"] = contract_type
+        if expiration_date_gte:
+            params["expiration_date.gte"] = expiration_date_gte
+        if expiration_date_lte:
+            params["expiration_date.lte"] = expiration_date_lte
+        if strike_price_gte is not None:
+            params["strike_price.gte"] = strike_price_gte
+        if strike_price_lte is not None:
+            params["strike_price.lte"] = strike_price_lte
+
+        try:
+            async def _fetch_page(p: dict) -> dict:
+                resp = await self.request(
+                    "GET", "/api/v1/data/options/contracts", params=p,
+                )
+                resp.raise_for_status()
+                return resp.json()
+
+            results = await paginate_cursor(_fetch_page, params, limit=limit)
+            return {"results": results}
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"Failed to fetch options chain: {e}"}
+
+    async def fetch_options_prices(
+        self,
+        options_ticker: str,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        interval: str = "1day",
+    ) -> list[dict] | dict:
+        """Fetch OHLCV bars for an options contract.
+
+        Returns normalized OHLCV bars on success, or an error dict.
+        """
+        if not await self.ensure():
+            return {"error": "Options data requires ginlix-data (not configured)."}
+
+        interval_lower = interval.lower()
+        ginlix_interval = GINLIX_INTERVAL_MAP.get(interval_lower)
+        if interval_lower in DAILY_INTERVALS:
+            ginlix_interval = "1/day"
+        if not ginlix_interval:
+            return {"error": f"Unsupported interval: {interval}"}
+
+        multiplier, timespan = ginlix_interval.split("/")
+        params: dict[str, Any] = {
+            "multiplier": multiplier,
+            "timespan": timespan,
+            "limit": 50000,
+        }
+        if from_date:
+            params["from"] = from_date
+        if to_date:
+            params["to"] = to_date
+
+        try:
+            all_bars = await self._fetch_paginated_bars(
+                f"/api/v1/data/aggregates/option/{options_ticker}", params,
+            )
+            intraday = interval_lower not in DAILY_INTERVALS
+            normalized = normalize_bars(all_bars, options_ticker, intraday=intraday)
+            return normalized
+        except httpx.HTTPStatusError as e:
+            try:
+                detail = e.response.json().get("detail", e.response.text)
+            except Exception:
+                detail = e.response.text
+            return {"error": f"ginlix-data error ({e.response.status_code}): {detail}"}
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"Failed to fetch options prices: {e}"}
+
+    async def fetch_options_snapshot(
+        self,
+        options_tickers: str | list[str],
+    ) -> dict:
+        """Fetch real-time snapshots for options contracts.
+
+        Accepts a single ticker string or a list of tickers.
+        Returns a dict with ``data`` list of snapshot results, or an error dict.
+        """
+        if not await self.ensure():
+            return {"error": "Options data requires ginlix-data (not configured)."}
+
+        if isinstance(options_tickers, str):
+            options_tickers = [options_tickers]
+
+        try:
+            resp = await self.request(
+                "GET",
+                "/api/v1/data/snapshots/options",
+                params={"symbols": ",".join(options_tickers)},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            results = [
+                r for r in body.get("results", [])
+                if r.get("error") != "NOT_FOUND"
+            ]
+            return {"count": len(results), "data": results, "source": "ginlix-data"}
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"Failed to fetch options snapshot: {e}"}
 
     async def fetch_short_data(
         self,

@@ -80,6 +80,7 @@ from src.tools.market_data.tool import (
     get_stock_daily_prices,
     get_company_overview,
     get_market_indices,
+    get_options_chain,
     get_sector_performance,
     screen_stocks,
 )
@@ -342,6 +343,7 @@ class PTCAgent:
             get_stock_daily_prices,  # Stock OHLCV price data
             get_company_overview,  # Company investment analysis (includes real-time quote)
             get_market_indices,  # Market indices data
+            get_options_chain,  # Options contracts chain with snapshot pricing
             get_sector_performance,  # Sector performance metrics
             screen_stocks,  # Stock screener with filters
         ]

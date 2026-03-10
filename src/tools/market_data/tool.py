@@ -15,7 +15,6 @@ from .implementations import (
     fetch_market_indices,
     fetch_market_movers,
     fetch_options_chain,
-    fetch_options_prices,
     fetch_sector_performance,
     fetch_stock_daily_prices,
     fetch_stock_screener,
@@ -322,76 +321,42 @@ async def get_options_chain(
     underlying: str,
     config: RunnableConfig,
     contract_type: Optional[str] = None,
-    expiration_date: Optional[str] = None,
+    expiration_date_gte: Optional[str] = None,
+    expiration_date_lte: Optional[str] = None,
     strike_min: Optional[float] = None,
     strike_max: Optional[float] = None,
     limit: int = 20,
 ) -> Tuple[str, Dict[str, Any]]:
     """
-    Get options contracts for an underlying ticker.
+    Get options contracts for an underlying ticker with current pricing.
 
-    Retrieves available options contracts with filtering by type, expiration, and strike price.
+    Retrieves available options contracts with filtering by type, expiration range,
+    and strike price. Includes real-time session data (close, change%, volume).
 
     Args:
         underlying: Underlying ticker symbol (e.g., "AAPL", "TSLA")
         contract_type: Filter by "call" or "put" (default: both)
-        expiration_date: Filter by exact expiration date (YYYY-MM-DD)
+        expiration_date_gte: Minimum expiration date (YYYY-MM-DD)
+        expiration_date_lte: Maximum expiration date (YYYY-MM-DD)
         strike_min: Minimum strike price filter
         strike_max: Maximum strike price filter
         limit: Maximum number of contracts to return (default 20)
 
     Returns:
         Formatted markdown table of options contracts with ticker, type, strike,
-        expiry, and exercise style.
+        expiry, close price, change%, and volume.
 
     Example:
-        # Get AAPL call options
-        get_options_chain("AAPL", contract_type="call", limit=10)
+        # Get AAPL call options expiring in the next 3 months
+        get_options_chain("AAPL", contract_type="call",
+                         expiration_date_gte="2026-03-01", expiration_date_lte="2026-06-01")
 
         # Get TSLA options with strike between $200-$300
         get_options_chain("TSLA", strike_min=200, strike_max=300)
     """
     content, artifact = await fetch_options_chain(
-        underlying, contract_type, expiration_date, strike_min, strike_max, limit,
-        config=config,
-    )
-    return content, artifact
-
-
-@tool(response_format="content_and_artifact")
-async def get_options_prices(
-    options_ticker: str,
-    config: RunnableConfig,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    interval: str = "1hour",
-) -> Tuple[str, Dict[str, Any]]:
-    """
-    Get OHLCV price data for a specific options contract.
-
-    Retrieves historical price bars for an options contract ticker.
-
-    Args:
-        options_ticker: Options contract ticker (e.g., "O:AAPL251219C00150000")
-        start_date: Start date in YYYY-MM-DD format
-        end_date: End date in YYYY-MM-DD format
-        interval: Bar interval - "1min", "5min", "15min", "30min", "1hour", "4hour"
-            (default "1hour")
-
-    Returns:
-        - Short series (<=20 bars): Markdown table with time, OHLCV
-        - Long series (>20 bars): Summary with open/close, high/low, avg volume, change%
-
-    Example:
-        # Get hourly prices for an AAPL call option
-        get_options_prices("O:AAPL251219C00150000")
-
-        # Get 5-minute bars for a specific date range
-        get_options_prices("O:TSLA260116P00200000", start_date="2025-12-01",
-                          end_date="2025-12-05", interval="5min")
-    """
-    content, artifact = await fetch_options_prices(
-        options_ticker, start_date, end_date, interval, config=config,
+        underlying, contract_type, expiration_date_gte, expiration_date_lte,
+        strike_min, strike_max, limit, config=config,
     )
     return content, artifact
 

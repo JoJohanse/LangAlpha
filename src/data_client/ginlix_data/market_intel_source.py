@@ -73,6 +73,13 @@ class GinlixMarketIntelSource:
     ) -> dict[str, Any]:
         return await self.client.get_float(symbol, user_id=user_id)
 
+    async def get_options_snapshot(
+        self,
+        tickers: list[str],
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return await self.client.get_snapshots("options", tickers, user_id=user_id)
+
     async def get_movers(
         self, direction: str = "gainers", user_id: str | None = None
     ) -> list[dict[str, Any]]:
