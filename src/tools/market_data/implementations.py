@@ -14,6 +14,7 @@ from langchain_core.runnables import RunnableConfig
 
 from .utils import format_number, format_percentage, get_market_session
 from src.data_client import get_financial_data_provider, get_market_data_provider
+from src.data_client.market_data_provider import symbol_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +50,12 @@ def _normalize_market_bars(
     result: List[Dict[str, Any]] = []
     prev_close: Optional[float] = None
 
+    tz = symbol_timezone(symbol)
+
     for bar in sorted_bars:
         ts = bar.get("time")
         if ts is not None and isinstance(ts, (int, float)) and ts > 0:
-            dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
+            dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc).astimezone(tz)
             date_str = (
                 dt.strftime("%Y-%m-%d %H:%M:%S")
                 if datetime_format
