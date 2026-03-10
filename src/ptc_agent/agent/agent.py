@@ -29,6 +29,7 @@ from ptc_agent.agent.middleware import (
     # Tool middleware
     EmptyToolCallRetryMiddleware,
     LeakDetectionMiddleware,
+    ProtectedPathMiddleware,
     ToolArgumentParsingMiddleware,
     ToolErrorHandlingMiddleware,
     ToolResultNormalizationMiddleware,
@@ -358,6 +359,9 @@ class PTCAgent:
         shared_middleware.extend(
             [
                 ToolArgumentParsingMiddleware(),
+                ProtectedPathMiddleware(
+                    denied_directories=self.config.filesystem.denied_directories,
+                ),
                 ToolErrorHandlingMiddleware(),
                 LeakDetectionMiddleware(mcp_servers=self.config.mcp.servers),
                 ToolResultNormalizationMiddleware(),

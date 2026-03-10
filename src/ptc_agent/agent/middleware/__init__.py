@@ -30,6 +30,7 @@ from ptc_agent.agent.middleware.ask_user import AskUserMiddleware
 from ptc_agent.agent.middleware.tool import (
     EmptyToolCallRetryMiddleware,
     LeakDetectionMiddleware,
+    ProtectedPathMiddleware,
     ToolArgumentParsingMiddleware,
     ToolErrorHandlingMiddleware,
     ToolResultNormalizationMiddleware,
@@ -108,6 +109,7 @@ __all__ = [
     # Tool middleware
     "EmptyToolCallRetryMiddleware",
     "LeakDetectionMiddleware",
+    "ProtectedPathMiddleware",
     "ToolArgumentParsingMiddleware",
     "ToolErrorHandlingMiddleware",
     "ToolResultNormalizationMiddleware",

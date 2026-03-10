@@ -9,10 +9,13 @@ Manages workspace lifecycle with database persistence and sandbox integration:
 
 import asyncio
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+
+import httpx
 
 from ptc_agent.config import AgentConfig
 from ptc_agent.core.session import Session, SessionManager
@@ -152,6 +155,38 @@ class WorkspaceManager:
         """Record that a sync was performed for this workspace."""
         self._last_sync_at[workspace_id] = time.monotonic()
 
+    @staticmethod
+    async def _mint_sandbox_tokens(user_id: str, workspace_id: str) -> dict:
+        """Mint scoped OAuth2 tokens for sandbox ginlix-data access.
+
+        Returns token dict on success, empty dict on failure (graceful degradation).
+        When empty, the sandbox runs in FMP-only mode.
+        """
+        auth_url = os.getenv("AUTH_SERVICE_URL", "")
+        service_token = os.getenv("INTERNAL_SERVICE_TOKEN", "")
+        ginlix_data_url = os.getenv("GINLIX_DATA_URL", "")
+
+        # Skip entire token chain if ginlix-data is not configured
+        if not ginlix_data_url or not auth_url or not service_token:
+            return {}
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"{auth_url}/api/auth/data-tokens",
+                    json={"user_id": user_id, "workspace_id": workspace_id},
+                    headers={"X-Service-Token": service_token},
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except Exception as e:
+            logger.warning(
+                f"Failed to mint sandbox tokens — ginlix-data features disabled: {e}",
+                extra={"workspace_id": workspace_id},
+            )
+            return {}
+
     async def _sync_user_data_if_needed(
         self,
         workspace_id: str,
@@ -178,6 +213,24 @@ class WorkspaceManager:
             logger.debug(f"User data synced for workspace {workspace_id}")
         except Exception as e:
             logger.warning(f"User data sync failed for workspace {workspace_id}: {e}")
+
+    async def _ensure_sandbox_tokens(
+        self,
+        workspace_id: str,
+        user_id: str | None,
+        sandbox: Any,
+    ) -> None:
+        """Ensure sandbox has a valid token file; mint fresh tokens if missing or stale.
+
+        Called for reconnected sandboxes. New sandboxes get tokens during creation.
+        Always re-mints to guarantee a fresh access token after sandbox restart.
+        """
+        if not user_id:
+            return
+        tokens = await self._mint_sandbox_tokens(user_id, workspace_id)
+        if tokens:
+            await sandbox.upload_token_file(tokens)
+            logger.info(f"Refreshed sandbox tokens for workspace {workspace_id}")
 
     async def _sync_sandbox_assets(
         self,
@@ -210,6 +263,12 @@ class WorkspaceManager:
         # User data sync task
         if user_id:
             tasks.append(sync_user_data_to_sandbox(sandbox, user_id))
+
+        # Backfill token file for sandboxes created before scoped-token support
+        if reusing_sandbox:
+            tasks.append(
+                self._ensure_sandbox_tokens(workspace_id, user_id, sandbox)
+            )
 
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -281,8 +340,9 @@ class WorkspaceManager:
 
         Returns the new session (already cached and DB-updated).
         """
+        sandbox_tokens = await self._mint_sandbox_tokens(user_id or "", workspace_id)
         session = SessionManager.get_session(workspace_id, core_config)
-        await session.initialize()
+        await session.initialize(sandbox_tokens=sandbox_tokens)
         new_sandbox_id = getattr(session.sandbox, "sandbox_id", None)
 
         await self._sync_sandbox_assets(
@@ -373,10 +433,13 @@ class WorkspaceManager:
 
         async with self._acquire_workspace_lock(workspace_id):
             try:
-                # 2. Initialize sandbox via ptc-agent Session
+                # 2. Mint scoped tokens for sandbox ginlix-data access
+                sandbox_tokens = await self._mint_sandbox_tokens(user_id, workspace_id)
+
+                # 3. Initialize sandbox via ptc-agent Session
                 core_config = self.config.to_core_config()
                 session = SessionManager.get_session(workspace_id, core_config)
-                await session.initialize()
+                await session.initialize(sandbox_tokens=sandbox_tokens)
 
                 # Sync skills and user data to sandbox in parallel
                 await self._sync_sandbox_assets(

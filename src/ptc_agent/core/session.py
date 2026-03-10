@@ -57,11 +57,14 @@ class Session:
         """Mark agent.md cache as stale so the next get_agent_md() re-reads."""
         self._agent_md_dirty = True
 
-    async def initialize(self, sandbox_id: str | None = None) -> None:
+    async def initialize(
+        self, sandbox_id: str | None = None, sandbox_tokens: dict | None = None
+    ) -> None:
         """Initialize the session (connect MCP servers and setup sandbox).
 
         Args:
             sandbox_id: Optional existing sandbox ID to reconnect to instead of creating new
+            sandbox_tokens: Optional scoped OAuth2 tokens for sandbox ginlix-data access
         """
         if self._initialized:
             logger.warning(
@@ -128,6 +131,10 @@ class Session:
                 raise
 
             self.sandbox.mcp_registry = self.mcp_registry
+
+            # Upload scoped auth tokens before MCP servers start
+            if sandbox_tokens:
+                await self.sandbox.upload_token_file(sandbox_tokens)
 
             await self.sandbox.setup_tools_and_mcp(snapshot_name)
 

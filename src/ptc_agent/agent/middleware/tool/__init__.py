@@ -13,11 +13,13 @@ from ptc_agent.agent.middleware.tool.error_handling import (
     simplify_tool_error,
 )
 from ptc_agent.agent.middleware.tool.leak_detection import LeakDetectionMiddleware
+from ptc_agent.agent.middleware.tool.protected_path import ProtectedPathMiddleware
 from ptc_agent.agent.middleware.tool.result_normalization import ToolResultNormalizationMiddleware
 
 __all__ = [
     "EmptyToolCallRetryMiddleware",
     "LeakDetectionMiddleware",
+    "ProtectedPathMiddleware",
     "ToolArgumentParsingMiddleware",
     "ToolErrorHandlingMiddleware",
     "ToolResultNormalizationMiddleware",

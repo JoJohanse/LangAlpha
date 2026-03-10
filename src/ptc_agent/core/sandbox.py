@@ -529,6 +529,8 @@ class PTCSandbox:
                 continue
             if hasattr(server, "env") and server.env:
                 for key, value in server.env.items():
+                    if key == "INTERNAL_SERVICE_TOKEN":
+                        continue  # Never inject platform token into sandbox
                     if value.startswith("${") and value.endswith("}"):
                         var_name = value[2:-1]
                         resolved_value = os.getenv(var_name)
@@ -672,6 +674,40 @@ class PTCSandbox:
             )
 
         logger.info("Tools and MCP servers ready", sandbox_id=self.sandbox_id)
+
+    TOKEN_FILE_PATH = "/home/daytona/_internal/.mcp_tokens.json"
+
+    async def upload_token_file(self, tokens: dict) -> None:
+        """Write scoped auth tokens to a file in the sandbox.
+
+        Tokens are written as a JSON file (not env vars) because refresh tokens
+        rotate on each use and the MCP server needs to update them in-place.
+        Tokens carry deterministic prefixes (gxsa_, gxsr_) so the host-side
+        LeakDetectionMiddleware can pattern-match them without knowing exact values.
+        """
+        import os
+
+        if not tokens or not self.sandbox:
+            return
+
+        token_data = json.dumps({
+            "access_token": tokens["access_token"],
+            "refresh_token": tokens["refresh_token"],
+            "client_id": tokens["client_id"],
+            "auth_service_url": os.getenv("AUTH_SERVICE_URL", ""),
+            "ginlix_data_url": os.getenv("GINLIX_DATA_URL", ""),
+        })
+
+        try:
+            await self._daytona_call(
+                self.sandbox.fs.upload_file,
+                token_data.encode("utf-8"),
+                self.TOKEN_FILE_PATH,
+                retry_policy=_DaytonaRetryPolicy.SAFE,
+            )
+            logger.info("Uploaded sandbox token file", path=self.TOKEN_FILE_PATH)
+        except Exception as e:
+            logger.warning("Failed to upload sandbox token file", error=str(e))
 
     async def ensure_sandbox_ready(self) -> None:
         await self._wait_ready()
@@ -1076,9 +1112,21 @@ class PTCSandbox:
             sandbox_root=str(internal_root),
         )
 
-    def _compute_mcp_manifest(self, expected_files: set[str]) -> dict[str, Any]:
+    def _compute_mcp_manifest(
+        self, expected_files: set[str], local_paths: dict[str, str] | None = None
+    ) -> dict[str, Any]:
         files = sorted(expected_files)
-        payload = "\n".join(files)
+        # Include file content hashes so code changes trigger re-upload
+        parts = []
+        for f in files:
+            parts.append(f)
+            if local_paths and f in local_paths:
+                try:
+                    content = Path(local_paths[f]).read_bytes()
+                    parts.append(hashlib.sha256(content).hexdigest())
+                except OSError:
+                    pass
+        payload = "\n".join(parts)
         version = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         return {"version": version, "files": files}
 
@@ -1175,7 +1223,12 @@ class PTCSandbox:
         assert self.sandbox is not None
         sandbox = self.sandbox
 
-        manifest = self._compute_mcp_manifest(expected_files)
+        # Map filename → local path for content-based manifest hashing
+        local_paths = {
+            Path(resolved).name: resolved
+            for _, resolved, _ in files_to_upload
+        }
+        manifest = self._compute_mcp_manifest(expected_files, local_paths)
         remote_manifest = await self._read_mcp_manifest(mcp_servers_dir)
         remote_version = remote_manifest.get("version") if remote_manifest else None
         should_refresh = force_refresh or remote_version != manifest["version"]

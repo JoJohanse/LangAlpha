@@ -3,9 +3,11 @@
 Discovers secret env var names from MCP server config and resolves their
 values from os.environ. Scans ToolMessage.content for exact occurrences
 and redacts before they reach the LLM context.
+
 """
 
 import os
+import re
 
 import structlog
 from langchain.agents.middleware import AgentMiddleware
@@ -29,6 +31,9 @@ class LeakDetectionMiddleware(AgentMiddleware):
     exact values of secrets actually accessible to the agent (sandbox
     env vars like FMP_API_KEY, GITHUB_TOKEN, etc.).
     """
+
+    # Matches sandbox access tokens (gxsa_...) and refresh tokens (gxsr_...)
+    _SANDBOX_TOKEN_RE = re.compile(r"gxs[ar]_[A-Za-z0-9_.\-]+")
 
     def __init__(self, mcp_servers: list | None = None) -> None:
         """Initialize by extracting secret values from MCP server config.
@@ -81,6 +86,8 @@ class LeakDetectionMiddleware(AgentMiddleware):
             if value in content:
                 logger.warning("Leak detected in tool output", secret_name=name)
                 content = content.replace(value, f"[REDACTED:{name}]")
+        # Pattern-based redaction for prefixed sandbox tokens (catches refreshed tokens)
+        content = self._SANDBOX_TOKEN_RE.sub("[REDACTED:SANDBOX_TOKEN]", content)
         return content
 
     def wrap_tool_call(self, request, handler):
