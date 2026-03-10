@@ -91,6 +91,6 @@ Cross-page data goes through shared hooks in `hooks/`.
 |---|---|---|
 | `VITE_API_BASE_URL` | `http://localhost:8000` | Backend API base URL |
 | `VITE_SUPABASE_URL` | (unset = local dev) | Supabase project URL — controls auth mode |
-| `VITE_SUPABASE_ANON_KEY` | — | Supabase anonymous key |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | — | Supabase publishable (anon) key |
 | `VITE_AUTH_USER_ID` | `local-dev-user` | User ID when Supabase auth is disabled |
 | `VITE_CDN_BASE` | `/` | Asset base URL for CDN deployments |

@@ -7,18 +7,28 @@ React frontend for LangAlpha — a vibe investing agent with AI-powered research
 - **Supabase Auth** — OAuth login with session management and protected routes
 - **SSE Streaming Chat** — Real-time agent responses with subagent task cards, tool call display, and reasoning blocks
 - **HITL Plan Approval** — Review and approve/reject agent plans before execution
+- **React Query Data Layer** — Hierarchical cache key factory with prefix-based invalidation, shared hooks across pages
 - **Market Dashboard** — Watchlist and portfolio overview with stock data
 - **TradingView-Style Charting** — Interactive candlestick charts with AI chat sidebar for stock analysis
 - **Scheduled Automations** — Create and manage recurring agent tasks with cron scheduling and execution history
 - **Document Viewers** — Inline rendering of PDF, Excel, CSV, and HTML artifacts from agent responses
+- **Monaco Code Editor** — Syntax-highlighted code editor for code artifacts
 - **Todo Tracking** — Drawer-based task list synced with agent todo updates
+- **Dark/Light Theme** — Theme switching with CSS custom properties and synced Ant Design algorithm
+- **i18n** — Internationalization with English and Chinese locale support
+- **Math Rendering** — KaTeX-based LaTeX math in markdown responses
+- **Drag-and-Drop** — Workspace and thread reordering via `@dnd-kit`
+- **Public Sharing** — Share chat threads via public `/s/:shareToken` links
+- **Settings** — User preferences and API key management
+- **OAuth/Codex Integration** — External OAuth connection flows
 
 ## Tech Stack
 
 | Category | Libraries |
 |----------|-----------|
-| Framework | React 18, Vite 5 |
+| Framework | React 19, Vite 7 |
 | Routing | React Router 6 |
+| State / Fetching | `@tanstack/react-query` 5 |
 | UI Components | Ant Design 5, Radix UI (dialog, toast), shadcn-style `ui/` components |
 | Styling | Tailwind CSS 3, `clsx`, `tailwind-merge`, `class-variance-authority` |
 | Animation | Framer Motion 12 |
@@ -26,33 +36,45 @@ React frontend for LangAlpha — a vibe investing agent with AI-powered research
 | Charts | `lightweight-charts` (TradingView), Recharts |
 | Auth | `@supabase/supabase-js` |
 | HTTP | Axios |
-| Markdown | `react-markdown`, `remark-gfm`, `rehype-raw`, `react-syntax-highlighter` |
-| File Handling | `react-pdf`, `exceljs`, `xlsx`, `html2canvas`, `react-to-print` |
+| Markdown | `react-markdown`, `remark-gfm`, `remark-math`, `remark-cjk-friendly`, `rehype-katex`, `rehype-raw`, `react-syntax-highlighter` |
+| Math | `katex`, `rehype-katex` |
+| Code Editor | `@monaco-editor/react` |
+| DnD | `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities` |
+| i18n | `i18next`, `react-i18next` |
+| File Handling | `react-pdf`, `exceljs`, `html2canvas`, `react-to-print` |
+| Testing | Vitest, `@testing-library/react`, `@testing-library/jest-dom`, `@testing-library/user-event` |
 | Dev Tools | ESLint 9 |
 
 ## Project Structure
 
 ```
 src/
-├── api/                    # Axios client, Supabase client, stock API
-├── assets/                 # Static assets
+├── api/                    # Axios client with Bearer token interceptor
+├── assets/                 # Static assets (SVG, PNG)
 ├── components/
-│   ├── Main/               # Route definitions
+│   ├── Main/               # Lazy-loaded route definitions with AnimatePresence transitions
 │   ├── Sidebar/            # Navigation sidebar
 │   └── ui/                 # Reusable UI primitives (button, card, dialog, toast, etc.)
-├── contexts/               # AuthContext provider
-├── lib/                    # Utility helpers (cn)
+├── contexts/               # AuthContext (Supabase session), ThemeContext (light/dark)
+├── hooks/                  # Shared React Query hooks (useUser, useWorkspaces, usePreferences, etc.)
+├── lib/                    # Utility helpers (cn), queryKeys factory, supabase client
+├── locales/                # i18n translation files (en-US, zh-CN)
 ├── pages/
 │   ├── Login/              # OAuth login with animated background
 │   ├── Dashboard/          # Watchlist, portfolio, market overview
 │   ├── ChatAgent/          # Streaming chat with workspaces, threads, file panel
 │   ├── MarketView/         # Candlestick charts with AI chat sidebar
 │   ├── Automations/        # Scheduled agent task management
-│   └── Detail/             # Stock detail page
+│   ├── Settings/           # User preferences and API key management
+│   ├── SharedChat/         # Public shared chat view (no auth required)
+│   ├── OAuth/              # Codex OAuth callback handler
+│   ├── Detail/             # Stock detail and news detail pages
+│   └── ...
+├── test/                   # Vitest global setup (matchMedia, IntersectionObserver mocks)
 ├── styles/                 # Global styles
 ├── utils/                  # Shared utilities
-├── App.jsx                 # Root component
-└── main.jsx                # Entry point
+├── App.jsx                 # Root component with top-level routes
+└── main.jsx                # Entry point (provider stack)
 ```
 
 ## Routes
@@ -61,12 +83,15 @@ src/
 |------|------|
 | `/` | Login |
 | `/callback` | OAuth callback handler |
+| `/s/:shareToken` | Public shared chat view |
 | `/dashboard` | Dashboard |
 | `/chat` | Chat Agent (workspace gallery) |
 | `/chat/:workspaceId` | Chat Agent (thread gallery) |
-| `/chat/:workspaceId/:threadId` | Chat Agent (conversation) |
+| `/chat/t/:threadId` | Chat Agent (conversation) |
 | `/market` | Market View |
 | `/automations` | Automations |
+| `/settings` | Settings |
+| `/news/:id` | News Detail |
 | `/detail/:indexNumber` | Stock Detail |
 
 ## Environment Variables
@@ -74,9 +99,10 @@ src/
 | Variable | Description |
 |----------|-------------|
 | `VITE_API_BASE_URL` | Backend API base URL (empty in production for relative URLs) |
-| `VITE_SUPABASE_URL` | Supabase project URL |
+| `VITE_SUPABASE_URL` | Supabase project URL (unset = local dev mode, no auth) |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable (anon) key |
 | `VITE_AUTH_USER_ID` | Fallback user ID for local dev when Supabase is unset |
+| `VITE_CDN_BASE` | Asset base URL for CDN deployments (default `/`) |
 
 Copy `.env.example` and fill in your values:
 
@@ -100,15 +126,17 @@ npm install
 ### Scripts
 
 ```bash
-npm run dev       # Start dev server (http://localhost:5173)
-npm run build     # Production build → dist/
-npm run preview   # Preview production build
-npm run lint      # Run ESLint
+npm run dev        # Start dev server (http://localhost:5173)
+npm run build      # Production build → dist/
+npm run preview    # Preview production build
+npm run lint       # Run ESLint
+npm run test       # Run tests (Vitest, single run)
+npm run test:watch # Run tests in watch mode
 ```
 
 ## Navigation
 
-The sidebar provides four main sections:
+The sidebar provides five main sections:
 
 | Icon | Label | Path |
 |------|-------|------|
@@ -116,3 +144,4 @@ The sidebar provides four main sections:
 | MessageSquareText | Chat Agent | `/chat` |
 | ChartCandlestick | Market View | `/market` |
 | Timer | Automations | `/automations` |
+| Settings | Settings | `/settings` |
