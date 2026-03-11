@@ -166,12 +166,18 @@ importers:
       eslint-plugin-react-refresh:
         specifier: ^0.4.26
         version: 0.4.26(eslint@9.39.4(jiti@1.21.7))
+      fancy-canvas:
+        specifier: ^2.1.0
+        version: 2.1.0
       globals:
         specifier: ^16.5.0
         version: 16.5.0
       jsdom:
         specifier: ^27.0.1
         version: 27.4.0
+      monaco-editor:
+        specifier: ^0.55.1
+        version: 0.55.1
       postcss:
         specifier: ^8.5.6
         version: 8.5.8
