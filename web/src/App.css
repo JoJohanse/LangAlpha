@@ -4,15 +4,16 @@
 
 .app-layout {
   width: 100%;
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   position: relative;
+  overflow: hidden;
 }
 
 .app-main {
   width: 100%;
-  min-height: 100vh;
-  padding-left: 80px;
+  height: 100%;
+  padding-left: var(--sidebar-width);
   background-color: hsl(var(--bg-main));
   overflow: auto;
   box-sizing: border-box;

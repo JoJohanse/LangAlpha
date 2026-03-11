@@ -403,7 +403,7 @@ function MarketViewInner() {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDragging.current) return;
       const delta = dragStartX.current - e.clientX;
-      const newWidth = Math.min(700, Math.max(300, dragStartWidth.current + delta));
+      const newWidth = Math.min(Math.min(700, window.innerWidth * 0.4), Math.max(300, dragStartWidth.current + delta));
       setChatPanelWidth(newWidth);
     };
 

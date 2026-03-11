@@ -4,7 +4,7 @@
    ============================================ */
 
 .sidebar {
-  width: 80px;
+  width: var(--sidebar-width);
   height: 100vh;
   position: fixed;
   left: 0;

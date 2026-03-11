@@ -310,6 +310,15 @@
   line-height: 1.5;
 }
 
+/* Auto-collapse on narrow viewports */
+@media (max-width: 1280px) {
+  .market-sidebar:not(.market-sidebar--collapsed) {
+    width: 36px;
+    align-items: center;
+    padding-top: 10px;
+  }
+}
+
 /* Loading skeleton */
 .market-sidebar-skeleton {
   display: flex;

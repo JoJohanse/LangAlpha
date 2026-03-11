@@ -5,6 +5,8 @@
 
 /* ---------- Semantic color tokens (hex/rgba for inline use) ---------- */
 :root {
+  --sidebar-width: 80px;
+
   --color-bg-page: #000000;
   --color-bg-card: #0A0A0A;
   --color-bg-elevated: #0F0F0F;
