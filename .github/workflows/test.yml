@@ -84,6 +84,7 @@ jobs:
         with:
           version: latest
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
       - run: pnpm vitest run --reporter=verbose
 
   frontend-e2e:
@@ -101,8 +102,8 @@ jobs:
         with:
           version: latest
       - run: pnpm install --frozen-lockfile
-      - run: npx playwright install chromium --with-deps
-      - run: npx playwright test
+      - run: pnpm exec playwright install chromium --with-deps
+      - run: pnpm exec playwright test
       - uses: actions/upload-artifact@v4
         if: always()
         with:
