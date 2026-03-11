@@ -813,12 +813,45 @@ async def astream_flash_workflow(
                 query_metadata["additional_context"] = serialized_ctx
 
         # Also detect slash commands from message text for persistence
-        if "additional_context" not in query_metadata:
+        if not request.hitl_response and "additional_context" not in query_metadata:
             _, early_detected = detect_slash_commands(user_input, mode="flash")
             if early_detected:
                 query_metadata["additional_context"] = [
                     {"type": "skills", "name": s.name} for s in early_detected
                 ]
+
+        # Extract HITL answer metadata for persistence (mirrors PTC handler)
+        feedback_action = None
+        query_content = user_input
+
+        if request.hitl_response:
+            summary = summarize_hitl_response_map(request.hitl_response)
+            feedback_action = summary["feedback_action"]
+            query_content = summary["content"]
+            query_metadata["hitl_interrupt_ids"] = summary["interrupt_ids"]
+
+            hitl_answers = {}
+            for interrupt_id, response in request.hitl_response.items():
+                decisions = (
+                    response.decisions
+                    if hasattr(response, "decisions")
+                    else response.get("decisions", [])
+                )
+                for d in decisions:
+                    d_type = d.type if hasattr(d, "type") else d.get("type")
+                    d_msg = (
+                        d.message if hasattr(d, "message") else d.get("message")
+                    ) or ""
+                    if d_type == "approve" and d_msg:
+                        hitl_answers[interrupt_id] = d_msg
+                    elif d_type == "reject" and not d_msg:
+                        hitl_answers[interrupt_id] = None
+            if hitl_answers:
+                query_metadata["hitl_answers"] = hitl_answers
+                has_answers = any(v is not None for v in hitl_answers.values())
+                feedback_action = (
+                    "QUESTION_ANSWERED" if has_answers else "QUESTION_SKIPPED"
+                )
 
         # Skip query persistence for checkpoint replay (regenerate/retry) —
         # the original user message is preserved (or no new message exists)
@@ -835,8 +868,9 @@ async def astream_flash_workflow(
             )
         else:
             await persistence_service.persist_query_start(
-                content=user_input,
+                content=query_content,
                 query_type=query_type,
+                feedback_action=feedback_action,
                 metadata=query_metadata,
             )
 
