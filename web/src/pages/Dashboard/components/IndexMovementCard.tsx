@@ -2,16 +2,33 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, ResponsiveContainer, YAxis, Tooltip } from 'recharts';
 import { motion } from 'framer-motion';
+import type { IndexData } from '@/types/market';
 
-function IndexCard({ index, delay }) {
+interface SparklineDataPoint {
+  time?: string;
+  val: number;
+  i: number;
+}
+
+interface IndexCardProps {
+  index: IndexData;
+  delay: number;
+}
+
+interface IndexMovementCardProps {
+  indices?: IndexData[];
+  loading?: boolean;
+}
+
+function IndexCard({ index, delay }: IndexCardProps) {
   const navigate = useNavigate();
   const pos = index.isPositive;
   const ch = Number(index.change);
   const pct = Number(index.changePercent);
   const changeStr = ch.toFixed(2);
   const pctStr = '(' + (pos ? '+' : '') + pct.toFixed(2) + '%)';
-  const chartData = (index.sparklineData || []).map((pt, i) =>
-    typeof pt === 'object' ? { ...pt, i } : { val: pt, i },
+  const chartData: SparklineDataPoint[] = (index.sparklineData || []).map((pt, i) =>
+    typeof pt === 'object' ? { ...pt, i } : { val: pt as unknown as number, i },
   );
 
   const today = new Date();
@@ -125,7 +142,7 @@ function IndexCard({ index, delay }) {
   );
 }
 
-function IndexMovementCard({ indices = [], loading = false }) {
+function IndexMovementCard({ indices = [], loading = false }: IndexMovementCardProps) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
       {loading

@@ -1,8 +1,16 @@
 import React from 'react';
 import { Plus } from 'lucide-react';
 
-const Portfolio = () => {
-  const portfolioItems = [
+interface WatchlistItem {
+  symbol: string;
+  name: string;
+  price: string;
+  change: string;
+  isPositive: boolean;
+}
+
+const Watchlist: React.FC = () => {
+  const watchlistItems: WatchlistItem[] = [
     { symbol: 'AAPL', name: 'Apple', price: '125', change: '6.36%', isPositive: true },
     { symbol: 'UBER', name: 'Uber', price: '80', change: '-3.84%', isPositive: false },
     { symbol: 'AAPL', name: 'Apple', price: '125', change: '6.36%', isPositive: true },
@@ -16,7 +24,7 @@ const Portfolio = () => {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Create My Portfolio</h2>
+        <h2 className="text-lg font-semibold">Create watchlist</h2>
         <Plus className="h-5 w-5 text-muted-foreground cursor-pointer hover:text-foreground" />
       </div>
       <div className="overflow-x-auto">
@@ -30,7 +38,7 @@ const Portfolio = () => {
             </tr>
           </thead>
           <tbody>
-            {portfolioItems.map((item, idx) => (
+            {watchlistItems.map((item, idx) => (
               <tr key={idx} className="border-b border-border hover:bg-accent/50 cursor-pointer transition-colors">
                 <td className="py-2 px-2 font-medium">{item.symbol}</td>
                 <td className="py-2 px-2 text-muted-foreground">{item.name}</td>
@@ -47,4 +55,4 @@ const Portfolio = () => {
   );
 };
 
-export default Portfolio;
+export default Watchlist;

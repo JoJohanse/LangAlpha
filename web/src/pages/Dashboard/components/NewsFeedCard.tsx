@@ -2,13 +2,38 @@ import React, { useState, useMemo } from 'react';
 import { TrendingUp, Clock, Briefcase, Eye, Search, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const TABS = [
+interface NewsItem {
+  id?: string | number;
+  title: string;
+  source?: string;
+  time?: string;
+  image?: string | null;
+  favicon?: string | null;
+  tickers?: string[];
+  isHot?: boolean;
+}
+
+type TabKey = 'market' | 'portfolio' | 'watchlist';
+type DateRangeKey = 'all' | '1h' | '6h' | '24h' | '7d';
+
+interface TabDef {
+  key: TabKey;
+  label: string;
+  icon: React.ComponentType<{ size?: number }>;
+}
+
+interface DateRangeDef {
+  key: DateRangeKey;
+  label: string;
+}
+
+const TABS: TabDef[] = [
   { key: 'market', label: 'Market Pulse', icon: TrendingUp },
   { key: 'portfolio', label: 'Your Portfolio', icon: Briefcase },
   { key: 'watchlist', label: 'Your Watchlist', icon: Eye },
 ];
 
-const DATE_RANGES = [
+const DATE_RANGES: DateRangeDef[] = [
   { key: 'all', label: 'All' },
   { key: '1h', label: '1H' },
   { key: '6h', label: '6H' },
@@ -16,7 +41,7 @@ const DATE_RANGES = [
   { key: '7d', label: '7D' },
 ];
 
-function parseRelativeTime(timeStr) {
+function parseRelativeTime(timeStr: string | undefined | null): number | null {
   if (!timeStr) return null;
   const now = Date.now();
   const m = timeStr.match(/^(\d+)\s*(min|hr|hrs|hour|hours|day|days)/i);
@@ -29,7 +54,7 @@ function parseRelativeTime(timeStr) {
   return now;
 }
 
-function getDateRangeCutoff(key) {
+function getDateRangeCutoff(key: DateRangeKey): number {
   if (key === 'all') return 0;
   const now = Date.now();
   switch (key) {
@@ -41,20 +66,26 @@ function getDateRangeCutoff(key) {
   }
 }
 
-function NewsRow({ item, idx, onNewsClick }) {
+interface NewsRowProps {
+  item: NewsItem;
+  idx: number;
+  onNewsClick?: (id: string | number) => void;
+}
+
+function NewsRow({ item, idx, onNewsClick }: NewsRowProps) {
   const sentiment = item.isHot ? 'positive' : 'neutral';
   const sentimentColor =
     sentiment === 'positive'
       ? 'var(--color-profit)'
       : 'var(--color-text-secondary)';
-  const tickers = item.tickers?.length > 0 ? item.tickers : null;
+  const tickers = (item.tickers?.length ?? 0) > 0 ? item.tickers! : null;
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: idx * 0.05 }}
-      onClick={() => onNewsClick?.(item.id)}
+      onClick={() => item.id != null && onNewsClick?.(item.id)}
       className="group flex items-center gap-4 p-3 rounded-xl border border-transparent transition-all cursor-pointer"
       style={{ backgroundColor: 'transparent' }}
       onMouseEnter={(e) => {
@@ -73,7 +104,7 @@ function NewsRow({ item, idx, onNewsClick }) {
             src={item.image}
             alt=""
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
-            onError={(e) => { e.target.style.display = 'none'; }}
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
         </div>
       )}
@@ -90,7 +121,7 @@ function NewsRow({ item, idx, onNewsClick }) {
               src={item.favicon}
               alt=""
               className="w-4 h-4 rounded flex-shrink-0"
-              onError={(e) => { e.target.style.display = 'none'; }}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
           )}
           {item.source && (
@@ -141,7 +172,7 @@ function NewsRow({ item, idx, onNewsClick }) {
   );
 }
 
-function SkeletonRows({ count = 6 }) {
+function SkeletonRows({ count = 6 }: { count?: number }) {
   return Array.from({ length: count }).map((_, idx) => (
     <div key={idx} className="flex items-center gap-4 p-3 animate-pulse">
       <div
@@ -156,7 +187,12 @@ function SkeletonRows({ count = 6 }) {
   ));
 }
 
-function EmptyState({ tab, hasFilters }) {
+interface EmptyStateProps {
+  tab: TabKey;
+  hasFilters: boolean;
+}
+
+function EmptyState({ tab, hasFilters }: EmptyStateProps) {
   if (hasFilters) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -167,7 +203,7 @@ function EmptyState({ tab, hasFilters }) {
     );
   }
 
-  const messages = {
+  const messages: Record<TabKey, string> = {
     market: 'No market news available',
     portfolio: 'Add stocks to your portfolio to see relevant news here',
     watchlist: 'Add stocks to your watchlist to see relevant news here',
@@ -182,6 +218,16 @@ function EmptyState({ tab, hasFilters }) {
   );
 }
 
+interface NewsFeedCardProps {
+  marketItems?: NewsItem[];
+  marketLoading?: boolean;
+  portfolioItems?: NewsItem[];
+  portfolioLoading?: boolean;
+  watchlistItems?: NewsItem[];
+  watchlistLoading?: boolean;
+  onNewsClick?: (id: string | number) => void;
+}
+
 function NewsFeedCard({
   marketItems = [],
   marketLoading = false,
@@ -190,12 +236,12 @@ function NewsFeedCard({
   watchlistItems = [],
   watchlistLoading = false,
   onNewsClick,
-}) {
-  const [activeTab, setActiveTab] = useState('market');
+}: NewsFeedCardProps) {
+  const [activeTab, setActiveTab] = useState<TabKey>('market');
   const [tickerFilter, setTickerFilter] = useState('');
-  const [dateRange, setDateRange] = useState('all');
+  const [dateRange, setDateRange] = useState<DateRangeKey>('all');
 
-  const dataMap = {
+  const dataMap: Record<TabKey, { items: NewsItem[]; loading: boolean }> = {
     market: { items: marketItems, loading: marketLoading },
     portfolio: { items: portfolioItems, loading: portfolioLoading },
     watchlist: { items: watchlistItems, loading: watchlistLoading },
@@ -230,7 +276,7 @@ function NewsFeedCard({
 
   // Collect unique tickers across current items for quick-pick
   const availableTickers = useMemo(() => {
-    const set = new Set();
+    const set = new Set<string>();
     for (const item of items) {
       if (item.tickers) item.tickers.forEach((t) => set.add(t));
     }

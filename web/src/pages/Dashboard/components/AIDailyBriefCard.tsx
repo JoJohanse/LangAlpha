@@ -4,20 +4,44 @@ import { motion, AnimatePresence } from 'framer-motion';
 import TopicBadge from './TopicBadge';
 import { getTodayInsights } from '../utils/api';
 
-// Module-level cache (survives navigation, clears on page refresh)
-let insightsCache = null;
+interface InsightTopic {
+  text: string;
+  trend: 'up' | 'down' | 'neutral';
+}
 
-const TYPE_CONFIG = {
+interface Insight {
+  market_insight_id: string;
+  type: string;
+  headline: string;
+  summary: string;
+  completed_at?: string;
+  topics?: InsightTopic[];
+  [key: string]: unknown;
+}
+
+interface AIDailyBriefCardProps {
+  onReadFull?: (marketInsightId: string) => void;
+}
+
+interface TypeConfigEntry {
+  label: string;
+  accent: string;
+}
+
+// Module-level cache (survives navigation, clears on page refresh)
+let insightsCache: Insight[] | null = null;
+
+const TYPE_CONFIG: Record<string, TypeConfigEntry> = {
   pre_market: { label: 'Pre-Market', accent: 'var(--color-profit)' },
   market_update: { label: 'Market Update', accent: 'var(--color-accent-primary)' },
   post_market: { label: 'Post-Market', accent: '#a78bfa' },
 };
 
-function formatRelativeTime(timestamp) {
+function formatRelativeTime(timestamp: string | undefined): string {
   if (!timestamp) return '';
   const now = new Date();
   const then = new Date(timestamp);
-  const diffMs = now - then;
+  const diffMs = now.getTime() - then.getTime();
   const diffMin = Math.floor(diffMs / 60000);
   if (diffMin < 1) return 'just now';
   if (diffMin < 60) return `${diffMin}m ago`;
@@ -27,7 +51,7 @@ function formatRelativeTime(timestamp) {
   return `${diffDay}d ago`;
 }
 
-function formatTime(timestamp) {
+function formatTime(timestamp: string | undefined): string {
   if (!timestamp) return '';
   try {
     const d = new Date(timestamp);
@@ -37,8 +61,8 @@ function formatTime(timestamp) {
   }
 }
 
-function AIDailyBriefCard({ onReadFull }) {
-  const [insights, setInsights] = useState(insightsCache || []);
+function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
+  const [insights, setInsights] = useState<Insight[]>(insightsCache || []);
   const [loading, setLoading] = useState(!insightsCache);
   const [expanded, setExpanded] = useState(false);
 
@@ -47,21 +71,22 @@ function AIDailyBriefCard({ onReadFull }) {
     let cancelled = false;
     getTodayInsights().then((data) => {
       if (cancelled) return;
-      if (data?.length) {
-        insightsCache = data;
-        setInsights(data);
+      const typedData = data as unknown as Insight[];
+      if (typedData?.length) {
+        insightsCache = typedData;
+        setInsights(typedData);
       }
       setLoading(false);
     });
     return () => { cancelled = true; };
   }, []);
 
-  const latest = insights[0] || null;
+  const latest: Insight | null = insights[0] || null;
   const older = insights.slice(1);
 
-  const handleCardClick = useCallback((e) => {
+  const handleCardClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     // Don't expand if clicking the CTA button or a link
-    if (e.target.closest('button') || e.target.closest('a')) return;
+    if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('a')) return;
     if (older.length > 0) setExpanded((v) => !v);
   }, [older.length]);
 

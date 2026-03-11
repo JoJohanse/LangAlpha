@@ -14,15 +14,86 @@ import { useTheme } from '../../../contexts/ThemeContext';
 import { useTranslation } from 'react-i18next';
 import ConfirmDialog from './ConfirmDialog';
 
+type SettingsTab = 'userInfo' | 'preferences' | 'model';
+
+interface ByokProvider {
+  provider: string;
+  display_name?: string;
+  parent_provider?: string;
+  has_key: boolean;
+  masked_key: string | null;
+  base_url: string | null;
+  is_custom?: boolean;
+  use_response_api?: boolean;
+}
+
+interface CodexDeviceCode {
+  user_code: string;
+  verification_url: string;
+  interval?: number;
+}
+
+interface OAuthStatus {
+  connected: boolean;
+  account_id?: string | null;
+  email?: string | null;
+  plan_type?: string | null;
+}
+
+interface CustomModel {
+  name: string;
+  model_id: string;
+  provider: string;
+  parameters?: Record<string, unknown>;
+  extra_body?: Record<string, unknown>;
+}
+
+interface CustomModelForm {
+  name: string;
+  model_id: string;
+  provider: string;
+  parameters: string;
+  extra_body: string;
+  _customProvider?: boolean;
+}
+
+interface AddProviderForm {
+  name: string;
+  parent_provider: string;
+  api_key?: string;
+  base_url?: string;
+  use_response_api?: boolean;
+}
+
+// TODO: type properly — preferences have a loosely defined shape from the backend
+interface PreferencesData {
+  risk_preference?: Record<string, unknown>;
+  investment_preference?: Record<string, unknown>;
+  agent_preference?: Record<string, unknown>;
+  other_preference?: {
+    preferred_model?: string;
+    preferred_flash_model?: string;
+    starred_models?: string[];
+    custom_models?: CustomModel[];
+    custom_providers?: Array<{ name: string; parent_provider: string; use_response_api?: boolean }>;
+  };
+  [key: string]: unknown;
+}
+
+interface UserConfigPanelProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onModifyPreferences?: () => void;
+  onStartOnboarding?: () => void;
+  initialTab?: SettingsTab;
+}
+
 /**
  * UserConfigPanel Component
  *
  * Modal panel for logged-in users: User info (email read-only), preferences, and logout button.
- *
- * @param {boolean} isOpen - Whether the panel is open
- * @param {Function} onClose - Callback to close the panel
  */
-function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboarding, initialTab }) {
+function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboarding, initialTab }: UserConfigPanelProps) {
   const { logout } = useAuth();
   const { user: authUser, isLoading: isUserLoading } = useUser();
   const { preferences: prefsData, isLoading: isPrefsLoading } = usePreferences();
@@ -30,69 +101,76 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
   const queryClient = useQueryClient();
   const { theme, preference, setTheme: setThemePref } = useTheme();
   const { t, i18n } = useTranslation();
-  const [activeTab, setActiveTab] = useState(initialTab || 'userInfo');
-  const [avatarUrl, setAvatarUrl] = useState(null);
-  const fileInputRef = useRef(null);
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'userInfo');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
   const [name, setName] = useState('');
   const [timezone, setTimezone] = useState('');
   const [locale, setLocale] = useState('');
 
-  const [preferences, setPreferences] = useState(null);
+  const [preferences, setPreferences] = useState<PreferencesData | null>(null);
 
   // Model tab state
-  const [availableModels, setAvailableModels] = useState({});
+  // Available models from the backend — keyed by provider name
+  interface ProviderModels {
+    models?: string[];
+    display_name?: string;
+    [key: string]: unknown;
+  }
+  type AvailableModelsMap = Record<string, string[] | ProviderModels>;
+  const [availableModels, setAvailableModels] = useState<AvailableModelsMap>({});
   const [preferredModel, setPreferredModel] = useState('');
   const [preferredFlashModel, setPreferredFlashModel] = useState('');
-  const [starredModels, setStarredModels] = useState([]);
+  const [starredModels, setStarredModels] = useState<string[]>([]);
   const [byokEnabled, setByokEnabled] = useState(false);
-  const [byokProviders, setByokProviders] = useState([]);
-  const [keyInputs, setKeyInputs] = useState({});
-  const [baseUrlInputs, setBaseUrlInputs] = useState({});
-  const [visibleKeys, setVisibleKeys] = useState({});
+  const [byokProviders, setByokProviders] = useState<ByokProvider[]>([]);
+  const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
+  const [baseUrlInputs, setBaseUrlInputs] = useState<Record<string, string>>({});
+  const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({});
   const [selectedByokProvider, setSelectedByokProvider] = useState('');
-  const [deletingProvider, setDeletingProvider] = useState(null);
+  const [deletingProvider, setDeletingProvider] = useState<string | null>(null);
 
   // Custom (sub-)providers state
   const [showAddProviderForm, setShowAddProviderForm] = useState(false);
-  const [addProviderForm, setAddProviderForm] = useState({ name: '', parent_provider: '' });
-  const [addProviderError, setAddProviderError] = useState(null);
-  const [modelTabError, setModelTabError] = useState(null);
+  const [addProviderForm, setAddProviderForm] = useState<AddProviderForm>({ name: '', parent_provider: '' });
+  const [addProviderError, setAddProviderError] = useState<string | null>(null);
+  const [modelTabError, setModelTabError] = useState<string | null>(null);
   const [modelSaveSuccess, setModelSaveSuccess] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [modelPickerSearch, setModelPickerSearch] = useState('');
 
   // Custom Models state
-  const [customModels, setCustomModels] = useState([]);
+  const [customModels, setCustomModels] = useState<CustomModel[]>([]);
   const [showCustomModelForm, setShowCustomModelForm] = useState(false);
-  const [editingCustomModelIdx, setEditingCustomModelIdx] = useState(null);
-  const [customModelForm, setCustomModelForm] = useState({ name: '', model_id: '', provider: '', parameters: '', extra_body: '' });
-  const [customModelError, setCustomModelError] = useState(null);
+  const [editingCustomModelIdx, setEditingCustomModelIdx] = useState<number | null>(null);
+  const [customModelForm, setCustomModelForm] = useState<CustomModelForm>({ name: '', model_id: '', provider: '', parameters: '', extra_body: '' });
+  const [customModelError, setCustomModelError] = useState<string | null>(null);
 
   // Connected Accounts (Codex OAuth — Device Code Flow)
-  const [codexOAuthStatus, setCodexOAuthStatus] = useState({ connected: false });
+  const [codexOAuthStatus, setCodexOAuthStatus] = useState<OAuthStatus>({ connected: false });
   const [showCodexDisclaimer, setShowCodexDisclaimer] = useState(false);
   const [isConnectingCodex, setIsConnectingCodex] = useState(false);
   const [isDisconnectingCodex, setIsDisconnectingCodex] = useState(false);
-  const [codexDeviceCode, setCodexDeviceCode] = useState(null); // { user_code, verification_url, interval }
-  const [codexDeviceError, setCodexDeviceError] = useState(null);
+  const [codexDeviceCode, setCodexDeviceCode] = useState<CodexDeviceCode | null>(null);
+  const [codexDeviceError, setCodexDeviceError] = useState<string | null>(null);
   const [isPollingCodex, setIsPollingCodex] = useState(false);
-  const codexPollRef = useRef(null);
+  const codexPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Connected Accounts (Claude OAuth — PKCE Authorization Code Flow)
-  const [claudeOAuthStatus, setClaudeOAuthStatus] = useState({ connected: false });
+  const [claudeOAuthStatus, setClaudeOAuthStatus] = useState<OAuthStatus>({ connected: false });
   const [showClaudeDisclaimer, setShowClaudeDisclaimer] = useState(false);
   const [isConnectingClaude, setIsConnectingClaude] = useState(false);
   const [isDisconnectingClaude, setIsDisconnectingClaude] = useState(false);
-  const [claudeAuthorizeUrl, setClaudeAuthorizeUrl] = useState(null);
+  const [claudeAuthorizeUrl, setClaudeAuthorizeUrl] = useState<string | null>(null);
   const [claudeCallbackInput, setClaudeCallbackInput] = useState('');
-  const [claudeError, setClaudeError] = useState(null);
+  const [claudeError, setClaudeError] = useState<string | null>(null);
   const [isSubmittingClaudeCallback, setIsSubmittingClaudeCallback] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isLoading = isUserLoading || isPrefsLoading;
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -145,8 +223,8 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
   useEffect(() => {
     if (authUser) {
       setName(authUser.name || '');
-      setTimezone(authUser.timezone || '');
-      setLocale(authUser.locale || '');
+      setTimezone((authUser.timezone as string) || '');
+      setLocale((authUser.locale as string) || '');
       const url = authUser.avatar_url;
       setAvatarUrl(url ? `${url}?v=${authUser.updated_at || ''}` : null);
     }
@@ -191,20 +269,23 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
         getCodexOAuthStatus(),
         getClaudeOAuthStatus(),
       ]);
-      setAvailableModels(modelsRes?.models || {});
-      setByokEnabled(keysRes?.byok_enabled || false);
-      setByokProviders(keysRes?.providers || []);
-      const initialBaseUrls = {};
-      (keysRes?.providers || []).forEach(p => {
+      const modelsData = modelsRes as { models?: AvailableModelsMap };
+      const keysData = keysRes as { byok_enabled?: boolean; providers?: ByokProvider[] };
+      setAvailableModels(modelsData?.models || {});
+      setByokEnabled(keysData?.byok_enabled || false);
+      setByokProviders(keysData?.providers || []);
+      const initialBaseUrls: Record<string, string> = {};
+      ((keysRes as { providers?: ByokProvider[] })?.providers || []).forEach((p: ByokProvider) => {
         if (p.base_url) initialBaseUrls[p.provider] = p.base_url;
       });
       setBaseUrlInputs(initialBaseUrls);
-      setPreferredModel(prefsData?.other_preference?.preferred_model || '');
-      setPreferredFlashModel(prefsData?.other_preference?.preferred_flash_model || '');
-      setStarredModels(prefsData?.other_preference?.starred_models || []);
-      setCustomModels(prefsData?.other_preference?.custom_models || []);
-      setCodexOAuthStatus(codexStatus || { connected: false });
-      setClaudeOAuthStatus(claudeStatus || { connected: false });
+      const otherPref = (prefsData as PreferencesData)?.other_preference;
+      setPreferredModel(otherPref?.preferred_model || '');
+      setPreferredFlashModel(otherPref?.preferred_flash_model || '');
+      setStarredModels(otherPref?.starred_models || []);
+      setCustomModels(otherPref?.custom_models || []);
+      setCodexOAuthStatus((codexStatus as OAuthStatus) || { connected: false });
+      setClaudeOAuthStatus((claudeStatus as OAuthStatus) || { connected: false });
     } catch {
       setModelTabError(t('settings.failedToLoadModels'));
     }
@@ -219,7 +300,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
       const customProvidersList = byokProviders
         .filter(p => p.is_custom)
         .map(p => {
-          const entry = { name: p.provider, parent_provider: p.parent_provider };
+          const entry: { name: string; parent_provider: string | undefined; use_response_api?: boolean } = { name: p.provider, parent_provider: p.parent_provider };
           if (p.use_response_api) entry.use_response_api = true;
           return entry;
         });
@@ -235,21 +316,21 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
 
       // 2. Save any pending API key inputs and base URL changes
       const pendingKeys = Object.entries(keyInputs).filter(([, v]) => v?.trim());
-      const pendingBaseUrls = {};
+      const pendingBaseUrls: Record<string, string | null> = {};
       for (const [provider, url] of Object.entries(baseUrlInputs)) {
         const original = byokProviders.find(p => p.provider === provider)?.base_url || '';
         if (url !== original) pendingBaseUrls[provider] = url || null;
       }
 
       if (pendingKeys.length > 0 || Object.keys(pendingBaseUrls).length > 0) {
-        const payload = {};
+        const payload: Record<string, unknown> = {};
         if (pendingKeys.length > 0) {
           payload.api_keys = Object.fromEntries(pendingKeys.map(([p, k]) => [p, k.trim()]));
         }
         if (Object.keys(pendingBaseUrls).length > 0) {
           payload.base_urls = pendingBaseUrls;
         }
-        const result = await updateUserApiKeys(payload);
+        const result = await updateUserApiKeys(payload) as { providers: ByokProvider[] };
         setByokProviders(result.providers);
         setKeyInputs({});
       }
@@ -267,7 +348,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
     setModelTabError(null);
     const newValue = !byokEnabled;
     try {
-      const result = await updateUserApiKeys({ byok_enabled: newValue });
+      const result = await updateUserApiKeys({ byok_enabled: newValue }) as { byok_enabled: boolean; providers: ByokProvider[] };
       setByokEnabled(result.byok_enabled);
       setByokProviders(result.providers);
     } catch {
@@ -275,11 +356,11 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
     }
   };
 
-  const handleDeleteProviderKey = async (provider) => {
+  const handleDeleteProviderKey = async (provider: string) => {
     setDeletingProvider(provider);
     setModelTabError(null);
     try {
-      const result = await deleteUserApiKey(provider);
+      const result = await deleteUserApiKey(provider) as { providers: ByokProvider[] };
       setByokProviders(result.providers);
     } catch {
       setModelTabError(t('settings.failedToDeleteKey', { provider }));
@@ -319,7 +400,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
     setAddProviderError(null);
   };
 
-  const handleDeleteCustomProvider = (providerName) => {
+  const handleDeleteCustomProvider = (providerName: string) => {
     setByokProviders(prev => prev.filter(p => p.provider !== providerName));
     // Also clean up any pending key/url inputs
     setKeyInputs(prev => { const next = { ...prev }; delete next[providerName]; return next; });
@@ -337,7 +418,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
     setModelTabError(null);
     setCodexDeviceError(null);
     try {
-      const device = await initiateCodexDevice();
+      const device = await initiateCodexDevice() as unknown as CodexDeviceCode;
       setCodexDeviceCode(device);
       // Open verification URL in new tab
       window.open(device.verification_url, '_blank', 'noopener');
@@ -353,7 +434,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
           return;
         }
         try {
-          const result = await pollCodexDevice();
+          const result = await pollCodexDevice() as { success?: boolean; pending?: boolean; account_id?: string; email?: string; plan_type?: string };
           if (result.success) {
             handleCodexDeviceCancel(); // stop polling
             setCodexOAuthStatus({
@@ -389,13 +470,13 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
   // Custom Models helpers
   const CUSTOM_MODEL_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/;
 
-  const validateCustomModelForm = (form, existingModels, editIdx) => {
+  const validateCustomModelForm = (form: CustomModelForm, existingModels: CustomModel[], editIdx: number | null): string | null => {
     if (!form.name?.trim()) return t('settings.customModelNameRequired');
     if (!CUSTOM_MODEL_NAME_RE.test(form.name.trim())) return t('settings.customModelNameInvalid');
     if (!form.model_id?.trim()) return t('settings.customModelIdRequired');
     if (!form.provider?.trim()) return t('settings.customModelProviderRequired');
     // Check collision with system models
-    const allSystemModels = Object.values(availableModels).flatMap(pd => Array.isArray(pd) ? pd : pd?.models || []);
+    const allSystemModels = Object.values(availableModels).flatMap(pd => Array.isArray(pd) ? pd as string[] : (pd as ProviderModels)?.models || []);
     if (allSystemModels.includes(form.name.trim())) return t('settings.customModelNameConflict');
     // Check duplicate in custom models
     const dup = existingModels.findIndex((cm, i) => i !== editIdx && cm.name === form.name.trim());
@@ -405,7 +486,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
     const prov = byokProviders.find(p => p.provider === providerName);
     if (!prov || !prov.has_key) return t('settings.customModelProviderNoKey', { provider: providerName });
     // Validate JSON fields
-    for (const field of ['parameters', 'extra_body']) {
+    for (const field of ['parameters', 'extra_body'] as const) {
       const val = form[field]?.trim();
       if (val) {
         try { JSON.parse(val); } catch { return `${field}: ${t('settings.customModelInvalidJson')}`; }
@@ -417,13 +498,13 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
   const handleCustomModelSave = () => {
     const err = validateCustomModelForm(customModelForm, customModels, editingCustomModelIdx);
     if (err) { setCustomModelError(err); return; }
-    const entry = {
+    const entry: CustomModel = {
       name: customModelForm.name.trim(),
       model_id: customModelForm.model_id.trim(),
       provider: customModelForm.provider.trim(),
     };
-    if (customModelForm.parameters?.trim()) entry.parameters = JSON.parse(customModelForm.parameters.trim());
-    if (customModelForm.extra_body?.trim()) entry.extra_body = JSON.parse(customModelForm.extra_body.trim());
+    if (customModelForm.parameters?.trim()) entry.parameters = JSON.parse(customModelForm.parameters.trim()) as Record<string, unknown>;
+    if (customModelForm.extra_body?.trim()) entry.extra_body = JSON.parse(customModelForm.extra_body.trim()) as Record<string, unknown>;
     setCustomModels(prev => {
       const next = [...prev];
       if (editingCustomModelIdx != null) next[editingCustomModelIdx] = entry;
@@ -436,7 +517,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
     setCustomModelError(null);
   };
 
-  const handleCustomModelEdit = (idx) => {
+  const handleCustomModelEdit = (idx: number) => {
     const cm = customModels[idx];
     const isKnown = byokProviders.some(p => p.provider === cm.provider);
     setCustomModelForm({
@@ -452,7 +533,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
     setCustomModelError(null);
   };
 
-  const handleCustomModelDelete = (idx) => {
+  const handleCustomModelDelete = (idx: number) => {
     setCustomModels(prev => prev.filter((_, i) => i !== idx));
   };
 
@@ -488,7 +569,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
     setModelTabError(null);
     setClaudeError(null);
     try {
-      const result = await initiateClaudeOAuth();
+      const result = await initiateClaudeOAuth() as { authorize_url: string };
       setClaudeAuthorizeUrl(result.authorize_url);
       // Open authorization page in new tab
       window.open(result.authorize_url, '_blank', 'noopener');
@@ -504,7 +585,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
     setIsSubmittingClaudeCallback(true);
     setClaudeError(null);
     try {
-      const result = await submitClaudeCallback(claudeCallbackInput.trim());
+      const result = await submitClaudeCallback(claudeCallbackInput.trim()) as { success?: boolean; account_id?: string; email?: string; plan_type?: string };
       if (result.success) {
         setClaudeAuthorizeUrl(null);
         setClaudeCallbackInput('');
@@ -515,8 +596,9 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
           plan_type: result.plan_type || null,
         });
       }
-    } catch (e) {
-      setClaudeError(e.response?.data?.detail || t('settings.claudePasteError', 'Failed to exchange code. Please try again.'));
+    } catch (e: unknown) {
+      const axiosErr = e as { response?: { data?: { detail?: string } } };
+      setClaudeError(axiosErr.response?.data?.detail || t('settings.claudePasteError', 'Failed to exchange code. Please try again.'));
     } finally {
       setIsSubmittingClaudeCallback(false);
     }
@@ -541,12 +623,12 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
     }
   };
 
-  const handleAvatarChange = async (e) => {
-    const file = e.target.files[0];
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
     setIsUploadingAvatar(true);
     try {
-      const { avatar_url } = await uploadAvatar(file);
+      const { avatar_url } = await uploadAvatar(file) as { avatar_url: string };
       setAvatarUrl(`${avatar_url}?t=${Date.now()}`);
       queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
     } catch {
@@ -556,7 +638,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
     }
   };
 
-  const handleLocaleChange = (newLocale) => {
+  const handleLocaleChange = (newLocale: string) => {
     setLocale(newLocale);
     // Also switch i18n language for supported UI locales
     if (newLocale === 'en-US' || newLocale === 'zh-CN') {
@@ -565,13 +647,13 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
     }
   };
 
-  const handleUserInfoSubmit = async (e) => {
+  const handleUserInfoSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
     setSaveSuccess(false);
     try {
-      const userData = {};
+      const userData: Record<string, string> = {};
       if (name.trim()) userData.name = name.trim();
       if (timezone) userData.timezone = timezone;
       if (locale) userData.locale = locale;
@@ -582,7 +664,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
-      setError(err.message || t('settings.failedToUpdateUser'));
+      setError((err as Error).message || t('settings.failedToUpdateUser'));
     } finally {
       setIsSubmitting(false);
     }
@@ -621,8 +703,9 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
 
   // Prevent Enter key in text inputs from submitting the enclosing <form>.
   // Only the explicit submit button should trigger form submission.
-  const preventEnterSubmit = (e) => {
-    if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'submit') {
+  const preventEnterSubmit = (e: React.KeyboardEvent<HTMLFormElement>) => {
+    const target = e.target as HTMLInputElement;
+    if (e.key === 'Enter' && target.tagName === 'INPUT' && target.type !== 'submit') {
       e.preventDefault();
     }
   };
@@ -927,7 +1010,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
                         { label: t('settings.riskTolerance'), data: preferences.risk_preference },
                         { label: t('settings.investmentStyle'), data: preferences.investment_preference },
                         { label: t('settings.agentSettings'), data: preferences.agent_preference },
-                      ].filter(({ data }) => data && Object.keys(data).length > 0).map(({ label, data }) => (
+                      ].filter((item): item is { label: string; data: Record<string, unknown> } => !!item.data && Object.keys(item.data).length > 0).map(({ label, data }) => (
                         <div key={label}>
                           <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-primary)' }}>{label}</label>
                           <div
@@ -1026,8 +1109,9 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
                           >
                             <option value="">{t('settings.systemDefault')}</option>
                             {Object.entries(availableModels).map(([provider, providerData]) => {
-                              const models = Array.isArray(providerData) ? providerData : providerData?.models || [];
-                              const displayName = providerData?.display_name || provider.charAt(0).toUpperCase() + provider.slice(1);
+                              const pd = providerData as string[] | ProviderModels;
+                              const models: string[] = Array.isArray(pd) ? pd : (pd?.models || []);
+                              const displayName = (!Array.isArray(pd) && pd?.display_name) || provider.charAt(0).toUpperCase() + provider.slice(1);
                               return (
                               <optgroup key={provider} label={displayName}>
                                 {models.map((m) => (
@@ -1130,20 +1214,21 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
                         {/* Provider groups */}
                         <div className="px-1 pb-1 max-h-[280px] overflow-y-auto">
                           {Object.entries(availableModels).map(([provider, providerData]) => {
-                            const models = Array.isArray(providerData) ? providerData : providerData?.models || [];
+                            const pd = providerData as string[] | ProviderModels;
+                            const models: string[] = Array.isArray(pd) ? pd : (pd?.models || []);
                             const query = modelPickerSearch.toLowerCase();
                             const filtered = query
-                              ? models.filter(m => (typeof m === 'string' ? m : m.name || m.key || '').toLowerCase().includes(query))
+                              ? models.filter((m: string) => m.toLowerCase().includes(query))
                               : models;
                             if (filtered.length === 0) return null;
-                            const displayName = providerData?.display_name || provider.charAt(0).toUpperCase() + provider.slice(1);
+                            const displayName = (!Array.isArray(pd) && pd?.display_name) || provider.charAt(0).toUpperCase() + provider.slice(1);
                             return (
                               <div key={provider} className="mb-1">
                                 <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-tertiary)' }}>
                                   {displayName}
                                 </div>
-                                {filtered.map((m) => {
-                                  const key = typeof m === 'string' ? m : (m.key || m.name || m);
+                                {filtered.map((m: string) => {
+                                  const key = m;
                                   const isStarred = starredModels.includes(key);
                                   return (
                                     <button
@@ -1160,7 +1245,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
                                       onMouseEnter={(e) => { if (!isStarred) e.currentTarget.style.backgroundColor = 'var(--color-bg-elevated)'; }}
                                       onMouseLeave={(e) => { if (!isStarred) e.currentTarget.style.backgroundColor = 'transparent'; }}
                                     >
-                                      <span>{typeof m === 'string' ? m : (m.name || key)}</span>
+                                      <span>{m}</span>
                                       <Pin className="h-3 w-3 flex-shrink-0" style={{ color: isStarred ? 'var(--color-accent-primary)' : 'var(--color-text-tertiary)', opacity: isStarred ? 1 : 0.4 }} />
                                     </button>
                                   );
@@ -1621,7 +1706,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
                                   type={visibleKeys[prov.provider] ? 'text' : 'password'}
                                   value={keyInputs[prov.provider] || ''}
                                   onChange={(e) => setKeyInputs((prev) => ({ ...prev, [prov.provider]: e.target.value }))}
-                                  placeholder={prov.has_key ? prov.masked_key : t('settings.enterApiKey')}
+                                  placeholder={prov.has_key ? (prov.masked_key ?? undefined) : t('settings.enterApiKey')}
                                   className="w-full rounded-md px-3 py-1.5 pr-16 text-sm"
                                   style={{
                                     backgroundColor: 'var(--color-bg-card)',

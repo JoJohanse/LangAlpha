@@ -1,14 +1,22 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '@/components/ui/use-toast';
 import { useUser } from '@/hooks/useUser';
 import { getFlashWorkspace } from '../../ChatAgent/utils/api';
 
+interface OnboardingResult {
+  showOnboardingDialog: boolean;
+  setShowOnboardingDialog: Dispatch<SetStateAction<boolean>>;
+  isCreatingWorkspace: boolean;
+  navigateToOnboarding: () => Promise<void>;
+  navigateToModifyPreferences: () => Promise<void>;
+}
+
 const ONBOARDING_IGNORE_STORAGE_KEY = 'langalpha-onboarding-ignored-at';
 const ONBOARDING_IGNORE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-export function isOnboardingIgnoredFor24h() {
+export function isOnboardingIgnoredFor24h(): boolean {
     try {
         const stored = localStorage.getItem(ONBOARDING_IGNORE_STORAGE_KEY);
         if (!stored) return false;
@@ -20,7 +28,7 @@ export function isOnboardingIgnoredFor24h() {
     }
 }
 
-export function setOnboardingIgnoredFor24h() {
+export function setOnboardingIgnoredFor24h(): void {
     try {
         localStorage.setItem(ONBOARDING_IGNORE_STORAGE_KEY, String(Date.now()));
     } catch (e) {
@@ -33,12 +41,12 @@ export function setOnboardingIgnoredFor24h() {
  * Manages the onboarding states, showing the modal correctly on mount if 
  * the user has not completed onboarding, and wraps navigation logic.
  */
-export function useOnboarding() {
+export function useOnboarding(): OnboardingResult {
     const navigate = useNavigate();
     const { t } = useTranslation();
     const { toast } = useToast();
 
-    const { user: authUser } = useUser();
+    const { user: authUser } = useUser() as { user: { onboarding_completed?: boolean; [key: string]: unknown } | null };
 
     const [showOnboardingDialog, setShowOnboardingDialog] = useState(false);
     const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
@@ -55,10 +63,10 @@ export function useOnboarding() {
         }
     }, [authUser]);
 
-    const navigateToOnboarding = useCallback(async () => {
+    const navigateToOnboarding = useCallback(async (): Promise<void> => {
         setIsCreatingWorkspace(true);
         try {
-            const flashWs = await getFlashWorkspace();
+            const flashWs = await getFlashWorkspace() as { workspace_id: string };
             navigate(`/chat/t/__default__`, {
                 state: {
                     workspaceId: flashWs.workspace_id,
@@ -79,9 +87,9 @@ export function useOnboarding() {
         }
     }, [navigate, toast, t]);
 
-    const navigateToModifyPreferences = useCallback(async () => {
+    const navigateToModifyPreferences = useCallback(async (): Promise<void> => {
         try {
-            const flashWs = await getFlashWorkspace();
+            const flashWs = await getFlashWorkspace() as { workspace_id: string };
             navigate(`/chat/t/__default__`, {
                 state: {
                     workspaceId: flashWs.workspace_id,

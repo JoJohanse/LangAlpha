@@ -22,14 +22,21 @@ import { useDashboardData } from './hooks/useDashboardData';
 import { useOnboarding, setOnboardingIgnoredFor24h } from './hooks/useOnboarding';
 import './Dashboard.css';
 
+interface DeleteConfirmState {
+  open: boolean;
+  title: string;
+  message: string;
+  onConfirm: (() => Promise<void>) | null;
+}
+
 function Dashboard() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   // News modal state
-  const [selectedNewsId, setSelectedNewsId] = useState(null);
+  const [selectedNewsId, setSelectedNewsId] = useState<string | null>(null);
 
   // Insight modal state
-  const [selectedMarketInsightId, setSelectedMarketInsightId] = useState(null);
+  const [selectedMarketInsightId, setSelectedMarketInsightId] = useState<string | null>(null);
 
   const {
     indices,
@@ -53,7 +60,7 @@ function Dashboard() {
   const portfolioNews = useTickerNews(portfolio.rows, 'portfolio');
   const watchlistNews = useTickerNews(watchlist.rows, 'watchlist');
 
-  const [deleteConfirm, setDeleteConfirm] = useState({
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState>({
     open: false,
     title: '',
     message: '',
@@ -61,8 +68,8 @@ function Dashboard() {
   });
 
   const handleDeletePortfolioItem = useCallback(
-    (holdingId) => {
-      setDeleteConfirm(portfolio.handleDelete(holdingId));
+    (holdingId: string) => {
+      setDeleteConfirm(portfolio.handleDelete(holdingId) as DeleteConfirmState);
     },
     [portfolio.handleDelete]
   );
@@ -104,7 +111,7 @@ function Dashboard() {
                 portfolioLoading={portfolioNews.loading}
                 watchlistItems={watchlistNews.items}
                 watchlistLoading={watchlistNews.loading}
-                onNewsClick={setSelectedNewsId}
+                onNewsClick={(id) => setSelectedNewsId(String(id))}
               />
             </div>
 
@@ -197,7 +204,7 @@ function Dashboard() {
       </Dialog>
 
       {/* Portfolio Edit Dialog */}
-      <Dialog open={!!portfolio.editRow} onOpenChange={(open) => !open && portfolio.openEdit(null)}>
+      <Dialog open={!!portfolio.editRow} onOpenChange={(open) => !open && (portfolio.openEdit as (row: unknown) => void)(null)}>
         <DialogContent className="sm:max-w-sm border" style={{ backgroundColor: 'var(--color-bg-elevated)', borderColor: 'var(--color-border-elevated)' }}>
           <DialogHeader>
             <DialogTitle className="title-font" style={{ color: 'var(--color-text-primary)' }}>Edit holding — {portfolio.editRow?.symbol}</DialogTitle>
@@ -241,7 +248,7 @@ function Dashboard() {
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={() => portfolio.openEdit(null)} className="px-3 py-1.5 rounded text-sm border hover:bg-foreground/10" style={{ color: 'var(--color-text-primary)', borderColor: 'var(--color-border-default)' }}>
+            <button type="button" onClick={() => (portfolio.openEdit as (row: unknown) => void)(null)} className="px-3 py-1.5 rounded text-sm border hover:bg-foreground/10" style={{ color: 'var(--color-text-primary)', borderColor: 'var(--color-border-default)' }}>
               Cancel
             </button>
             <button type="button" onClick={portfolio.handleUpdate} className="px-3 py-1.5 rounded text-sm font-medium hover:opacity-90" style={{ backgroundColor: 'var(--color-accent-primary)', color: 'var(--color-text-on-accent)' }}>
@@ -254,13 +261,13 @@ function Dashboard() {
       <AddWatchlistItemDialog
         open={watchlist.modalOpen}
         onClose={() => watchlist.setModalOpen(false)}
-        onAdd={watchlist.handleAdd}
-        watchlistId={watchlist.currentWatchlistId}
+        onAdd={watchlist.handleAdd as (...args: unknown[]) => void}
+        watchlistId={watchlist.currentWatchlistId ?? undefined}
       />
       <AddPortfolioHoldingDialog
         open={portfolio.modalOpen}
         onClose={() => portfolio.setModalOpen(false)}
-        onAdd={portfolio.handleAdd}
+        onAdd={portfolio.handleAdd as (...args: unknown[]) => void}
       />
     </div>
   );

@@ -3,6 +3,26 @@ import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../../components/ui/use-toast';
 import { getFlashWorkspace } from '../../ChatAgent/utils/api';
 import { useWorkspaces } from '../../../hooks/useWorkspaces';
+import type { Workspace } from '@/types/api';
+
+type ChatMode = 'fast' | 'deep';
+
+interface ChatAttachment {
+  file: File;
+  type: string;
+  preview?: string | null;
+  dataUrl: string;
+  [key: string]: unknown;
+}
+
+interface SlashCommand {
+  [key: string]: unknown;
+}
+
+interface SendOptions {
+  model?: string;
+  reasoningEffort?: string;
+}
 
 /**
  * Custom hook for handling chat input functionality
@@ -12,15 +32,15 @@ import { useWorkspaces } from '../../../hooks/useWorkspaces';
  * @returns {Object} Chat input state and handlers
  */
 export function useChatInput() {
-  const [mode, setMode] = useState('fast'); // 'fast' or 'deep'
+  const [mode, setMode] = useState<ChatMode>('fast');
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(null);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   const navigate = useNavigate();
   const { toast } = useToast();
 
   // Fetch workspaces for the workspace selector (shared cache with ChatAgent)
   const { data: wsData } = useWorkspaces({ limit: 50, offset: 0 });
-  const workspaces = (wsData?.workspaces || []).filter((ws) => ws.status !== 'flash');
+  const workspaces = ((wsData as { workspaces?: Workspace[] })?.workspaces || []).filter((ws: Workspace) => ws.status !== 'flash');
 
   // Auto-select first workspace when data arrives
   useEffect(() => {
@@ -30,15 +50,17 @@ export function useChatInput() {
   }, [workspaces, selectedWorkspaceId]);
 
   /**
-   * Handles sending a message and navigating to the ChatAgent workspace
+   * Handles sending a message and navigating to the ChatAgent workspace.
    * Fast mode: uses flash workspace (agent_mode: flash)
    * Deep mode: uses selected workspace or falls back to default LangAlpha workspace
-   *
-   * @param {string} message - The message text
-   * @param {boolean} planMode - Whether plan mode is enabled
-   * @param {Array} attachments - File attachments from ChatInput
    */
-  const handleSend = async (message, planMode = false, attachments = [], slashCommands = [], { model, reasoningEffort } = {}) => {
+  const handleSend = async (
+    message: string,
+    planMode = false,
+    attachments: ChatAttachment[] = [],
+    _slashCommands: SlashCommand[] = [],
+    { model, reasoningEffort }: SendOptions = {},
+  ): Promise<void> => {
     const hasContent = message.trim() || (attachments && attachments.length > 0);
     if (!hasContent || isLoading) {
       return;
@@ -47,8 +69,8 @@ export function useChatInput() {
     setIsLoading(true);
     try {
       // Build additional context and attachment metadata from attachments
-      let additionalContext = null;
-      let attachmentMeta = null;
+      let additionalContext: Array<{ type: string; data: string; description: string }> | null = null;
+      let attachmentMeta: Array<{ name: string; type: string; size: number; preview: string | null; dataUrl: string }> | null = null;
       if (attachments && attachments.length > 0) {
         additionalContext = attachments.map((a) => ({
           type: 'image',
@@ -66,7 +88,7 @@ export function useChatInput() {
 
       if (mode === 'fast') {
         // Flash mode: get/create flash workspace and navigate
-        const flashWs = await getFlashWorkspace();
+        const flashWs = await getFlashWorkspace() as { workspace_id: string };
         const workspaceId = flashWs.workspace_id;
 
         navigate(`/chat/t/__default__`, {

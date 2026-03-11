@@ -6,27 +6,37 @@ import { searchStocks } from '@/lib/marketUtils';
 import { useNavigate } from 'react-router-dom';
 import './DashboardHeader.css';
 
-const DashboardHeader = ({ onStockSearch }) => {
+interface StockResult {
+  symbol: string;
+  name?: string;
+  [key: string]: unknown;
+}
+
+interface DashboardHeaderProps {
+  onStockSearch?: (symbol: string, stock: StockResult | null) => void;
+}
+
+const DashboardHeader: React.FC<DashboardHeaderProps> = ({ onStockSearch }) => {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [showHelpPopover, setShowHelpPopover] = useState(false);
-  const helpRef = useRef(null);
-  const searchInputRef = useRef(null);
+  const helpRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Search state
   const [searchValue, setSearchValue] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
+  const [searchResults, setSearchResults] = useState<StockResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
-  const dropdownRef = useRef(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Global "/" shortcut to focus search
   useEffect(() => {
-    const handleKey = (e) => {
+    const handleKey = (e: KeyboardEvent) => {
       if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const tag = document.activeElement?.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || (document.activeElement as HTMLElement)?.isContentEditable) return;
         e.preventDefault();
         searchInputRef.current?.focus();
       }
@@ -38,8 +48,8 @@ const DashboardHeader = ({ onStockSearch }) => {
   // Close help popover on outside click
   useEffect(() => {
     if (!showHelpPopover) return;
-    const handleClickOutside = (e) => {
-      if (helpRef.current && !helpRef.current.contains(e.target)) {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (helpRef.current && !helpRef.current.contains(e.target as Node)) {
         setShowHelpPopover(false);
       }
     };
@@ -62,7 +72,7 @@ const DashboardHeader = ({ onStockSearch }) => {
       setShowDropdown(true);
       try {
         const result = await searchStocks(query, 12);
-        setSearchResults(result.results || []);
+        setSearchResults((result.results || []) as StockResult[]);
       } catch (error) {
         console.error('Stock search failed:', error);
         setSearchResults([]);
@@ -76,8 +86,8 @@ const DashboardHeader = ({ onStockSearch }) => {
 
   // Close search dropdown on outside click
   useEffect(() => {
-    function handleClickOutside(event) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setShowDropdown(false);
       }
     }
@@ -85,7 +95,7 @@ const DashboardHeader = ({ onStockSearch }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleSelectStock = (stock) => {
+  const handleSelectStock = (stock: StockResult) => {
     if (stock?.symbol) {
       const symbol = stock.symbol.trim().toUpperCase();
       setSearchValue(symbol);
@@ -98,7 +108,7 @@ const DashboardHeader = ({ onStockSearch }) => {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const q = searchValue.trim();
     if (!q) return;
@@ -237,7 +247,7 @@ const DashboardHeader = ({ onStockSearch }) => {
                 >
                   {t('dashboard.contactMessage')}
                 </p>
-                {(import.meta.env.VITE_CONTACT_EMAILS || '').split(',').filter(Boolean).map((email, idx, arr) => (
+                {((import.meta.env.VITE_CONTACT_EMAILS as string) || '').split(',').filter(Boolean).map((email: string, idx: number, arr: string[]) => (
                   <div
                     key={email}
                     className="flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-colors hover:opacity-80"

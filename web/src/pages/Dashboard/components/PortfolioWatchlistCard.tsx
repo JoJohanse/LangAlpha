@@ -4,7 +4,55 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { getExtendedHoursInfo } from '@/lib/marketUtils';
 
-function ContextMenu({ menu, onClose, items }) {
+interface MenuPosition {
+  x: number;
+  y: number;
+}
+
+interface ContextMenuItem {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}
+
+interface WatchlistRow {
+  watchlist_item_id?: string | number;
+  symbol: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  isPositive: boolean;
+  previousClose?: number | null;
+  earlyTradingChangePercent?: number | null;
+  lateTradingChangePercent?: number | null;
+  [key: string]: unknown;
+}
+
+interface PortfolioRow {
+  user_portfolio_id?: string | number;
+  symbol: string;
+  price: number;
+  quantity?: number | null;
+  average_cost?: number | null;
+  marketValue?: number;
+  unrealizedPlPercent?: number | null;
+  isPositive?: boolean;
+  previousClose?: number | null;
+  earlyTradingChangePercent?: number | null;
+  lateTradingChangePercent?: number | null;
+  [key: string]: unknown;
+}
+
+// TODO: type properly once marketUtils exports this
+type MarketStatusData = Parameters<typeof getExtendedHoursInfo>[0];
+
+interface ContextMenuProps {
+  menu: MenuPosition | null;
+  onClose: () => void;
+  items: ContextMenuItem[];
+}
+
+function ContextMenu({ menu, onClose, items }: ContextMenuProps) {
   if (!menu) return null;
   return (
     <>
@@ -32,9 +80,16 @@ function ContextMenu({ menu, onClose, items }) {
   );
 }
 
-function WatchlistItem({ item, index, onDelete, marketStatus }) {
+interface WatchlistItemProps {
+  item: WatchlistRow;
+  index: number;
+  onDelete?: (id: string) => void;
+  marketStatus: MarketStatusData;
+}
+
+function WatchlistItem({ item, index, onDelete, marketStatus }: WatchlistItemProps) {
   const navigate = useNavigate();
-  const [menu, setMenu] = useState(null); // { x, y } or null
+  const [menu, setMenu] = useState<MenuPosition | null>(null);
   const pos = item.isPositive;
   const pctStr = (pos ? '+' : '') + Number(item.changePercent).toFixed(2) + '%';
 
@@ -42,7 +97,7 @@ function WatchlistItem({ item, index, onDelete, marketStatus }) {
   const { extPct, extType, extPrice, extChange } = getExtendedHoursInfo(marketStatus, item, { shortLabels: true });
   const extColor = extType === 'pre' ? '#fbbf24' : '#3b82f6';
 
-  const handleContextMenu = (e) => {
+  const handleContextMenu = (e: React.MouseEvent) => {
     if (!item.watchlist_item_id) return;
     e.preventDefault();
     setMenu({ x: e.clientX, y: e.clientY });
@@ -113,9 +168,18 @@ function WatchlistItem({ item, index, onDelete, marketStatus }) {
   );
 }
 
-function PortfolioItem({ item, index, onEdit, onDelete, valuesHidden, marketStatus }) {
+interface PortfolioItemProps {
+  item: PortfolioRow;
+  index: number;
+  onEdit?: (item: PortfolioRow) => void;
+  onDelete?: (id: string) => void;
+  valuesHidden: boolean;
+  marketStatus: MarketStatusData;
+}
+
+function PortfolioItem({ item, index, onEdit, onDelete, valuesHidden, marketStatus }: PortfolioItemProps) {
   const navigate = useNavigate();
-  const [menu, setMenu] = useState(null); // { x, y } or null
+  const [menu, setMenu] = useState<MenuPosition | null>(null);
   const pos = item.isPositive;
   const plStr =
     item.unrealizedPlPercent != null
@@ -126,7 +190,7 @@ function PortfolioItem({ item, index, onEdit, onDelete, valuesHidden, marketStat
   const { extPct, extType, extPrice } = getExtendedHoursInfo(marketStatus, item, { shortLabels: true });
   const extColor = extType === 'pre' ? '#fbbf24' : '#3b82f6';
 
-  const handleContextMenu = (e) => {
+  const handleContextMenu = (e: React.MouseEvent) => {
     if (!item.user_portfolio_id) return;
     e.preventDefault();
     setMenu({ x: e.clientX, y: e.clientY });
@@ -202,7 +266,12 @@ function PortfolioItem({ item, index, onEdit, onDelete, valuesHidden, marketStat
   );
 }
 
-function AddNewButton({ label, onClick }) {
+interface AddNewButtonProps {
+  label: string;
+  onClick?: () => void;
+}
+
+function AddNewButton({ label, onClick }: AddNewButtonProps) {
   return (
     <button
       onClick={onClick}
@@ -227,6 +296,22 @@ function AddNewButton({ label, onClick }) {
   );
 }
 
+type PWTabKey = 'watchlist' | 'portfolio';
+
+interface PortfolioWatchlistCardProps {
+  watchlistRows?: WatchlistRow[];
+  watchlistLoading?: boolean;
+  onWatchlistAdd?: () => void;
+  onWatchlistDelete?: (id: string) => void;
+  portfolioRows?: PortfolioRow[];
+  portfolioLoading?: boolean;
+  hasRealHoldings?: boolean;
+  onPortfolioAdd?: () => void;
+  onPortfolioDelete?: (id: string) => void;
+  onPortfolioEdit?: (item: PortfolioRow) => void;
+  marketStatus: MarketStatusData;
+}
+
 function PortfolioWatchlistCard({
   watchlistRows = [],
   watchlistLoading = false,
@@ -239,15 +324,15 @@ function PortfolioWatchlistCard({
   onPortfolioDelete,
   onPortfolioEdit,
   marketStatus,
-}) {
-  const [activeTab, setActiveTabRaw] = useState(() => localStorage.getItem('portfolio_active_tab') || 'watchlist');
+}: PortfolioWatchlistCardProps) {
+  const [activeTab, setActiveTabRaw] = useState<PWTabKey>(() => (localStorage.getItem('portfolio_active_tab') as PWTabKey) || 'watchlist');
   const [valuesHidden, setValuesHiddenRaw] = useState(() => localStorage.getItem('portfolio_values_hidden') === 'true');
 
-  const setActiveTab = (tab) => {
+  const setActiveTab = (tab: PWTabKey) => {
     setActiveTabRaw(tab);
     localStorage.setItem('portfolio_active_tab', tab);
   };
-  const setValuesHidden = (updater) => {
+  const setValuesHidden = (updater: boolean | ((prev: boolean) => boolean)) => {
     setValuesHiddenRaw((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       localStorage.setItem('portfolio_values_hidden', String(next));

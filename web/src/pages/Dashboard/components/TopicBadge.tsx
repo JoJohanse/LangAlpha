@@ -1,6 +1,8 @@
 import React from 'react';
 
-const trendStyles = {
+type Trend = 'up' | 'down' | 'neutral';
+
+const trendStyles: Record<Trend, React.CSSProperties> = {
   up: {
     backgroundColor: 'var(--color-profit-soft)',
     color: 'var(--color-profit)',
@@ -18,7 +20,12 @@ const trendStyles = {
   },
 };
 
-function TopicBadge({ text, trend }) {
+interface TopicBadgeProps {
+  text: string;
+  trend: Trend;
+}
+
+function TopicBadge({ text, trend }: TopicBadgeProps) {
   return (
     <span
       className="px-3 py-1.5 rounded-lg border text-xs font-medium"

@@ -2,7 +2,13 @@ import React, { useState, useRef } from 'react';
 import ChatInput from '../../../components/ui/chat-input';
 import { useChatInput } from '../hooks/useChatInput';
 
-const SUGGESTION_CHIPS = [
+// TODO: type properly when chat-input is migrated to TS
+interface ChatInputHandle {
+  setValue: (value: string) => void;
+  [key: string]: unknown;
+}
+
+const SUGGESTION_CHIPS: string[] = [
   "Summarize Apple's earnings",
   'Compare TSLA vs BYD',
   'Predict market volatility',
@@ -25,7 +31,7 @@ function ChatInputCard() {
   } = useChatInput();
 
   const [focused, setFocused] = useState(false);
-  const chatInputRef = useRef(null);
+  const chatInputRef = useRef<ChatInputHandle>(null);
 
   return (
     <div className="fixed bottom-8 left-0 right-0 z-40 flex justify-center pointer-events-none">
@@ -53,6 +59,7 @@ function ChatInputCard() {
             if (!e.currentTarget.contains(e.relatedTarget)) setFocused(false);
           }}
         >
+          {/* ChatInput forwardRef props not yet typed — see chat-input.tsx */}
           <ChatInput
             ref={chatInputRef}
             onSend={handleSend}

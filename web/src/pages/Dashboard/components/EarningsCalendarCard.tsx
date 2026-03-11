@@ -4,7 +4,47 @@ import { ChevronRight, X, Calendar } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getEarningsCalendar } from '../utils/api';
 
-function LogoFallback({ symbol }) {
+interface EarningsEntry {
+  symbol: string;
+  date: string;
+  companyName?: string;
+  [key: string]: unknown;
+}
+
+interface EarningsPreviewItem extends EarningsEntry {
+  _isPast: boolean;
+}
+
+interface LogoFallbackProps {
+  symbol: string;
+}
+
+interface EarningsItemProps {
+  item: EarningsEntry;
+  index: number;
+  isPast?: boolean;
+}
+
+interface SectionLabelProps {
+  label: string;
+}
+
+interface EarningsModalProps {
+  earnings: EarningsEntry[];
+  onClose: () => void;
+}
+
+interface DateGroup {
+  date: string;
+  items: EarningsEntry[];
+}
+
+interface DateTabInfo {
+  weekday: string;
+  label: string;
+}
+
+function LogoFallback({ symbol }: LogoFallbackProps) {
   return (
     <span className="font-bold text-xs" style={{ color: 'var(--color-text-primary)' }}>
       {(symbol || '??').substring(0, 2)}
@@ -12,12 +52,12 @@ function LogoFallback({ symbol }) {
   );
 }
 
-function formatDate(dateStr) {
+function formatDate(dateStr: string | undefined): string {
   if (!dateStr) return '';
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function EarningsItem({ item, index, isPast }) {
+function EarningsItem({ item, index, isPast }: EarningsItemProps) {
   const dateStr = formatDate(item.date);
 
   return (
@@ -62,7 +102,7 @@ function EarningsItem({ item, index, isPast }) {
   );
 }
 
-function SectionLabel({ label }) {
+function SectionLabel({ label }: SectionLabelProps) {
   return (
     <div
       className="text-[10px] font-bold uppercase tracking-wider px-3 pt-2 pb-1"
@@ -73,8 +113,8 @@ function SectionLabel({ label }) {
   );
 }
 
-function formatDateTab(dateStr) {
-  if (!dateStr) return '';
+function formatDateTab(dateStr: string | undefined): DateTabInfo {
+  if (!dateStr) return { weekday: '', label: '' };
   const d = new Date(dateStr + 'T00:00:00');
   const weekday = d.toLocaleDateString('en-US', { weekday: 'short' });
   const month = d.toLocaleDateString('en-US', { month: 'short' });
@@ -82,12 +122,12 @@ function formatDateTab(dateStr) {
   return { weekday, label: `${month} ${day}` };
 }
 
-function EarningsModal({ earnings, onClose }) {
+function EarningsModal({ earnings, onClose }: EarningsModalProps) {
   const todayStr = new Date().toISOString().split('T')[0];
 
   // Group by date, sorted chronologically
-  const dateGroups = useMemo(() => {
-    const groups = {};
+  const dateGroups = useMemo((): DateGroup[] => {
+    const groups: Record<string, EarningsEntry[]> = {};
     for (const e of earnings) {
       if (!e.date) continue;
       if (!groups[e.date]) groups[e.date] = [];
@@ -117,7 +157,7 @@ function EarningsModal({ earnings, onClose }) {
   const isPastDate = activeDate < todayStr;
 
   useEffect(() => {
-    const handleEsc = (e) => { if (e.key === 'Escape') onClose(); };
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, [onClose]);
@@ -274,7 +314,7 @@ function EarningsModal({ earnings, onClose }) {
 }
 
 function EarningsCalendarCard() {
-  const [allEarnings, setAllEarnings] = useState([]);
+  const [allEarnings, setAllEarnings] = useState<EarningsEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -286,10 +326,10 @@ function EarningsCalendarCard() {
       const to = new Date(today.getTime() + 5 * 86400000).toISOString().split('T')[0];
       const result = await getEarningsCalendar({ from, to });
       // Filter to US-market symbols only (no dot-suffix like .BK, .TW, .L, .TO, etc.)
-      const usOnly = (result?.data || []).filter((e) => e.symbol && !e.symbol.includes('.'));
+      const usOnly = ((result?.data || []) as EarningsEntry[]).filter((e) => e.symbol && !e.symbol.includes('.'));
       setAllEarnings(usOnly);
-    } catch (err) {
-      console.error('[EarningsCalendarCard] fetch failed:', err?.message);
+    } catch (err: unknown) {
+      console.error('[EarningsCalendarCard] fetch failed:', (err as Error)?.message);
       setAllEarnings([]);
     } finally {
       setLoading(false);
@@ -309,7 +349,7 @@ function EarningsCalendarCard() {
   }, [allEarnings, todayStr]);
 
   // Card preview: show up to 3 upcoming + fill remaining from recent, max 6 total
-  const previewItems = useMemo(() => {
+  const previewItems = useMemo((): EarningsPreviewItem[] => {
     const upSlice = upcoming.slice(0, 3);
     const remaining = 6 - upSlice.length;
     const recSlice = recent.slice(0, remaining);

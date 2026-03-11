@@ -1,8 +1,13 @@
 import React from 'react';
 import { Menu } from 'lucide-react';
 
-const TopResearch = () => {
-  const researchItems = [
+interface ResearchItem {
+  title: string;
+  time: string;
+}
+
+const TopResearch: React.FC = () => {
+  const researchItems: ResearchItem[] = [
     { title: 'Retail Sales Slump Takes Toll on Market, Stocks Dip', time: '10 min ago' },
     { title: 'Retail Sales Slump Takes Toll on Market, Stocks Dip', time: '10 min ago' },
     { title: 'Retail Sales Slump Takes Toll on Market, Stocks Dip', time: '10 min ago' },

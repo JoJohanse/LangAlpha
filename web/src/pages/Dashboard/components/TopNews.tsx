@@ -1,8 +1,14 @@
 import React from 'react';
 import { Menu, Zap } from 'lucide-react';
 
-const TopNews = () => {
-  const newsItems = [
+interface NewsItem {
+  title: string;
+  time: string;
+  isHot: boolean;
+}
+
+const TopNews: React.FC = () => {
+  const newsItems: NewsItem[] = [
     { title: 'Retail Sales Slump Takes Toll on Market,...', time: '10 min ago', isHot: true },
     { title: "Tech Giant's Earnings Soar, Stock Hits All-Ti...", time: '2 min ago', isHot: false },
     { title: 'Retail Sales Slump Takes Toll on Market,...', time: '10 min ago', isHot: true },

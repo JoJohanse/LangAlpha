@@ -8,6 +8,42 @@ import {
   listWatchlists,
   listWatchlistItems,
 } from '../utils/api';
+import type { StockPrice } from '@/types/market';
+
+export interface WatchlistRow {
+  watchlist_item_id: string;
+  symbol: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  isPositive: boolean;
+  previousClose: number | null;
+  earlyTradingChangePercent: number | null;
+  lateTradingChangePercent: number | null;
+  [key: string]: unknown;
+}
+
+interface WatchlistQueryData {
+  rows: WatchlistRow[];
+  currentWatchlistId: string | null;
+}
+
+interface WatchlistItemData {
+  symbol: string;
+  [key: string]: unknown;
+}
+
+interface ApiError {
+  response?: {
+    status?: number;
+    data?: {
+      detail?: string;
+      message?: string;
+      [key: string]: unknown;
+    };
+  };
+  message?: string;
+}
 
 /**
  * Shared hook for watchlist data fetching and CRUD operations.
@@ -20,22 +56,22 @@ export function useWatchlistData() {
 
   const [modalOpen, setModalOpen] = useState(false);
 
-  const { data = { rows: [], currentWatchlistId: null }, isLoading: loading, refetch: fetchWatchlist } = useQuery({
+  const { data = { rows: [], currentWatchlistId: null }, isLoading: loading, refetch: fetchWatchlist } = useQuery<WatchlistQueryData>({
     queryKey: ['watchlistData'],
-    queryFn: async () => {
-      const { watchlists } = await listWatchlists();
+    queryFn: async (): Promise<WatchlistQueryData> => {
+      const { watchlists } = await listWatchlists() as { watchlists?: Array<{ watchlist_id: string; [key: string]: unknown }> };
       const firstWatchlist = watchlists?.[0];
       const watchlistId = firstWatchlist?.watchlist_id || 'default';
 
-      const { items } = await listWatchlistItems(watchlistId);
+      const { items } = await listWatchlistItems(watchlistId) as { items?: Array<{ watchlist_item_id: string; symbol: string; [key: string]: unknown }> };
       const symbols = items?.length ? items.map((i) => i.symbol) : [];
-      const prices = symbols.length > 0 ? await getStockPrices(symbols) : [];
-      const bySym = Object.fromEntries((prices || []).map((p) => [p.symbol, p]));
+      const prices: StockPrice[] = symbols.length > 0 ? await getStockPrices(symbols) : [];
+      const bySym: Record<string, StockPrice> = Object.fromEntries((prices || []).map((p) => [p.symbol, p]));
 
-      const combined = items?.length
+      const combined: WatchlistRow[] = items?.length
         ? items.map((i) => {
           const sym = String(i.symbol || '').trim().toUpperCase();
-          const p = bySym[sym] || {};
+          const p = bySym[sym] || {} as Partial<StockPrice>;
           return {
             watchlist_item_id: i.watchlist_item_id,
             symbol: sym,
@@ -60,11 +96,11 @@ export function useWatchlistData() {
   const { rows, currentWatchlistId } = data;
 
   const handleAdd = useCallback(
-    async (itemData, watchlistId) => {
+    async (itemData: WatchlistItemData, watchlistId?: string | null) => {
       try {
         let targetWatchlistId = watchlistId || currentWatchlistId;
         if (!targetWatchlistId) {
-          const { watchlists } = await listWatchlists();
+          const { watchlists } = await listWatchlists() as { watchlists?: Array<{ watchlist_id: string }> };
           targetWatchlistId = watchlists?.[0]?.watchlist_id || 'default';
         }
 
@@ -76,11 +112,12 @@ export function useWatchlistData() {
           title: 'Stock added',
           description: `${itemData.symbol} has been added to your watchlist.`,
         });
-      } catch (e) {
-        console.error('Add watchlist item failed:', e?.response?.status, e?.response?.data, e?.message);
+      } catch (e: unknown) {
+        const err = e as ApiError;
+        console.error('Add watchlist item failed:', err?.response?.status, err?.response?.data, err?.message);
 
-        const status = e?.response?.status;
-        const msg = e?.response?.data?.detail || e?.response?.data?.message || '';
+        const status = err?.response?.status;
+        const msg = err?.response?.data?.detail || err?.response?.data?.message || '';
 
         if (status === 409 || msg.toLowerCase().includes('already exists')) {
           toast({
@@ -101,18 +138,19 @@ export function useWatchlistData() {
   );
 
   const handleDelete = useCallback(
-    async (itemId) => {
+    async (itemId: string) => {
       try {
         let watchlistId = currentWatchlistId;
         if (!watchlistId) {
-          const { watchlists } = await listWatchlists();
+          const { watchlists } = await listWatchlists() as { watchlists?: Array<{ watchlist_id: string }> };
           watchlistId = watchlists?.[0]?.watchlist_id || 'default';
         }
 
         await deleteWatchlistItem(itemId, watchlistId);
         queryClient.invalidateQueries({ queryKey: ['watchlistData'] });
-      } catch (e) {
-        console.error('Delete watchlist item failed:', e?.response?.status, e?.response?.data, e?.message);
+      } catch (e: unknown) {
+        const err = e as ApiError;
+        console.error('Delete watchlist item failed:', err?.response?.status, err?.response?.data, err?.message);
       }
     },
     [currentWatchlistId, queryClient]

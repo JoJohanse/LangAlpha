@@ -1,14 +1,35 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getNews } from '../utils/api';
 
-// Module-level caches keyed by caller-provided cacheKey
-const cacheMap = new Map();
+export interface TickerNewsItem {
+  id: string;
+  title: string;
+  time: string;
+  isHot: boolean;
+  image: string | null;
+  source: string;
+  favicon: string | null;
+  tickers: string[];
+}
 
-function formatRelativeTime(timestamp) {
+interface TickerRow {
+  symbol: string;
+  [key: string]: unknown;
+}
+
+interface CacheEntry {
+  items: TickerNewsItem[];
+  tickerKey: string;
+}
+
+// Module-level caches keyed by caller-provided cacheKey
+const cacheMap = new Map<string, CacheEntry>();
+
+function formatRelativeTime(timestamp: string | number | null | undefined): string {
   if (!timestamp) return '';
   const now = new Date();
   const then = new Date(timestamp);
-  const diffMs = now - then;
+  const diffMs = now.getTime() - then.getTime();
   const diffMin = Math.floor(diffMs / 60000);
   if (diffMin < 1) return 'just now';
   if (diffMin < 60) return `${diffMin} min ago`;
@@ -18,31 +39,30 @@ function formatRelativeTime(timestamp) {
   return `${diffDay} day${diffDay > 1 ? 's' : ''} ago`;
 }
 
-function mapNewsResults(results) {
+function mapNewsResults(results: Record<string, unknown>[]): TickerNewsItem[] {
   return results.map((r) => ({
-    id: r.id,
-    title: r.title,
-    time: formatRelativeTime(r.published_at),
-    isHot: r.has_sentiment,
-    image: r.image_url || null,
-    source: r.source?.name || '',
-    favicon: r.source?.favicon_url || null,
-    tickers: r.tickers || [],
+    id: r.id as string,
+    title: r.title as string,
+    time: formatRelativeTime(r.published_at as string | null | undefined),
+    isHot: r.has_sentiment as boolean,
+    image: r.image_url as string || null,
+    source: (r.source as Record<string, unknown> | undefined)?.name as string || '',
+    favicon: (r.source as Record<string, unknown> | undefined)?.favicon_url as string || null,
+    tickers: (r.tickers as string[]) || [],
   }));
 }
 
 /**
  * Hook to fetch news for a list of ticker rows.
- * @param {Array} rows - Array of objects with a `symbol` property
- * @param {string} cacheKey - Unique key for module-level caching (e.g. 'portfolio', 'watchlist')
- * @returns {{ items: Array, loading: boolean }}
+ * @param rows - Array of objects with a `symbol` property
+ * @param cacheKey - Unique key for module-level caching (e.g. 'portfolio', 'watchlist')
  */
-export function useTickerNews(rows, cacheKey) {
+export function useTickerNews(rows: TickerRow[], cacheKey: string): { items: TickerNewsItem[]; loading: boolean } {
   const cached = cacheMap.get(cacheKey);
-  const [items, setItems] = useState(() => cached?.items || []);
+  const [items, setItems] = useState<TickerNewsItem[]>(() => cached?.items || []);
   const [loading, setLoading] = useState(!cached);
 
-  const fetchNews = useCallback(async () => {
+  const fetchNews = useCallback(async (): Promise<void> => {
     const tickers = (rows || []).map((r) => r.symbol).filter(Boolean);
     const tickerKey = [...tickers].sort().join(',');
 
@@ -56,7 +76,7 @@ export function useTickerNews(rows, cacheKey) {
     setLoading(true);
     try {
       const data = await getNews({ tickers, limit: 50 });
-      const mapped = data.results?.length > 0 ? mapNewsResults(data.results) : [];
+      const mapped: TickerNewsItem[] = data.results?.length > 0 ? mapNewsResults(data.results) : [];
       setItems(mapped);
       cacheMap.set(cacheKey, { items: mapped, tickerKey });
     } catch {

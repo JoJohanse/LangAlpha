@@ -3,7 +3,37 @@ import { X, Calendar, Hash, ExternalLink, TrendingUp, TrendingDown, Minus, Tag }
 import { motion, AnimatePresence } from 'framer-motion';
 import { getNewsArticle } from '../utils/api';
 
-function sentimentIcon(sentiment) {
+interface ArticleSource {
+  name: string;
+  favicon_url?: string;
+}
+
+interface ArticleSentiment {
+  ticker: string;
+  sentiment: string;
+  reasoning?: string;
+}
+
+interface Article {
+  title: string;
+  description?: string;
+  image_url?: string;
+  article_url?: string;
+  author?: string;
+  published_at?: string;
+  keywords?: string[];
+  tickers?: string[];
+  sentiments?: ArticleSentiment[];
+  source?: ArticleSource;
+  [key: string]: unknown;
+}
+
+interface NewsDetailModalProps {
+  newsId: string | null;
+  onClose: () => void;
+}
+
+function sentimentIcon(sentiment: string): React.ReactElement {
   switch (sentiment) {
     case 'positive':
       return <TrendingUp size={16} style={{ color: 'var(--color-profit)' }} />;
@@ -14,7 +44,7 @@ function sentimentIcon(sentiment) {
   }
 }
 
-function sentimentStyle(sentiment) {
+function sentimentStyle(sentiment: string): React.CSSProperties {
   switch (sentiment) {
     case 'positive':
       return {
@@ -37,7 +67,7 @@ function sentimentStyle(sentiment) {
   }
 }
 
-function formatDate(dateString) {
+function formatDate(dateString: string | undefined): string {
   if (!dateString) return '';
   try {
     const d = new Date(dateString);
@@ -53,10 +83,10 @@ function formatDate(dateString) {
   }
 }
 
-function NewsDetailModal({ newsId, onClose }) {
-  const [article, setArticle] = useState(null);
+function NewsDetailModal({ newsId, onClose }: NewsDetailModalProps) {
+  const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(false);
-  const [expandedSentiment, setExpandedSentiment] = useState(null);
+  const [expandedSentiment, setExpandedSentiment] = useState<number | null>(null);
 
   useEffect(() => {
     if (!newsId) {
@@ -69,7 +99,7 @@ function NewsDetailModal({ newsId, onClose }) {
     setExpandedSentiment(null);
     getNewsArticle(newsId)
       .then((data) => {
-        if (!cancelled) setArticle(data);
+        if (!cancelled) setArticle(data as Article);
       })
       .catch((err) => {
         console.error('[NewsDetailModal] fetch failed:', err?.message);
@@ -86,7 +116,7 @@ function NewsDetailModal({ newsId, onClose }) {
   // Escape key
   useEffect(() => {
     if (!newsId) return;
-    const handleEsc = (e) => {
+    const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleEsc);
@@ -170,7 +200,7 @@ function NewsDetailModal({ newsId, onClose }) {
                               src={article.source.favicon_url}
                               alt=""
                               className="w-3.5 h-3.5 rounded-sm"
-                              onError={(e) => { e.target.style.display = 'none'; }}
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                             />
                           )}
                           {article.source.name}
@@ -221,7 +251,7 @@ function NewsDetailModal({ newsId, onClose }) {
 
                   <div className="space-y-8">
                     {/* Related Topics */}
-                    {article.keywords?.length > 0 && (
+                    {(article.keywords?.length ?? 0) > 0 && (
                       <div>
                         <h3
                           className="text-lg font-bold mb-3 flex items-center gap-2"
@@ -231,7 +261,7 @@ function NewsDetailModal({ newsId, onClose }) {
                           Related Topics
                         </h3>
                         <div className="flex flex-wrap gap-2">
-                          {article.keywords.map((kw, i) => (
+                          {article.keywords!.map((kw, i) => (
                             <span
                               key={i}
                               className="px-3 py-1 rounded-full border text-xs"
@@ -268,7 +298,7 @@ function NewsDetailModal({ newsId, onClose }) {
                     )}
 
                     {/* Ticker Impact */}
-                    {(article.sentiments?.length > 0 || article.tickers?.length > 0) && (
+                    {((article.sentiments?.length ?? 0) > 0 || (article.tickers?.length ?? 0) > 0) && (
                       <div>
                         <h3
                           className="text-lg font-bold mb-3 flex items-center gap-2"
@@ -277,8 +307,8 @@ function NewsDetailModal({ newsId, onClose }) {
                           Ticker Impact
                         </h3>
                         <div className="flex flex-wrap gap-3">
-                          {article.sentiments?.length > 0
-                            ? article.sentiments.slice(0, 5).map((insight, i) => (
+                          {(article.sentiments?.length ?? 0) > 0
+                            ? article.sentiments!.slice(0, 5).map((insight, i) => (
                                 <div
                                   key={i}
                                   className="p-3 rounded-xl border cursor-pointer transition-colors flex-1 min-w-[200px] max-w-[300px]"
@@ -314,8 +344,8 @@ function NewsDetailModal({ newsId, onClose }) {
                                   )}
                                 </div>
                               ))
-                            : article.tickers?.length > 0 && (
-                                article.tickers.map((ticker, i) => (
+                            : (article.tickers?.length ?? 0) > 0 && (
+                                article.tickers!.map((ticker, i) => (
                                   <span
                                     key={i}
                                     className="px-3 py-1.5 rounded-lg border text-xs font-bold"

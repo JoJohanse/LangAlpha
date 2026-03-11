@@ -6,15 +6,15 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { useUser } from '@/hooks/useUser';
 import ConfirmDialog from './ConfirmDialog';
 
-const AvatarDropdown = () => {
+const AvatarDropdown: React.FC = () => {
   const navigate = useNavigate();
   const { isLoggedIn, logout } = useAuth();
   const { user } = useUser();
   const { t } = useTranslation();
   const [showDropdown, setShowDropdown] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const dropdownRef = useRef(null);
-  const accountUrl = import.meta.env.VITE_ACCOUNT_URL || null;
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const accountUrl = (import.meta.env.VITE_ACCOUNT_URL as string | undefined) || null;
 
   const avatarUrl = useMemo(() => {
     const url = user?.avatar_url;
@@ -22,15 +22,15 @@ const AvatarDropdown = () => {
     return url ? `${url}?v=${version}` : null;
   }, [user?.avatar_url, user?.updated_at]);
 
-  const displayName = user?.display_name || user?.name || '';
+  const displayName = (user?.display_name as string) || user?.name || '';
   const [avatarError, setAvatarError] = useState(false);
   useEffect(() => setAvatarError(false), [avatarUrl]);
 
   // Close dropdown on outside click
   useEffect(() => {
     if (!showDropdown) return;
-    const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setShowDropdown(false);
       }
     };

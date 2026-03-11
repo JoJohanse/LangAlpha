@@ -5,6 +5,33 @@ import { Input } from '../../../components/ui/input';
 import { ScrollArea } from '../../../components/ui/scroll-area';
 import { searchStocks } from '@/lib/marketUtils';
 
+interface StockResult {
+  symbol: string;
+  name?: string;
+  exchangeShortName?: string;
+  stockExchange?: string;
+  currency?: string;
+}
+
+interface PortfolioHoldingPayload {
+  symbol: string;
+  instrument_type: string;
+  exchange: string;
+  name: string;
+  quantity: string;
+  average_cost: string;
+  currency: string;
+  account_name?: string;
+  notes?: string;
+  first_purchased_at: string;
+}
+
+interface AddPortfolioHoldingDialogProps {
+  open?: boolean;
+  onClose?: () => void;
+  onAdd: (payload: PortfolioHoldingPayload) => void;
+}
+
 /**
  * Two-page dialog for adding portfolio holdings:
  * Page 1: Search for stocks by keyword
@@ -14,12 +41,12 @@ function AddPortfolioHoldingDialog({
   open = false,
   onClose,
   onAdd,
-}) {
-  const [page, setPage] = useState(1); // 1 = search, 2 = details
+}: AddPortfolioHoldingDialogProps) {
+  const [page, setPage] = useState<1 | 2>(1); // 1 = search, 2 = details
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
+  const [searchResults, setSearchResults] = useState<StockResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [selectedStock, setSelectedStock] = useState(null);
+  const [selectedStock, setSelectedStock] = useState<StockResult | null>(null);
   
   // Form fields for page 2
   const [quantity, setQuantity] = useState('');
@@ -45,7 +72,7 @@ function AddPortfolioHoldingDialog({
       try {
         // Use maximum limit of 100 to show more search results
         const result = await searchStocks(query, 100);
-        setSearchResults(result.results || []);
+        setSearchResults((result.results || []) as StockResult[]);
       } catch (error) {
         console.error('Search failed:', error);
         setSearchResults([]);
@@ -71,7 +98,7 @@ function AddPortfolioHoldingDialog({
     }
   }, [open]);
 
-  const handleStockSelect = (stock) => {
+  const handleStockSelect = (stock: StockResult) => {
     setSelectedStock(stock);
     setPage(2);
   };

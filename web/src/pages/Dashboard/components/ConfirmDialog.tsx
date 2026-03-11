@@ -2,10 +2,19 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../../components/ui/dialog';
 
+interface ConfirmDialogProps {
+  open: boolean;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  onConfirm?: () => void | Promise<void>;
+  onOpenChange?: (open: boolean) => void;
+}
+
 /**
  * Reusable confirmation dialog. Uses color tokens only.
  */
-function ConfirmDialog({ open, title, message, confirmLabel, onConfirm, onOpenChange }) {
+function ConfirmDialog({ open, title, message, confirmLabel, onConfirm, onOpenChange }: ConfirmDialogProps) {
   const { t } = useTranslation();
   const handleConfirm = async () => {
     if (onConfirm) await onConfirm();

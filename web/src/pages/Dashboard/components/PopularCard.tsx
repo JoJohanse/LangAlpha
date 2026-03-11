@@ -3,11 +3,27 @@ import { useNavigate } from 'react-router-dom';
 import { AlignEndHorizontal, Clock, Menu, Tag } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card';
 
-function formatRelativeTime(timestamp) {
+interface PopularItem {
+  indexNumber?: string;
+  title: string;
+  description?: string;
+  event_timestamp?: string;
+  duration?: string;
+  tags?: string[];
+}
+
+interface PopularCardProps {
+  items?: PopularItem[];
+  loading?: boolean;
+  hasMore?: boolean;
+  onLoadMore?: () => void;
+}
+
+function formatRelativeTime(timestamp: string): string {
   if (!timestamp) return '';
   const now = new Date();
   const then = new Date(timestamp);
-  const diffMs = now - then;
+  const diffMs = now.getTime() - then.getTime();
   const diffMin = Math.floor(diffMs / 60000);
   if (diffMin < 1) return 'just now';
   if (diffMin < 60) return `${diffMin} min ago`;
@@ -17,19 +33,19 @@ function formatRelativeTime(timestamp) {
   return `${diffDay} day${diffDay > 1 ? 's' : ''} ago`;
 }
 
-function PopularCard({ items = [], loading = false, hasMore = false, onLoadMore }) {
+function PopularCard({ items = [], loading = false, hasMore = false, onLoadMore }: PopularCardProps) {
   const navigate = useNavigate();
   const loadingMore = useRef(false);
 
-  const handleCardClick = (item) => {
+  const handleCardClick = (item: PopularItem) => {
     if (item.indexNumber) {
       navigate(`/detail/${item.indexNumber}`);
     }
   };
 
-  const handleScroll = useCallback((e) => {
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (!hasMore || !onLoadMore || loadingMore.current) return;
-    const el = e.target;
+    const el = e.target as HTMLDivElement;
     if (el.scrollLeft + el.clientWidth >= el.scrollWidth - 100) {
       loadingMore.current = true;
       onLoadMore();

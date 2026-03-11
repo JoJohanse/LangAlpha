@@ -6,6 +6,32 @@ import { ScrollArea } from '../../../components/ui/scroll-area';
 import { getStockPrices } from '../utils/api';
 import { searchStocks } from '@/lib/marketUtils';
 
+interface StockResult {
+  symbol: string;
+  name?: string;
+  exchangeShortName?: string;
+  stockExchange?: string;
+}
+
+interface WatchlistItemData {
+  symbol: string;
+  instrument_type: string;
+  exchange: string;
+  name: string;
+  notes?: string;
+  alert_settings?: {
+    price_above?: number;
+    price_below?: number;
+  };
+}
+
+interface AddWatchlistItemDialogProps {
+  open?: boolean;
+  onClose?: () => void;
+  onAdd: (itemData: WatchlistItemData, watchlistId?: string) => void;
+  watchlistId?: string;
+}
+
 /**
  * Two-page dialog for adding watchlist items:
  * Page 1: Search for stocks by keyword
@@ -16,13 +42,13 @@ function AddWatchlistItemDialog({
   onClose,
   onAdd,
   watchlistId,
-}) {
-  const [page, setPage] = useState(1); // 1 = search, 2 = details
+}: AddWatchlistItemDialogProps) {
+  const [page, setPage] = useState<1 | 2>(1); // 1 = search, 2 = details
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
+  const [searchResults, setSearchResults] = useState<StockResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [selectedStock, setSelectedStock] = useState(null);
-  const [currentPrice, setCurrentPrice] = useState(null);
+  const [selectedStock, setSelectedStock] = useState<StockResult | null>(null);
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [priceLoading, setPriceLoading] = useState(false);
   
   // Form fields for page 2
@@ -47,7 +73,7 @@ function AddWatchlistItemDialog({
       setSearchLoading(true);
       try {
         const result = await searchStocks(query, 50);
-        setSearchResults(result.results || []);
+        setSearchResults((result.results || []) as StockResult[]);
       } catch (error) {
         console.error('Search failed:', error);
         setSearchResults([]);
@@ -96,7 +122,7 @@ function AddWatchlistItemDialog({
     }
   }, [open]);
 
-  const handleStockSelect = (stock) => {
+  const handleStockSelect = (stock: StockResult) => {
     setSelectedStock(stock);
     setPage(2);
   };

@@ -3,19 +3,34 @@ import { MoreVertical, Plus, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card';
 import { ScrollArea } from '../../../components/ui/scroll-area';
 
+interface WatchlistRow {
+  watchlist_item_id?: string | number;
+  symbol: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  isPositive: boolean;
+}
+
+interface WatchlistCardProps {
+  rows?: WatchlistRow[];
+  loading?: boolean;
+  onHeaderAddClick?: () => void;
+  onDeleteItem?: (itemId: string) => void;
+}
+
 /**
  * Watchlist panel: table. Add modal is handled separately via AddWatchlistItemDialog.
- * rows = [{ watchlist_item_id?, symbol, price, change, changePercent, isPositive }]
  */
 function WatchlistCard({
   rows = [],
   loading = false,
   onHeaderAddClick,
   onDeleteItem,
-}) {
-  const [menuOpenId, setMenuOpenId] = useState(null);
+}: WatchlistCardProps) {
+  const [menuOpenId, setMenuOpenId] = useState<string | number | null>(null);
 
-  const handleDelete = (itemId) => {
+  const handleDelete = (itemId: string) => {
     setMenuOpenId(null);
     onDeleteItem?.(itemId);
   };
@@ -72,7 +87,7 @@ function WatchlistCard({
                           <div className="relative inline-block">
                             <button
                               type="button"
-                              onClick={(e) => { e.stopPropagation(); setMenuOpenId((id) => (id === item.watchlist_item_id ? null : item.watchlist_item_id)); }}
+                              onClick={(e) => { e.stopPropagation(); setMenuOpenId((id) => (id === item.watchlist_item_id ? null : item.watchlist_item_id ?? null)); }}
                               className="p-1 rounded hover:opacity-80"
                               style={{ color: 'var(--color-text-secondary)' }}
                               aria-label="More options"

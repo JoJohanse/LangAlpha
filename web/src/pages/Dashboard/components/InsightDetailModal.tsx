@@ -4,7 +4,41 @@ import { motion, AnimatePresence } from 'framer-motion';
 import TopicBadge from './TopicBadge';
 import { getInsightDetail } from '../utils/api';
 
-function formatDate(dateString) {
+interface InsightTopic {
+  text: string;
+  trend: 'up' | 'down' | 'neutral';
+}
+
+interface InsightSource {
+  url: string;
+  title?: string;
+  favicon?: string;
+}
+
+interface InsightContentItem {
+  title: string;
+  body: string;
+  url?: string;
+}
+
+interface InsightDetail {
+  market_insight_id: string;
+  headline: string;
+  summary?: string;
+  model?: string;
+  completed_at?: string;
+  topics?: InsightTopic[];
+  content?: InsightContentItem[];
+  sources?: InsightSource[];
+  [key: string]: unknown;
+}
+
+interface InsightDetailModalProps {
+  marketInsightId: string | null;
+  onClose: () => void;
+}
+
+function formatDate(dateString: string | undefined): string {
   if (!dateString) return '';
   try {
     const d = new Date(dateString);
@@ -20,8 +54,8 @@ function formatDate(dateString) {
   }
 }
 
-function InsightDetailModal({ marketInsightId, onClose }) {
-  const [detail, setDetail] = useState(null);
+function InsightDetailModal({ marketInsightId, onClose }: InsightDetailModalProps) {
+  const [detail, setDetail] = useState<InsightDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
 
@@ -34,7 +68,7 @@ function InsightDetailModal({ marketInsightId, onClose }) {
     setLoading(true);
     getInsightDetail(marketInsightId)
       .then((data) => {
-        if (!cancelled) setDetail(data);
+        if (!cancelled) setDetail(data as InsightDetail);
       })
       .catch((err) => {
         console.error('[InsightDetailModal] fetch failed:', err?.message);
@@ -49,7 +83,7 @@ function InsightDetailModal({ marketInsightId, onClose }) {
   // Escape key
   useEffect(() => {
     if (!marketInsightId) return;
-    const handleEsc = (e) => {
+    const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleEsc);
@@ -146,9 +180,9 @@ function InsightDetailModal({ marketInsightId, onClose }) {
                   </h1>
 
                   {/* Topics */}
-                  {detail.topics?.length > 0 && (
+                  {(detail.topics?.length ?? 0) > 0 && (
                     <div className="flex flex-wrap gap-2 mb-6">
-                      {detail.topics.map((topic) => (
+                      {detail.topics!.map((topic) => (
                         <TopicBadge key={topic.text} text={topic.text} trend={topic.trend} />
                       ))}
                     </div>
@@ -167,7 +201,7 @@ function InsightDetailModal({ marketInsightId, onClose }) {
 
                 {/* News Items */}
                 <div className="px-6 md:px-8 pb-6 md:pb-8">
-                  {detail.content?.length > 0 && (
+                  {(detail.content?.length ?? 0) > 0 && (
                     <div
                       className="rounded-xl border overflow-hidden"
                       style={{
@@ -175,10 +209,10 @@ function InsightDetailModal({ marketInsightId, onClose }) {
                         borderColor: 'var(--color-border-muted)',
                       }}
                     >
-                      {detail.content.map((item, i) => {
-                        const source = item.url && detail.sources?.find(
-                          (s) => item.url.startsWith(s.url) || s.url.startsWith(item.url)
-                        );
+                      {detail.content!.map((item, i) => {
+                        const source = item.url ? detail.sources?.find(
+                          (s) => item.url!.startsWith(s.url) || s.url.startsWith(item.url!)
+                        ) : undefined;
                         const favicon = source?.favicon;
                         const domain = item.url ? (() => { try { return new URL(item.url).hostname.replace('www.', ''); } catch { return ''; } })() : '';
 
@@ -233,7 +267,7 @@ function InsightDetailModal({ marketInsightId, onClose }) {
                   )}
 
                   {/* Collapsible All Sources */}
-                  {detail.sources?.length > 0 && (
+                  {(detail.sources?.length ?? 0) > 0 && (
                     <div className="mt-6">
                       <button
                         onClick={() => setSourcesOpen((v) => !v)}
@@ -245,10 +279,10 @@ function InsightDetailModal({ marketInsightId, onClose }) {
                           className="transition-transform"
                           style={{ transform: sourcesOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
                         />
-                        All Sources ({detail.sources.length})
+                        All Sources ({detail.sources!.length})
                         {!sourcesOpen && (
                           <span className="flex items-center -space-x-1 ml-1">
-                            {detail.sources
+                            {detail.sources!
                               .filter((s) => s.favicon)
                               .slice(0, 5)
                               .map((s, i) => (
@@ -264,7 +298,7 @@ function InsightDetailModal({ marketInsightId, onClose }) {
                       </button>
                       {sourcesOpen && (
                         <div className="mt-2 space-y-1">
-                          {detail.sources.map((source, i) => {
+                          {detail.sources!.map((source, i) => {
                             const domain = (() => { try { return new URL(source.url).hostname.replace('www.', ''); } catch { return source.url; } })();
                             return (
                               <a

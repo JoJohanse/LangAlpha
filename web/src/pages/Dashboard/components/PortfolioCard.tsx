@@ -5,6 +5,35 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../compo
 import { Input } from '../../../components/ui/input';
 import { ScrollArea } from '../../../components/ui/scroll-area';
 
+interface PortfolioRow {
+  user_portfolio_id?: string | number;
+  symbol: string;
+  quantity?: number | null;
+  price: number;
+  unrealizedPlPercent?: number | null;
+  isPositive?: boolean;
+}
+
+interface EditForm {
+  quantity?: string;
+  averageCost?: string;
+  notes?: string;
+}
+
+interface PortfolioCardProps {
+  rows?: PortfolioRow[];
+  loading?: boolean;
+  hasRealHoldings?: boolean;
+  onHeaderAddClick?: () => void;
+  editRow?: PortfolioRow | null;
+  editForm?: EditForm;
+  onEditFormChange?: (form: EditForm) => void;
+  onEditSubmit?: () => void;
+  onEditClose?: () => void;
+  onDeleteItem?: (holdingId: string) => void;
+  onEditItem?: (row: PortfolioRow) => void;
+}
+
 /**
  * Portfolio panel: table + edit modal. Add modal is handled separately via AddPortfolioHoldingDialog.
  */
@@ -20,15 +49,15 @@ function PortfolioCard({
   onEditClose,
   onDeleteItem,
   onEditItem,
-}) {
-  const [menuOpenId, setMenuOpenId] = useState(null);
+}: PortfolioCardProps) {
+  const [menuOpenId, setMenuOpenId] = useState<string | number | null>(null);
 
-  const handleDelete = (holdingId) => {
+  const handleDelete = (holdingId: string) => {
     setMenuOpenId(null);
     onDeleteItem?.(holdingId);
   };
 
-  const handleEdit = (row) => {
+  const handleEdit = (row: PortfolioRow) => {
     setMenuOpenId(null);
     onEditItem?.(row);
   };
@@ -142,7 +171,7 @@ function PortfolioCard({
                           <div className="relative inline-block">
                             <button
                               type="button"
-                              onClick={(e) => { e.stopPropagation(); setMenuOpenId((id) => (id === row.user_portfolio_id ? null : row.user_portfolio_id)); }}
+                              onClick={(e) => { e.stopPropagation(); setMenuOpenId((id) => (id === row.user_portfolio_id ? null : row.user_portfolio_id ?? null)); }}
                               className="p-1 rounded hover:opacity-80"
                               style={{ color: 'var(--color-text-secondary)' }}
                               aria-label="More options"
