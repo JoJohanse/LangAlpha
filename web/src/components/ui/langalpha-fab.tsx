@@ -38,7 +38,7 @@ function LangAlphaFab({ onClick }: LangAlphaFabProps) {
         top: -(vh * 0.4),  // can go up to ~40% from default position
         left: -(vw - FAB_SIZE - EDGE_MARGIN * 2),
         right: 0,
-        bottom: 0,
+        bottom: -tabHeight,
       });
     };
     update();
