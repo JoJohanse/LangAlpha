@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Info, List, Sunrise, Sunset } from 'lucide-react';
+import { Info, List, Sunrise, Sunset, ChevronDown } from 'lucide-react';
 import './StockHeader.css';
 import { isUSEquity, EXT_COLOR_PRE, EXT_COLOR_POST } from '../utils/chartConstants';
 import { getExtendedHoursInfo } from '@/lib/marketUtils';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import type { StockInfo, RealTimePrice, SnapshotData } from '@/types/market';
 import type { PriceUpdate, ConnectionStatus, DataLevel } from '../hooks/useMarketDataWS';
 
@@ -90,6 +91,9 @@ const StockHeader = ({ symbol, stockInfo, realTimePrice, chartMeta, displayOverr
   // Live = WS connected AND actually delivering aggregate data for this symbol
   const usSymbol = isUSEquity(symbol);
   const isLive = wsStatus === 'connected' && usSymbol && wsHasData;
+  const isMobile = useIsMobile();
+  const [metricsCollapsed, setMetricsCollapsed] = useState(false);
+
   const [tickTime, setTickTime] = useState<Date | null>(null);
   useEffect(() => {
     if ((realTimePrice as PriceUpdate)?.timestamp) {
@@ -102,8 +106,15 @@ const StockHeader = ({ symbol, stockInfo, realTimePrice, chartMeta, displayOverr
     return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   };
 
+  const watchlistBtn = onOpenWatchlist ? (
+    <button className="stock-metrics-watchlist-pill" onClick={onOpenWatchlist}>
+      <List size={13} />
+      Watchlist
+    </button>
+  ) : null;
+
   return (
-    <div className="stock-header">
+    <div className={`stock-header${isMobile && metricsCollapsed ? ' stock-header--compact' : ''}`}>
       <div className="stock-header-top">
         <div>
           <div className="stock-title">
@@ -176,85 +187,91 @@ const StockHeader = ({ symbol, stockInfo, realTimePrice, chartMeta, displayOverr
         </div>
       </div>
 
-      <div className="stock-metrics">
-        <div className="metric-item">
-          <span className="metric-label">Prev Close</span>
-          <span className="metric-value">
-            {previousClose != null ? Number(previousClose).toFixed(2) : '—'}
-          </span>
+      {isMobile && (
+        <div className="stock-metrics-toggle-row">
+          <button
+            className="stock-metrics-toggle"
+            onClick={() => setMetricsCollapsed(c => !c)}
+            aria-expanded={!metricsCollapsed}
+          >
+            <span>{metricsCollapsed ? 'Show metrics' : 'Hide metrics'}</span>
+            <ChevronDown size={14} className={`stock-metrics-toggle-icon${metricsCollapsed ? '' : ' stock-metrics-toggle-icon--open'}`} />
+          </button>
+          {watchlistBtn}
         </div>
-        <div className="metric-item">
-          <span className="metric-label">Open
-            <span className="metrics-discrepancy-hint" title="Values are aggregated from intraday data and may differ slightly from daily figures shown on the chart.">!</span>
-          </span>
-          <span className="metric-value">
-            {open != null ? Number(open).toFixed(2) : '—'}
-          </span>
-        </div>
-        <div className="metric-item">
-          <span className="metric-label">Low</span>
-          <span className="metric-value">
-            {low != null ? Number(low).toFixed(2) : '—'}
-          </span>
-        </div>
-        <div className="metric-item">
-          <span className="metric-label">High</span>
-          <span className="metric-value">
-            {high != null ? Number(high).toFixed(2) : '—'}
-          </span>
-        </div>
-        <div className="metric-item">
-          <span className="metric-label">52 wk high</span>
-          <span className="metric-value">
-            {fiftyTwoWeekHigh != null ? Number(fiftyTwoWeekHigh).toFixed(2) : '—'}
-          </span>
-        </div>
-        <div className="metric-item">
-          <span className="metric-label">52 wk low</span>
-          <span className="metric-value">
-            {fiftyTwoWeekLow != null ? Number(fiftyTwoWeekLow).toFixed(2) : '—'}
-          </span>
-        </div>
-        <div className="metric-item">
-          <span className="metric-label">Avg Vol (3M)</span>
-          <span className="metric-value">
-            {averageVolume != null ? formatNumber(Number(averageVolume)) : '—'}
-          </span>
-        </div>
-        <div className="metric-item">
-          <span className="metric-label">Volume</span>
-          <span className="metric-value">
-            {volume != null ? formatNumber(Number(volume)) : (averageVolume != null ? formatNumber(Number(averageVolume)) : '—')}
-          </span>
-        </div>
-        <div className="metric-item">
-          <span className="metric-label">Day Range</span>
-          <span className="metric-value">
-            {hasDayRange ? `${Number(low).toFixed(2)} – ${Number(high).toFixed(2)}` : '—'}
-          </span>
-        </div>
-        <div className="metric-item">
-          <span className="metric-label">Change %</span>
-          <span className={`metric-value ${(changePct || 0) >= 0 ? 'positive' : 'negative'}`}>
-            {changePct != null ? (changePct >= 0 ? '+' : '') + changePct.toFixed(2) + '%' : '—'}
-          </span>
-        </div>
-        {onOpenWatchlist && (
-          <div className="metric-item metric-item--watchlist">
-            <button
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors"
-              style={{
-                borderColor: 'var(--color-border-muted)',
-                color: 'var(--color-text-secondary)',
-                backgroundColor: 'var(--color-bg-card)',
-              }}
-              onClick={onOpenWatchlist}
-            >
-              <List size={13} />
-              Watchlist
-            </button>
+      )}
+      <div
+        className={`stock-metrics-wrapper${isMobile && metricsCollapsed ? ' stock-metrics-wrapper--collapsed' : ''}`}
+      >
+        <div className="stock-metrics">
+          <div className="metric-item">
+            <span className="metric-label">Prev Close</span>
+            <span className="metric-value">
+              {previousClose != null ? Number(previousClose).toFixed(2) : '—'}
+            </span>
           </div>
-        )}
+          <div className="metric-item">
+            <span className="metric-label">Open
+              <span className="metrics-discrepancy-hint" title="Values are aggregated from intraday data and may differ slightly from daily figures shown on the chart.">!</span>
+            </span>
+            <span className="metric-value">
+              {open != null ? Number(open).toFixed(2) : '—'}
+            </span>
+          </div>
+          <div className="metric-item">
+            <span className="metric-label">Low</span>
+            <span className="metric-value">
+              {low != null ? Number(low).toFixed(2) : '—'}
+            </span>
+          </div>
+          <div className="metric-item">
+            <span className="metric-label">High</span>
+            <span className="metric-value">
+              {high != null ? Number(high).toFixed(2) : '—'}
+            </span>
+          </div>
+          <div className="metric-item">
+            <span className="metric-label">52 wk high</span>
+            <span className="metric-value">
+              {fiftyTwoWeekHigh != null ? Number(fiftyTwoWeekHigh).toFixed(2) : '—'}
+            </span>
+          </div>
+          <div className="metric-item">
+            <span className="metric-label">52 wk low</span>
+            <span className="metric-value">
+              {fiftyTwoWeekLow != null ? Number(fiftyTwoWeekLow).toFixed(2) : '—'}
+            </span>
+          </div>
+          <div className="metric-item">
+            <span className="metric-label">Avg Vol (3M)</span>
+            <span className="metric-value">
+              {averageVolume != null ? formatNumber(Number(averageVolume)) : '—'}
+            </span>
+          </div>
+          <div className="metric-item">
+            <span className="metric-label">Volume</span>
+            <span className="metric-value">
+              {volume != null ? formatNumber(Number(volume)) : (averageVolume != null ? formatNumber(Number(averageVolume)) : '—')}
+            </span>
+          </div>
+          <div className="metric-item">
+            <span className="metric-label">Day Range</span>
+            <span className="metric-value">
+              {hasDayRange ? `${Number(low).toFixed(2)} – ${Number(high).toFixed(2)}` : '—'}
+            </span>
+          </div>
+          <div className="metric-item">
+            <span className="metric-label">Change %</span>
+            <span className={`metric-value ${(changePct || 0) >= 0 ? 'positive' : 'negative'}`}>
+              {changePct != null ? (changePct >= 0 ? '+' : '') + changePct.toFixed(2) + '%' : '—'}
+            </span>
+          </div>
+          {!isMobile && onOpenWatchlist && (
+            <div className="metric-item metric-item--watchlist">
+              {watchlistBtn}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

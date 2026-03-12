@@ -203,8 +203,45 @@
   border-color: var(--color-border-elevated);
 }
 
+.stock-metrics-watchlist-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid var(--color-border-muted);
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-card);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+/* Collapsible metrics wrapper */
+.stock-metrics-wrapper {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.25s ease;
+  overflow: hidden;
+}
+
+.stock-metrics-wrapper > .stock-metrics {
+  min-height: 0;
+}
+
+.stock-metrics-wrapper--collapsed {
+  grid-template-rows: 0fr;
+}
+
+.stock-metrics-toggle-row {
+  display: none;
+}
+
 @media (max-width: 767px) {
-  .stock-header { padding: 10px 12px; }
+  .stock-header { padding: 10px 12px; transition: padding 0.25s ease; }
+  .stock-header--compact { padding-bottom: 4px; }
+  .stock-header--compact .stock-header-top { margin-bottom: 6px; }
   .stock-price { font-size: 22px; }
   .stock-symbol { font-size: 16px; }
   .stock-metrics { grid-template-columns: repeat(4, 1fr); gap: 6px; }
@@ -215,5 +252,40 @@
     display: flex;
     align-items: flex-end;
     justify-content: flex-end;
+  }
+
+  .stock-metrics-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+    border-top: 1px solid var(--color-border-default);
+  }
+
+  .stock-metrics-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0;
+    border: none;
+    background: none;
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+  }
+
+  .stock-metrics-toggle-icon {
+    transition: transform 0.25s ease;
+    transform: rotate(0deg);
+  }
+
+  .stock-metrics-toggle-icon--open {
+    transform: rotate(180deg);
+  }
+
+  /* Remove the border-top from metrics since the toggle row now has it */
+  .stock-metrics {
+    border-top: none;
+    padding-top: 6px;
   }
 }
