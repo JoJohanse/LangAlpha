@@ -3,6 +3,8 @@ import { X, ExternalLink, Sparkles, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import TopicBadge from './TopicBadge';
 import { getInsightDetail } from '../utils/api';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import { MobileBottomSheet } from '@/components/ui/mobile-bottom-sheet';
 
 interface InsightTopic {
   text: string;
@@ -54,10 +56,238 @@ function formatDate(dateString: string | undefined): string {
   }
 }
 
+/** Shared inner content for both mobile bottom sheet and desktop dialog */
+function InsightBody({
+  detail,
+  loading,
+  sourcesOpen,
+  setSourcesOpen,
+  isMobile,
+}: {
+  detail: InsightDetail | null;
+  loading: boolean;
+  sourcesOpen: boolean;
+  setSourcesOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  isMobile: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <div
+          className="h-8 w-8 border-2 rounded-full animate-spin"
+          style={{ borderColor: 'var(--color-border-default)', borderTopColor: 'var(--color-accent-primary)' }}
+        />
+      </div>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <p style={{ color: 'var(--color-text-secondary)' }}>Insight not found</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* Header */}
+      <div className={isMobile ? '' : 'p-6 md:p-8 pb-0'}>
+        {/* Badge row */}
+        <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4 flex-wrap">
+          <div
+            className="px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full border flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs font-semibold uppercase tracking-wider"
+            style={{
+              backgroundColor: 'var(--color-accent-soft)',
+              borderColor: 'var(--color-accent-overlay)',
+              color: 'var(--color-accent-light)',
+            }}
+          >
+            <Sparkles size={isMobile ? 10 : 12} />
+            AI Research Brief
+          </div>
+          {detail.model && (
+            <span
+              className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
+              style={{
+                backgroundColor: 'var(--color-bg-hover)',
+                color: 'var(--color-text-secondary)',
+              }}
+            >
+              {detail.model}
+            </span>
+          )}
+          {detail.completed_at && (
+            <span className="text-[11px] sm:text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              {formatDate(detail.completed_at)}
+            </span>
+          )}
+        </div>
+
+        {/* Headline */}
+        <h1
+          className="text-xl sm:text-2xl md:text-3xl font-bold leading-tight mb-3 sm:mb-4"
+          style={{ color: 'var(--color-text-primary)' }}
+        >
+          {detail.headline}
+        </h1>
+
+        {/* Topics */}
+        {(detail.topics?.length ?? 0) > 0 && (
+          <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-4 sm:mb-6">
+            {detail.topics!.map((topic) => (
+              <TopicBadge key={topic.text} text={topic.text} trend={topic.trend} />
+            ))}
+          </div>
+        )}
+
+        {/* Summary */}
+        {detail.summary && (
+          <p
+            className="text-[13px] sm:text-sm leading-relaxed mb-4 sm:mb-6"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            {detail.summary}
+          </p>
+        )}
+      </div>
+
+      {/* News Items */}
+      <div className={isMobile ? '' : 'px-6 md:px-8 pb-6 md:pb-8'}>
+        {(detail.content?.length ?? 0) > 0 && (
+          <div
+            className="rounded-xl border overflow-hidden"
+            style={{
+              backgroundColor: 'var(--color-bg-subtle)',
+              borderColor: 'var(--color-border-muted)',
+            }}
+          >
+            {detail.content!.map((item, i) => {
+              const source = item.url ? detail.sources?.find(
+                (s) => item.url!.startsWith(s.url) || s.url.startsWith(item.url!)
+              ) : undefined;
+              const favicon = source?.favicon;
+              const domain = item.url ? (() => { try { return new URL(item.url).hostname.replace('www.', ''); } catch { return ''; } })() : '';
+
+              return (
+                <div
+                  key={i}
+                  className={isMobile ? 'px-3 py-3 flex gap-3' : 'px-5 py-4 flex gap-4'}
+                  style={i > 0 ? { borderTop: '1px solid var(--color-border-muted)' } : undefined}
+                >
+                  <span
+                    className="text-[11px] sm:text-xs font-bold mt-0.5 shrink-0 w-4 sm:w-5 text-right"
+                    style={{ color: 'var(--color-text-tertiary)' }}
+                  >
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className={isMobile ? 'flex flex-col gap-1' : 'flex items-start justify-between gap-3'}>
+                      <h3
+                        className="text-[13px] sm:text-sm font-semibold leading-snug"
+                        style={{ color: 'var(--color-text-primary)' }}
+                      >
+                        {item.title}
+                      </h3>
+                      {item.url && (
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs shrink-0 transition-opacity hover:opacity-80"
+                          style={{ color: 'var(--color-text-tertiary)' }}
+                        >
+                          {favicon ? (
+                            <img src={favicon} alt="" className="w-3.5 h-3.5 rounded-sm" />
+                          ) : (
+                            <ExternalLink size={12} />
+                          )}
+                          <span>{domain}</span>
+                        </a>
+                      )}
+                    </div>
+                    <p
+                      className="text-[13px] sm:text-sm leading-relaxed mt-1"
+                      style={{ color: 'var(--color-text-secondary)' }}
+                    >
+                      {item.body}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Collapsible All Sources */}
+        {(detail.sources?.length ?? 0) > 0 && (
+          <div className="mt-6">
+            <button
+              onClick={() => setSourcesOpen((v) => !v)}
+              className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider w-full py-2 transition-colors"
+              style={{ color: 'var(--color-text-tertiary)' }}
+            >
+              <ChevronDown
+                size={14}
+                className="transition-transform"
+                style={{ transform: sourcesOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+              />
+              All Sources ({detail.sources!.length})
+              {!sourcesOpen && (
+                <span className="flex items-center -space-x-1 ml-1">
+                  {detail.sources!
+                    .filter((s) => s.favicon)
+                    .slice(0, 5)
+                    .map((s, i) => (
+                      <img
+                        key={i}
+                        src={s.favicon}
+                        alt=""
+                        className="w-4 h-4 rounded-full ring-1 ring-[var(--color-bg-elevated)]"
+                      />
+                    ))}
+                </span>
+              )}
+            </button>
+            {sourcesOpen && (
+              <div className="mt-2 space-y-1">
+                {detail.sources!.map((source, i) => {
+                  const domain = (() => { try { return new URL(source.url).hostname.replace('www.', ''); } catch { return source.url; } })();
+                  return (
+                    <a
+                      key={i}
+                      href={source.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-xs py-1.5 px-3 rounded-lg transition-colors"
+                      style={{ color: 'var(--color-text-secondary)' }}
+                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                    >
+                      {source.favicon ? (
+                        <img src={source.favicon} alt="" className="w-4 h-4 rounded-sm shrink-0" />
+                      ) : (
+                        <ExternalLink size={14} className="shrink-0 opacity-50" />
+                      )}
+                      <span className="truncate">{source.title || domain}</span>
+                      <span className="ml-auto shrink-0 opacity-40">{domain}</span>
+                    </a>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 function InsightDetailModal({ marketInsightId, onClose }: InsightDetailModalProps) {
   const [detail, setDetail] = useState<InsightDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (!marketInsightId) {
@@ -90,6 +320,32 @@ function InsightDetailModal({ marketInsightId, onClose }: InsightDetailModalProp
     return () => window.removeEventListener('keydown', handleEsc);
   }, [marketInsightId, onClose]);
 
+  const body = (
+    <InsightBody
+      detail={detail}
+      loading={loading}
+      sourcesOpen={sourcesOpen}
+      setSourcesOpen={setSourcesOpen}
+      isMobile={isMobile}
+    />
+  );
+
+  // Mobile: use MobileBottomSheet
+  if (isMobile) {
+    return (
+      <MobileBottomSheet
+        open={!!marketInsightId}
+        onClose={onClose}
+        sizing="fixed"
+        height="92vh"
+        style={{ paddingBottom: 'calc(var(--bottom-tab-height, 0px) + 16px)' }}
+      >
+        {body}
+      </MobileBottomSheet>
+    );
+  }
+
+  // Desktop: centered dialog
   return (
     <AnimatePresence>
       {marketInsightId && (
@@ -98,7 +354,7 @@ function InsightDetailModal({ marketInsightId, onClose }: InsightDetailModalProp
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 pb-[calc(var(--bottom-tab-height,0px)+16px)] md:p-8 md:pb-8"
+          className="fixed inset-0 z-50 flex items-center justify-center p-8"
           style={{ backgroundColor: 'var(--color-bg-overlay, rgba(0,0,0,0.6))', backdropFilter: 'blur(4px)' }}
         >
           <motion.div
@@ -125,209 +381,9 @@ function InsightDetailModal({ marketInsightId, onClose }: InsightDetailModalProp
               <X size={20} />
             </button>
 
-            {loading ? (
-              <div className="flex items-center justify-center py-24">
-                <div
-                  className="h-8 w-8 border-2 rounded-full animate-spin"
-                  style={{ borderColor: 'var(--color-border-default)', borderTopColor: 'var(--color-accent-primary)' }}
-                />
-              </div>
-            ) : !detail ? (
-              <div className="flex items-center justify-center py-24">
-                <p style={{ color: 'var(--color-text-secondary)' }}>Insight not found</p>
-              </div>
-            ) : (
-              <div className="overflow-y-auto flex-1">
-                {/* Header */}
-                <div className="p-6 md:p-8 pb-0">
-                  {/* Badge row */}
-                  <div className="flex items-center gap-3 mb-4 flex-wrap">
-                    <div
-                      className="px-3 py-1 rounded-full border flex items-center gap-2 text-xs font-semibold uppercase tracking-wider"
-                      style={{
-                        backgroundColor: 'var(--color-accent-soft)',
-                        borderColor: 'var(--color-accent-overlay)',
-                        color: 'var(--color-accent-light)',
-                      }}
-                    >
-                      <Sparkles size={12} />
-                      AI Research Brief
-                    </div>
-                    {detail.model && (
-                      <span
-                        className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
-                        style={{
-                          backgroundColor: 'var(--color-bg-hover)',
-                          color: 'var(--color-text-secondary)',
-                        }}
-                      >
-                        {detail.model}
-                      </span>
-                    )}
-                    {detail.completed_at && (
-                      <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                        {formatDate(detail.completed_at)}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Headline */}
-                  <h1
-                    className="text-2xl md:text-3xl font-bold leading-tight mb-4"
-                    style={{ color: 'var(--color-text-primary)' }}
-                  >
-                    {detail.headline}
-                  </h1>
-
-                  {/* Topics */}
-                  {(detail.topics?.length ?? 0) > 0 && (
-                    <div className="flex flex-wrap gap-2 mb-6">
-                      {detail.topics!.map((topic) => (
-                        <TopicBadge key={topic.text} text={topic.text} trend={topic.trend} />
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Summary */}
-                  {detail.summary && (
-                    <p
-                      className="text-sm leading-relaxed mb-6"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      {detail.summary}
-                    </p>
-                  )}
-                </div>
-
-                {/* News Items */}
-                <div className="px-6 md:px-8 pb-6 md:pb-8">
-                  {(detail.content?.length ?? 0) > 0 && (
-                    <div
-                      className="rounded-xl border overflow-hidden"
-                      style={{
-                        backgroundColor: 'var(--color-bg-subtle)',
-                        borderColor: 'var(--color-border-muted)',
-                      }}
-                    >
-                      {detail.content!.map((item, i) => {
-                        const source = item.url ? detail.sources?.find(
-                          (s) => item.url!.startsWith(s.url) || s.url.startsWith(item.url!)
-                        ) : undefined;
-                        const favicon = source?.favicon;
-                        const domain = item.url ? (() => { try { return new URL(item.url).hostname.replace('www.', ''); } catch { return ''; } })() : '';
-
-                        return (
-                          <div
-                            key={i}
-                            className="px-5 py-4 flex gap-4"
-                            style={i > 0 ? { borderTop: '1px solid var(--color-border-muted)' } : undefined}
-                          >
-                            <span
-                              className="text-xs font-bold mt-0.5 shrink-0 w-5 text-right"
-                              style={{ color: 'var(--color-text-tertiary)' }}
-                            >
-                              {i + 1}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-start justify-between gap-3">
-                                <h3
-                                  className="text-sm font-semibold leading-snug"
-                                  style={{ color: 'var(--color-text-primary)' }}
-                                >
-                                  {item.title}
-                                </h3>
-                                {item.url && (
-                                  <a
-                                    href={item.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 text-xs shrink-0 mt-0.5 transition-opacity hover:opacity-80"
-                                    style={{ color: 'var(--color-text-tertiary)' }}
-                                  >
-                                    {favicon ? (
-                                      <img src={favicon} alt="" className="w-3.5 h-3.5 rounded-sm" />
-                                    ) : (
-                                      <ExternalLink size={12} />
-                                    )}
-                                    <span>{domain}</span>
-                                  </a>
-                                )}
-                              </div>
-                              <p
-                                className="text-sm leading-relaxed mt-1"
-                                style={{ color: 'var(--color-text-secondary)' }}
-                              >
-                                {item.body}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Collapsible All Sources */}
-                  {(detail.sources?.length ?? 0) > 0 && (
-                    <div className="mt-6">
-                      <button
-                        onClick={() => setSourcesOpen((v) => !v)}
-                        className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider w-full py-2 transition-colors"
-                        style={{ color: 'var(--color-text-tertiary)' }}
-                      >
-                        <ChevronDown
-                          size={14}
-                          className="transition-transform"
-                          style={{ transform: sourcesOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
-                        />
-                        All Sources ({detail.sources!.length})
-                        {!sourcesOpen && (
-                          <span className="flex items-center -space-x-1 ml-1">
-                            {detail.sources!
-                              .filter((s) => s.favicon)
-                              .slice(0, 5)
-                              .map((s, i) => (
-                                <img
-                                  key={i}
-                                  src={s.favicon}
-                                  alt=""
-                                  className="w-4 h-4 rounded-full ring-1 ring-[var(--color-bg-elevated)]"
-                                />
-                              ))}
-                          </span>
-                        )}
-                      </button>
-                      {sourcesOpen && (
-                        <div className="mt-2 space-y-1">
-                          {detail.sources!.map((source, i) => {
-                            const domain = (() => { try { return new URL(source.url).hostname.replace('www.', ''); } catch { return source.url; } })();
-                            return (
-                              <a
-                                key={i}
-                                href={source.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-2 text-xs py-1.5 px-3 rounded-lg transition-colors"
-                                style={{ color: 'var(--color-text-secondary)' }}
-                                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'; }}
-                                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                              >
-                                {source.favicon ? (
-                                  <img src={source.favicon} alt="" className="w-4 h-4 rounded-sm shrink-0" />
-                                ) : (
-                                  <ExternalLink size={14} className="shrink-0 opacity-50" />
-                                )}
-                                <span className="truncate">{source.title || domain}</span>
-                                <span className="ml-auto shrink-0 opacity-40">{domain}</span>
-                              </a>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+            <div className="overflow-y-auto flex-1">
+              {body}
+            </div>
           </motion.div>
         </motion.div>
       )}

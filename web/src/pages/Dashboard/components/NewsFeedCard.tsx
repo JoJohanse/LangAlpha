@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { TrendingUp, Clock, Briefcase, Eye, Search, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 interface NewsItem {
   id?: string | number;
@@ -86,7 +87,7 @@ function NewsRow({ item, idx, onNewsClick }: NewsRowProps) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: idx * 0.05 }}
       onClick={() => item.id != null && onNewsClick?.(item.id)}
-      className="group flex items-center gap-4 p-3 rounded-xl border border-transparent transition-all cursor-pointer"
+      className="group flex items-center gap-3 sm:gap-4 px-2 py-2.5 sm:p-3 rounded-lg sm:rounded-xl border border-transparent transition-all cursor-pointer"
       style={{ backgroundColor: 'transparent' }}
       onMouseEnter={(e) => {
         e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
@@ -283,11 +284,13 @@ function NewsFeedCard({
     return [...set].sort();
   }, [items]);
 
+  const isMobile = useIsMobile();
+
   return (
-    <div className="dashboard-glass-card p-6">
+    <div className={`dashboard-glass-card ${isMobile ? 'p-3' : 'p-6'}`}>
       {/* Header: tabs + filters on same row */}
       <div
-        className="flex items-center justify-between gap-3 pb-4 mb-4 border-b flex-wrap"
+        className={`flex items-center justify-between gap-3 ${isMobile ? 'pb-3 mb-3' : 'pb-4 mb-4'} border-b flex-wrap`}
         style={{ borderColor: 'var(--color-border-muted)' }}
       >
         {/* Tabs */}

@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Sparkles, ArrowRight, Newspaper, Clock, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import TopicBadge from './TopicBadge';
 import { getTodayInsights } from '../utils/api';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 interface InsightTopic {
   text: string;
@@ -59,6 +60,66 @@ function formatTime(timestamp: string | undefined): string {
   } catch {
     return '';
   }
+}
+
+/** On mobile: show tags in a single row, overflow hidden with "+N more". Desktop: wrap freely. */
+function MobileTopicRow({ topics }: { topics: InsightTopic[] }) {
+  const isMobile = useIsMobile();
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [visibleCount, setVisibleCount] = useState(topics.length);
+
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+
+    function measure() {
+      if (!isMobile) {
+        setVisibleCount(topics.length);
+        return;
+      }
+      const children = Array.from(row!.children) as HTMLElement[];
+      const rowTop = row!.getBoundingClientRect().top;
+      let count = 0;
+      for (const child of children) {
+        if (child.dataset.overflow) continue; // skip the "+N" badge
+        if (child.getBoundingClientRect().top - rowTop > 4) break; // wrapped to next line
+        count++;
+      }
+      setVisibleCount(count < topics.length ? (count || 1) : topics.length);
+    }
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(row);
+    return () => ro.disconnect();
+  }, [isMobile, topics.length]);
+
+  const overflow = topics.length - visibleCount;
+
+  if (!isMobile) {
+    return (
+      <div className="flex flex-wrap gap-3">
+        {topics.map((t) => <TopicBadge key={t.text} text={t.text} trend={t.trend} />)}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={rowRef} className="flex flex-wrap gap-1.5 overflow-hidden" style={{ maxHeight: 28 }}>
+      {topics.slice(0, visibleCount).map((t) => (
+        <TopicBadge key={t.text} text={t.text} trend={t.trend} />
+      ))}
+      {overflow > 0 && (
+        <span
+          data-overflow="true"
+          className="px-1.5 py-0.5 rounded text-[10px] font-medium"
+          style={{ color: 'var(--color-text-tertiary)', backgroundColor: 'var(--color-bg-tag)', border: '1px solid var(--color-bg-tag)' }}
+        >
+          +{overflow} more
+        </span>
+      )}
+    </div>
+  );
 }
 
 function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
@@ -230,15 +291,47 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
             </p>
 
             {/* Topic badges */}
-            <div className="flex flex-wrap gap-3">
-              {topics.map((topic) => (
-                <TopicBadge key={topic.text} text={topic.text} trend={topic.trend} />
-              ))}
+            <MobileTopicRow topics={topics} />
+
+            {/* Mobile: full-width CTA + stack indicator */}
+            <div className="flex flex-col gap-2 mt-4 sm:hidden">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onReadFull?.(latest.market_insight_id);
+                }}
+                className="group/btn flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-sm font-semibold transition-colors"
+                style={{
+                  backgroundColor: 'var(--color-btn-primary-bg, var(--color-accent-primary))',
+                  color: 'var(--color-btn-primary-text, #fff)',
+                }}
+              >
+                Read Full Brief
+                <ArrowRight size={14} className="group-hover/btn:translate-x-1 transition-transform" />
+              </button>
+              {older.length > 0 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpanded((v) => !v);
+                  }}
+                  className="flex items-center justify-center gap-1.5 text-xs transition-colors"
+                  style={{ color: 'var(--color-text-tertiary)' }}
+                >
+                  <Clock size={12} />
+                  {older.length} earlier
+                  <ChevronDown
+                    size={14}
+                    className="transition-transform"
+                    style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                  />
+                </button>
+              )}
             </div>
           </div>
 
-          {/* CTA + stack indicator */}
-          <div className="w-full md:w-auto flex flex-col items-end justify-end gap-3 self-stretch">
+          {/* Desktop CTA + stack indicator */}
+          <div className="hidden sm:flex w-auto flex-col items-end justify-end gap-3 self-stretch">
             <button
               onClick={(e) => {
                 e.stopPropagation();
