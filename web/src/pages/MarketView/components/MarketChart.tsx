@@ -211,7 +211,6 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
   const prevBarSmoothingRef = useRef<RSIState | null>(null);       // State *before* current bar (for same-bar re-updates)
   const pendingRsiDataRef = useRef<Array<{ time: number; value: number }> | null>(null);         // Buffered rsiData when series isn't ready
   const rsiDataMapRef = useRef<Map<number, number>>(new Map());        // time->rsiValue for O(1) crosshair lookup
-  const isSyncingTimeScaleRef = useRef<boolean>(false);    // Guard for bidirectional time-scale sync
 
   // Track when the last WS live tick was applied (for REST polling fallback)
   const lastLiveTickTimeRef = useRef<number>(0);
@@ -949,7 +948,19 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
           timeVisible: true,
           secondsVisible: false,
         },
-      });
+        handleScroll: {
+          mouseWheel: false,
+          pressedMouseMove: false,
+          horzTouchDrag: false,
+          vertTouchDrag: false,
+        },
+        handleScale: {
+          mouseWheel: false,
+          pinch: false,
+          axisPressedMouseMove: false,
+          axisDoubleClickReset: false,
+        },
+      } as any);
       rsiChartRef.current = rsiChart;
       // RSI as area series with gradient
       rsiSeriesRef.current = rsiChart.addAreaSeries({
@@ -967,20 +978,19 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
         rsiChart.timeScale().fitContent();
       }
 
-      // Bidirectional time-scale sync between main chart and RSI chart (Bug 4 fix)
+      // One-directional logical-range sync: main chart drives RSI chart.
+      // RSI data starts `period` bars later than main data, so logical
+      // index 0 on RSI = index `period` on main. Subtract the offset
+      // when forwarding the range.
+      // RSI chart has all scroll/scale interactions disabled.
       const mainTs = chart.timeScale();
       const rsiTs = rsiChart.timeScale();
       mainTs.subscribeVisibleLogicalRangeChange((range) => {
-        if (isSyncingTimeScaleRef.current || !range) return;
-        isSyncingTimeScaleRef.current = true;
-        rsiTs.setVisibleLogicalRange(range);
-        isSyncingTimeScaleRef.current = false;
-      });
-      rsiTs.subscribeVisibleLogicalRangeChange((range) => {
-        if (isSyncingTimeScaleRef.current || !range) return;
-        isSyncingTimeScaleRef.current = true;
-        mainTs.setVisibleLogicalRange(range);
-        isSyncingTimeScaleRef.current = false;
+        if (!range) return;
+        const offset = rsiPeriodRef.current;
+        try {
+          rsiTs.setVisibleLogicalRange({ from: range.from - offset, to: range.to - offset });
+        } catch { /* RSI data may not cover the range yet */ }
       });
     }, 100);
 
