@@ -1018,7 +1018,7 @@ function WorkspaceGallery({ onWorkspaceSelect, prefetchThreads }: WorkspaceGalle
               }}
             >
               <MorphingPageDots
-                totalPages={Math.max(totalPages, 2)}
+                totalPages={totalPages}
                 activeIndex={currentPage}
                 onChange={goToPage}
               />
