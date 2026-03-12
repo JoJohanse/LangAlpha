@@ -86,6 +86,20 @@ function Dashboard() {
     setDeleteConfirm((p) => ({ ...p, open: false }));
   }, [deleteConfirm.onConfirm]);
 
+  const portfolioWatchlistProps = {
+    watchlistRows: watchlist.rows,
+    watchlistLoading: watchlist.loading,
+    onWatchlistAdd: () => watchlist.setModalOpen(true),
+    onWatchlistDelete: watchlist.handleDelete,
+    portfolioRows: portfolio.rows,
+    portfolioLoading: portfolio.loading,
+    hasRealHoldings: portfolio.hasRealHoldings,
+    onPortfolioAdd: () => portfolio.setModalOpen(true),
+    onPortfolioDelete: handleDeletePortfolioItem,
+    onPortfolioEdit: portfolio.openEdit,
+    marketStatus,
+  };
+
   return (
     <div className="dashboard-container min-h-screen">
       {/* Main content area */}
@@ -143,19 +157,7 @@ function Dashboard() {
               <div className="lg:col-span-1">
                 <div className="lg:sticky lg:top-24 space-y-6">
                   <div>
-                    <PortfolioWatchlistCard
-                      watchlistRows={watchlist.rows}
-                      watchlistLoading={watchlist.loading}
-                      onWatchlistAdd={() => watchlist.setModalOpen(true)}
-                      onWatchlistDelete={watchlist.handleDelete}
-                      portfolioRows={portfolio.rows}
-                      portfolioLoading={portfolio.loading}
-                      hasRealHoldings={portfolio.hasRealHoldings}
-                      onPortfolioAdd={() => portfolio.setModalOpen(true)}
-                      onPortfolioDelete={handleDeletePortfolioItem}
-                      onPortfolioEdit={portfolio.openEdit}
-                      marketStatus={marketStatus}
-                    />
+                    <PortfolioWatchlistCard {...portfolioWatchlistProps} />
                   </div>
                   <EarningsCalendarCard />
                 </div>
@@ -297,19 +299,7 @@ function Dashboard() {
 
       {/* Mobile watchlist/portfolio bottom sheet */}
       <MobileBottomSheet open={showWatchlistSheet} onClose={() => setShowWatchlistSheet(false)} className="pb-8">
-        <PortfolioWatchlistCard
-          watchlistRows={watchlist.rows}
-          watchlistLoading={watchlist.loading}
-          onWatchlistAdd={() => watchlist.setModalOpen(true)}
-          onWatchlistDelete={watchlist.handleDelete}
-          portfolioRows={portfolio.rows}
-          portfolioLoading={portfolio.loading}
-          hasRealHoldings={portfolio.hasRealHoldings}
-          onPortfolioAdd={() => portfolio.setModalOpen(true)}
-          onPortfolioDelete={handleDeletePortfolioItem}
-          onPortfolioEdit={portfolio.openEdit}
-          marketStatus={marketStatus}
-        />
+        <PortfolioWatchlistCard {...portfolioWatchlistProps} />
         <div className="mt-4">
           <EarningsCalendarCard />
         </div>
