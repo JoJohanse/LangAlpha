@@ -1,8 +1,8 @@
 import { defineConfig } from '@playwright/test';
 
-// Use a dedicated port (5174) so E2E tests never reuse the user's dev server
-// on :5173, which might have real Supabase env vars and break auth bypass.
-const E2E_PORT = 5174;
+// Use a dedicated port so E2E tests never collide with the user's dev server
+// on :5173 (which might have real Supabase env vars) or other local services.
+const E2E_PORT = 5176;
 
 export default defineConfig({
   testDir: './e2e',

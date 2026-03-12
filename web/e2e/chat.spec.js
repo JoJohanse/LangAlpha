@@ -136,8 +136,8 @@ test.describe('Workspace Gallery', () => {
     // Wait for gallery to load
     await expect(page.getByText('Research', { exact: true })).toBeVisible({ timeout: 10000 });
 
-    // Click "New workspace" header button
-    await page.locator('button', { hasText: /[Nn]ew workspace/i }).click();
+    // Click "New workspace" header button (use getByRole to avoid matching the hidden mobile duplicate)
+    await page.getByRole('button', { name: 'New workspace' }).click();
 
     // Modal should appear
     await expect(page.locator('h2.cwm-title')).toBeVisible();
