@@ -68,7 +68,7 @@ function App() {
       <Route path="/*" element={
         isLoggedIn ? (
           <div className="app-layout">
-            <Sidebar />
+            {!isMobile && <Sidebar />}
             {isMobile && <BottomTabBar />}
             <main className="app-main">
               <Main />
