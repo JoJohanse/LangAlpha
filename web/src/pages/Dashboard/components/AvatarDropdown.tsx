@@ -8,7 +8,7 @@ import ConfirmDialog from './ConfirmDialog';
 
 const AvatarDropdown: React.FC = () => {
   const navigate = useNavigate();
-  const { isLoggedIn, logout } = useAuth();
+  const { isLoggedIn: _isLoggedIn, logout } = useAuth();
   const { user } = useUser();
   const { t } = useTranslation();
   const [showDropdown, setShowDropdown] = useState(false);

@@ -1,13 +1,5 @@
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-function formatHour(h: string): string {
-  const hour = parseInt(h, 10);
-  if (hour === 0) return '12:00 AM';
-  if (hour < 12) return `${hour}:00 AM`;
-  if (hour === 12) return '12:00 PM';
-  return `${hour - 12}:00 PM`;
-}
-
 function formatMinuteHour(min: string, hour: string): string {
   const h = parseInt(hour, 10);
   const m = parseInt(min, 10).toString().padStart(2, '0');

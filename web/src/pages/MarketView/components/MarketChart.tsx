@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { createChart, ColorType, CrosshairMode, PriceScaleMode, LineType, LineStyle } from 'lightweight-charts';
-import type { IChartApi, ISeriesApi, SeriesType, LogicalRange, MouseEventParams } from 'lightweight-charts';
+import type { IChartApi, LogicalRange, MouseEventParams } from 'lightweight-charts';
 import html2canvas from 'html2canvas';
 import './MarketChart.css';
 import { fetchStockData } from '../utils/api';
@@ -11,13 +11,13 @@ import {
   INTERVALS, PRIMARY_INTERVAL_KEYS, INITIAL_LOAD_DAYS, SCROLL_CHUNK_DAYS,
   SCROLL_LOAD_THRESHOLD, RANGE_CHANGE_DEBOUNCE_MS,
   STAGE1_LOAD_DAYS, STAGE2_BACKFILL_DAYS, PREFETCH_ENABLED_INTERVALS, PREFETCH_THRESHOLD,
-  MA_CONFIGS, DEFAULT_ENABLED_MA, RSI_PERIODS, BARS_PER_DAY, AUTO_FIT_BARS, TARGET_BAR_SPACING,
+  MA_CONFIGS, DEFAULT_ENABLED_MA, RSI_PERIODS, BARS_PER_DAY, TARGET_BAR_SPACING,
   OVERLAY_COLORS, OVERLAY_LABELS,
   EXTENDED_HOURS_INTERVALS, getExtendedHoursType, computeExtendedHoursRegions,
   EXT_COLOR_PRE, EXT_COLOR_POST,
   isUSEquity, supports1sInterval,
 } from '../utils/chartConstants';
-import type { ChartThemeColors, ChartDataPoint as ChartConstDataPoint } from '../utils/chartConstants';
+import type { ChartDataPoint as ChartConstDataPoint } from '../utils/chartConstants';
 import { ExtendedHoursBgPrimitive } from '../utils/extendedHoursBg';
 import { useTheme } from '@/contexts/ThemeContext';
 import CrosshairTooltip from './CrosshairTooltip';
@@ -91,7 +91,7 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
   symbol,
   interval = '1day',
   onIntervalChange,
-  onCapture,
+  onCapture: _onCapture,
   onStockMeta,
   onLatestBar,
   quoteData,
@@ -99,7 +99,7 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
   overlayData,
   stockMeta,
   liveTick,
-  wsStatus,
+  wsStatus: _wsStatus,
   ginlixDataEnabled = true,
   snapshot,
 }, ref) => {
@@ -126,7 +126,7 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
   const [loading, setLoading] = useState<boolean>(true);
   const [scrollLoading, setScrollLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
+  const [_lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
   const [rsiValue, setRsiValue] = useState<string | null>(null);
 
   // MA / RSI config state (persisted)

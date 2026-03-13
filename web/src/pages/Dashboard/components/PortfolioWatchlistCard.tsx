@@ -94,7 +94,7 @@ function WatchlistItem({ item, index, onDelete, marketStatus }: WatchlistItemPro
   const pctStr = (pos ? '+' : '') + Number(item.changePercent).toFixed(2) + '%';
 
   // Extended hours: show when not regular session and data available
-  const { extPct, extType, extPrice, extChange } = getExtendedHoursInfo(marketStatus, item, { shortLabels: true });
+  const { extPct, extType, extPrice: _extPrice, extChange: _extChange } = getExtendedHoursInfo(marketStatus, item, { shortLabels: true });
   const extColor = extType === 'pre' ? '#fbbf24' : '#3b82f6';
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -187,7 +187,7 @@ function PortfolioItem({ item, index, onEdit, onDelete, valuesHidden, marketStat
       : '—';
 
   // Extended hours
-  const { extPct, extType, extPrice } = getExtendedHoursInfo(marketStatus, item, { shortLabels: true });
+  const { extPct, extType, extPrice: _extPrice2 } = getExtendedHoursInfo(marketStatus, item, { shortLabels: true });
   const extColor = extType === 'pre' ? '#fbbf24' : '#3b82f6';
 
   const handleContextMenu = (e: React.MouseEvent) => {

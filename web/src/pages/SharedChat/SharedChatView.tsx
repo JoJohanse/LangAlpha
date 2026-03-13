@@ -51,7 +51,7 @@ export default function SharedChatView() {
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [replayDone, setReplayDone] = useState(false);
+  const [_replayDone, setReplayDone] = useState(false);
 
   // File panel (right side, matching ChatView's rightPanelType === 'file')
   const [showFilePanel, setShowFilePanel] = useState(false);
@@ -84,8 +84,8 @@ export default function SharedChatView() {
 
     const assistantMessagesByPair = new Map<number, string>();
     const pairStateByPair = new Map<number, PairState>();
-    let currentActivePairIndex: number | null = null;
-    let currentActivePairState: PairState | undefined = undefined;
+    let _currentActivePairIndex: number | null = null;
+    let _currentActivePairState: PairState | undefined = undefined;
 
     // Persistent refs that survive across event callbacks (matching useChatMessages shape)
     const sharedRefs = {
@@ -108,8 +108,8 @@ export default function SharedChatView() {
           const hasPairIndex = event.turn_index !== undefined;
 
           if (hasPairIndex) {
-            currentActivePairIndex = event.turn_index as number;
-            currentActivePairState = pairStateByPair.get(event.turn_index as number);
+            _currentActivePairIndex = event.turn_index as number;
+            _currentActivePairState = pairStateByPair.get(event.turn_index as number);
           }
 
           if (eventType === 'replay_done') {
@@ -309,7 +309,7 @@ export default function SharedChatView() {
   // Permissions
   const permissions = (metadata?.permissions || {}) as Record<string, unknown>;
   const canBrowseFiles = permissions.allow_files === true;
-  const canDownload = permissions.allow_download === true;
+  const _canDownload = permissions.allow_download === true;
 
   // File panel handlers
   const handleToggleFilePanel = useCallback(async () => {

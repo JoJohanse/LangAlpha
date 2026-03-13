@@ -142,13 +142,13 @@ function SupabaseAuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginWithEmail = useCallback(
     (email: string, password: string) => sb.auth.signInWithPassword({ email, password }),
-    []
+    [sb.auth]
   );
 
   const signupWithEmail = useCallback(
     (email: string, password: string, name: string) =>
       sb.auth.signUp({ email, password, options: { data: { name } } }),
-    []
+    [sb.auth]
   );
 
   const loginWithProvider = useCallback(
@@ -157,13 +157,13 @@ function SupabaseAuthProvider({ children }: { children: React.ReactNode }) {
         provider,
         options: { redirectTo: window.location.origin + '/callback' },
       }),
-    []
+    [sb.auth]
   );
 
   const logout = useCallback(async () => {
     await sb.auth.signOut();
     queryClient.clear();
-  }, [queryClient]);
+  }, [sb.auth, queryClient]);
 
   const value: AuthContextValue = {
     userId: session?.user?.id ?? null,
@@ -178,6 +178,7 @@ function SupabaseAuthProvider({ children }: { children: React.ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');

@@ -474,7 +474,7 @@ function ChatView({ workspaceId, threadId, onBack, workspaceName: initialWorkspa
     isCompacting,
     setIsCompacting,
     isLoadingHistory,
-    isReconnecting,
+    isReconnecting: _isReconnecting,
     messageError,
     returnedQueuedMessage,
     clearReturnedQueuedMessage,

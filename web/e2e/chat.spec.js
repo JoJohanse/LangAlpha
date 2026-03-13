@@ -6,14 +6,12 @@
  */
 import {
   configureSSE,
-  getCapturedRequests,
   resetMockServer,
   mockAPI,
   test,
   expect,
 } from './fixtures.js';
 import {
-  defaultResponses,
   sampleWorkspace,
   sampleThread,
   sseEvents,
@@ -79,15 +77,6 @@ async function configureEmptyReplay() {
     events: [sseEvents.replayDone()],
     delay: 10,
   });
-}
-
-/** Navigate to the chat view for th-1 with all mocks in place. */
-async function navigateToChatView(page) {
-  await mockAPI(page, chatViewOverrides());
-  await configureEmptyReplay();
-  await page.goto('/chat/t/th-1');
-  // Wait for the chat textarea to be visible (signals chat view is ready)
-  await page.waitForSelector('textarea', { timeout: 10000 });
 }
 
 // ================================================================

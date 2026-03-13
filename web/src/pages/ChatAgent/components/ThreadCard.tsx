@@ -21,7 +21,7 @@ interface ThreadCardProps {
  * - Click handler to navigate to the thread conversation
  */
 function ThreadCard({ thread, onClick, onDelete, onRename }: ThreadCardProps) {
-  const { t } = useTranslation();
+  const { t: _t } = useTranslation();
   const isMobile = useIsMobile();
   const handleDeleteClick = (e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent card click when clicking delete icon

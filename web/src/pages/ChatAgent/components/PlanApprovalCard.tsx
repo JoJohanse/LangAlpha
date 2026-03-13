@@ -27,13 +27,13 @@ interface PlanApprovalCardProps {
  * Resolved states default to expanded; user can manually collapse.
  */
 function PlanApprovalCard({ planData, onApprove, onReject, onDetailClick }: PlanApprovalCardProps): React.ReactElement | null {
+  const [collapsed, setCollapsed] = useState(false);
+
   if (!planData) return null;
 
   const { description, status } = planData;
   const isApproved = status === 'approved';
   const isRejected = status === 'rejected';
-
-  const [collapsed, setCollapsed] = useState(false);
 
   // --- Resolved (approved / rejected): expanded by default, manually collapsible ---
   if (isApproved || isRejected) {

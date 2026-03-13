@@ -57,7 +57,7 @@ function formatDate(dateStr: string | undefined): string {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function EarningsItem({ item, index, isPast }: EarningsItemProps) {
+function EarningsItem({ item, index: _index, isPast }: EarningsItemProps) {
   const dateStr = formatDate(item.date);
 
   return (

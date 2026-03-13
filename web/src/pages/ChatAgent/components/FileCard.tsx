@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { FileText, FileCode, Image, Table, ExternalLink, Folder } from 'lucide-react';
@@ -55,7 +56,7 @@ export function extractFilePaths(text: string | undefined): string[] {
   // Match paths: must have at least one /, end with .extension
   // Handles relative (dir/file.ext) and absolute (/home/daytona/file.ext) paths
   // Handles paths in backticks, quotes, or bare
-  const regex = /(?:^|[\s`"'(\[])(\/[a-zA-Z_][^\s`"')\]<>]*\/[^\s`"')\]<>]*\.[a-zA-Z0-9]{1,10}|[a-zA-Z_][^\s`"')\]<>]*\/[^\s`"')\]<>]*\.[a-zA-Z0-9]{1,10})(?=[\s`"')\],:;!?|]|$)/gm;
+  const regex = /(?:^|[\s`"'([])(\/[a-zA-Z_][^\s`"')\]<>]*\/[^\s`"')\]<>]*\.[a-zA-Z0-9]{1,10}|[a-zA-Z_][^\s`"')\]<>]*\/[^\s`"')\]<>]*\.[a-zA-Z0-9]{1,10})(?=[\s`"')\],:;!?|]|$)/gm;
   const paths = new Set<string>();
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {

@@ -40,7 +40,6 @@ export function createUserMessage(message: string, attachments: AttachmentMeta[]
     // AttachmentMeta is the upload-time shape (file, dataUrl, type).
     // Attachment from sse.ts has a different shape (name, size, url).
     // At send time only AttachmentMeta fields are used, so store as-is.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     msg.attachments = attachments as any;
   }
   return msg;

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Mock } from 'vitest';
 import { setTokenGetter } from '../client';
 
 interface InterceptorHandler<T = unknown> {

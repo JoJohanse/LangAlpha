@@ -121,7 +121,7 @@ function QuoteSummary({ data }: QuoteSummaryProps) {
   );
 }
 
-export default function CompanyOverviewPanel({ symbol, visible, onClose, data, loading }: CompanyOverviewPanelProps) {
+export default function CompanyOverviewPanel({ symbol: _symbol, visible, onClose, data, loading }: CompanyOverviewPanelProps) {
   if (!visible) return null;
 
   const error = !data && !loading ? 'No data available' : null;

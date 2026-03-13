@@ -91,6 +91,7 @@ function isStructuralLine(line: string): boolean {
  * - Preserve newlines adjacent to markdown-structural lines (headings, lists, etc.)
  * - Preserve double newlines (paragraph breaks)
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function normalizeSubagentText(content: string | null | undefined): string {
   if (!content || typeof content !== 'string') return '';
   const s = content

@@ -208,6 +208,7 @@ const DIR_PRIORITY: Record<string, number> = { '/': 0, 'results': 1, 'data': 2 }
 
 /** System directory prefixes -- collapsed by default when visible.
  *  Source of truth: src/ptc_agent/core/paths.py -> AGENT_SYSTEM_DIRS */
+// eslint-disable-next-line react-refresh/only-export-components
 export const SYSTEM_DIR_PREFIXES = ['code', 'tools', 'mcp_servers', 'skills', '.agent', '.self-improve'];
 
 function dirSortKey(dir: string): number {
@@ -296,15 +297,6 @@ function buildFileTree(filePaths: string[]): TreeNode[] {
   }
   result.push(...root.children);
   return result;
-}
-
-/** Count all files recursively under a tree node */
-function countTreeFiles(node: TreeNode): number {
-  let count = node.files.length;
-  for (const child of node.children) {
-    count += countTreeFiles(child);
-  }
-  return count;
 }
 
 /** Collect all file paths recursively under a tree node */
@@ -780,10 +772,6 @@ function FilePanel({
   const activePresetLabel = activePreset?.label ?? '';
 
   const handlePrint = useReactToPrint({ contentRef: markdownRef });
-
-  const exitPrintMode = useCallback(() => {
-    setPrintMode(false);
-  }, []);
 
   // Lazy-load Google Fonts when print mode activates
   useEffect(() => {

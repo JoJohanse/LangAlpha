@@ -24,13 +24,13 @@ interface StartQuestionCardProps {
  */
 function StartQuestionCard({ proposalData, onApprove, onReject }: StartQuestionCardProps) {
   const { t } = useTranslation();
+  const [collapsed, setCollapsed] = useState(true);
+
   if (!proposalData) return null;
 
   const { question, status } = proposalData;
   const isApproved = status === 'approved';
   const isRejected = status === 'rejected';
-
-  const [collapsed, setCollapsed] = useState(true);
 
   // --- Resolved (approved / rejected) ---
   if (isApproved || isRejected) {

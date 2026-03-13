@@ -200,7 +200,7 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
 
   const updatedAgo = formatRelativeTime(latest.completed_at);
   const topics = latest.topics || [];
-  const latestType = TYPE_CONFIG[latest.type] || TYPE_CONFIG.market_update;
+  const _latestType = TYPE_CONFIG[latest.type] || TYPE_CONFIG.market_update;
 
   return (
     <div className="relative">

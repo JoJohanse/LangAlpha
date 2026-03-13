@@ -50,7 +50,7 @@ function LangAlphaFab({ onClick }: LangAlphaFabProps) {
     isDragging.current = true;
   }, []);
 
-  const handleDragEnd = useCallback((_: any, info: PanInfo) => {
+  const handleDragEnd = useCallback((_: any, _info: PanInfo) => {
     // Snap to nearest horizontal edge
     const vw = window.innerWidth;
     const currentX = x.get();

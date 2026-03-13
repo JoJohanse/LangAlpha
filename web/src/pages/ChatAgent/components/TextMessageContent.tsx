@@ -83,4 +83,5 @@ function ErrorDisplay({ parsed }: ErrorDisplayProps): React.ReactElement {
 }
 
 export default TextMessageContent;
+// eslint-disable-next-line react-refresh/only-export-components
 export { parseErrorMessage, ErrorDisplay };

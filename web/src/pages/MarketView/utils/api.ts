@@ -456,7 +456,7 @@ async function streamFetch(
           buffer += decoder.decode(new Uint8Array(), { stream: false });
           const lines = buffer.split('\n');
           lines.forEach(processLine);
-        } catch (e: unknown) {
+        } catch {
           // Ignore errors when processing final buffer
         }
       }
@@ -478,7 +478,7 @@ async function streamFetch(
     // Ensure reader is released
     try {
       reader.releaseLock();
-    } catch (e: unknown) {
+    } catch {
       // Reader might already be released
     }
   }

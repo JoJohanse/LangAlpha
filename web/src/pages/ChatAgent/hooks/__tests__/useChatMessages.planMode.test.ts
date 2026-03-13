@@ -5,7 +5,7 @@
  * interrupt), answering or skipping the question must resume the workflow with
  * plan_mode: true so the backend rebuilds the graph with the SubmitPlan tool.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Mock } from 'vitest';
 import { act, waitFor } from '@testing-library/react';
 import { renderHookWithProviders } from '@/test/utils';
@@ -100,7 +100,7 @@ function mockStreamWithEvents(events: Record<string, unknown>[]) {
 }
 
 /** Build a workflow_interrupt event that looks like an AskUserQuestion. */
-function makeAskUserQuestionInterrupt(interruptId: string, questionId?: string) {
+function makeAskUserQuestionInterrupt(interruptId: string, _questionId?: string) {
   return {
     event: 'interrupt',
     interrupt_id: interruptId,

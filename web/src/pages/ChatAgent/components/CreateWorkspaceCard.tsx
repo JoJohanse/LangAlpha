@@ -23,13 +23,13 @@ interface CreateWorkspaceCardProps {
  *   rejected - collapsed "Workspace creation declined"
  */
 function CreateWorkspaceCard({ proposalData, onApprove, onReject }: CreateWorkspaceCardProps) {
+  const [collapsed, setCollapsed] = useState(true);
+
   if (!proposalData) return null;
 
   const { workspace_name, workspace_description, status } = proposalData;
   const isApproved = status === 'approved';
   const isRejected = status === 'rejected';
-
-  const [collapsed, setCollapsed] = useState(true);
 
   // --- Resolved (approved / rejected) ---
   if (isApproved || isRejected) {

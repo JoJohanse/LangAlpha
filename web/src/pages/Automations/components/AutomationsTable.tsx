@@ -27,7 +27,7 @@ export default function AutomationsTable({
   selectedAutomation,
   onSelectAutomation,
   onCloseOverlay,
-  onCreateClick,
+  onCreateClick: _onCreateClick,
   onEdit,
   onDelete,
   onPause,

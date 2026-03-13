@@ -282,7 +282,7 @@ function NewsFeedCard({
   }, [items, tickerFilter, dateRange]);
 
   // Collect unique tickers across current items for quick-pick
-  const availableTickers = useMemo(() => {
+  const _availableTickers = useMemo(() => {
     const set = new Set<string>();
     for (const item of items) {
       if (item.tickers) item.tickers.forEach((t) => set.add(t));

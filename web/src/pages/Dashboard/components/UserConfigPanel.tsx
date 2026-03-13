@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, User, LogOut, Eye, EyeOff, Trash2, HelpCircle, MessageSquareText, Sun, Moon, Monitor, Link2, Unlink, ExternalLink, Shield, ClipboardCopy, Plus, Pencil, ChevronDown, Search, Pin } from 'lucide-react';
+import { X, User, LogOut, Eye, EyeOff, Trash2, HelpCircle, MessageSquareText, Sun, Moon, Monitor, Link2, Unlink, ExternalLink, Shield, ClipboardCopy, Plus, Pencil, Search, Pin } from 'lucide-react';
 import { Input } from '../../../components/ui/input';
 import { Select } from '../../../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../../../components/ui/dialog';
@@ -99,7 +99,7 @@ function UserConfigPanel({ isOpen, onClose, onModifyPreferences, onStartOnboardi
   const { preferences: prefsData, isLoading: isPrefsLoading } = usePreferences();
   const updatePrefsMutation = useUpdatePreferences();
   const queryClient = useQueryClient();
-  const { theme, preference, setTheme: setThemePref } = useTheme();
+  const { theme: _theme, preference, setTheme: setThemePref } = useTheme();
   const { t, i18n } = useTranslation();
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'userInfo');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);

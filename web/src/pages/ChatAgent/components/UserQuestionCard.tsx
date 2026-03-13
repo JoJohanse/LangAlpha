@@ -159,17 +159,17 @@ interface UserQuestionCardProps {
  *   skipped   - Collapsed summary, click to expand and see the question + options
  */
 function UserQuestionCard({ questionData, onAnswer, onSkip }: UserQuestionCardProps): React.ReactElement | null {
+  // Local state
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [otherText, setOtherText] = useState('');
+  const [expanded, setExpanded] = useState(false);
+
   if (!questionData) return null;
 
   const { question, options = [], allow_multiple = false, status, answer } = questionData;
   const isAnswered = status === 'answered';
   const isSkipped = status === 'skipped';
   const isResolved = isAnswered || isSkipped;
-
-  // Local state
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [otherText, setOtherText] = useState('');
-  const [expanded, setExpanded] = useState(false);
 
   // Parse which options were selected from the answer string
   const answeredOptions = isAnswered && answer

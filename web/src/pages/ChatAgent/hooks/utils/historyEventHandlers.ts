@@ -72,7 +72,7 @@ export function handleHistoryUserMessage({
   assistantMessagesByPair,
   pairStateByPair,
   refs,
-  messages,
+  messages: _messages,
   setMessages,
 }: {
   event: HistoryEvent;
@@ -517,7 +517,7 @@ export function handleHistoryToolCalls({ assistantMessageId, toolCalls, pairStat
  * @param {Function} params.setMessages - State setter for messages
  * @returns {boolean} True if event was handled
  */
-export function handleHistoryToolCallResult({ assistantMessageId, toolCallId, result, pairState, setMessages }: {
+export function handleHistoryToolCallResult({ assistantMessageId, toolCallId, result, pairState: _pairState, setMessages }: {
   assistantMessageId: string;
   toolCallId: string;
   result: ToolCallResultRecord;

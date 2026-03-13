@@ -101,7 +101,7 @@ function Settings() {
   const { preferences: prefsData, isLoading: isPrefsLoading } = usePreferences();
   const updatePrefsMutation = useUpdatePreferences();
   const queryClient = useQueryClient();
-  const { theme, preference, setTheme: setThemePref } = useTheme();
+  const { theme: _theme, preference, setTheme: setThemePref } = useTheme();
   const { t, i18n } = useTranslation();
 
   const tabParam = searchParams.get('tab') || 'userInfo';

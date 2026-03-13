@@ -1,5 +1,4 @@
 import React, { useRef, useEffect } from 'react';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 import MessageList from '../../ChatAgent/components/MessageList';
 import LogoLoading from '../../../components/ui/logo-loading';
 import './MarketPanel.css';
@@ -19,8 +18,8 @@ interface MarketPanelProps {
   error?: string | null;
 }
 
-const MarketPanel = ({ messages = [], isLoading = false, error = null }: MarketPanelProps) => {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+const MarketPanel = ({ messages = [], isLoading: _isLoading = false, error = null }: MarketPanelProps) => {
+  const _messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when messages change or when streaming

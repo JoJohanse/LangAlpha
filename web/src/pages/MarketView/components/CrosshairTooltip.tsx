@@ -22,7 +22,7 @@ interface CrosshairTooltipProps {
   containerHeight?: number;
 }
 
-function CrosshairTooltip({ visible, x, y, data, enabledMaPeriods, containerWidth, containerHeight }: CrosshairTooltipProps) {
+function CrosshairTooltip({ visible, x, y, data, enabledMaPeriods: _enabledMaPeriods, containerWidth, containerHeight }: CrosshairTooltipProps) {
   if (!visible || !data) return null;
 
   const isUp = data.close >= data.open;

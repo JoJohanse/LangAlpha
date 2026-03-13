@@ -299,7 +299,7 @@ export function handleTextContent({ assistantMessageId, content, finishReason, r
  * @param {Function} params.setMessages - State setter for messages
  * @returns {boolean} True if event was handled
  */
-export function handleToolCalls({ assistantMessageId, toolCalls, finishReason, refs, setMessages, eventId }: {
+export function handleToolCalls({ assistantMessageId, toolCalls, finishReason: _finishReason, refs, setMessages, eventId }: {
   assistantMessageId: string;
   toolCalls: ToolCallRecord[];
   finishReason: string | undefined;
@@ -434,7 +434,7 @@ export function handleToolCalls({ assistantMessageId, toolCalls, finishReason, r
  * @param {string} params.assistantMessageId - ID of the assistant message being updated
  * @param {string} params.toolCallId - ID of the tool call
  * @param {Object} params.result - Tool call result object
- * @param {Object} params.refs - Refs object with contentOrderCounterRef, currentToolCallIdRef
+ * @param {Object} params.refs - Refs object with currentToolCallIdRef
  * @param {Function} params.setMessages - State setter for messages
  * @returns {boolean} True if event was handled
  */
@@ -445,7 +445,7 @@ export function handleToolCallResult({ assistantMessageId, toolCallId, result, r
   refs: StreamRefs;
   setMessages: SetMessages;
 }): boolean {
-  const { contentOrderCounterRef, currentToolCallIdRef } = refs;
+  const { currentToolCallIdRef } = refs;
 
   if (!toolCallId) {
     return false;
@@ -1328,7 +1328,7 @@ export function handleSubagentToolCallResult({ taskId, assistantMessageId, toolC
     // If it failed, we want to clear currentTool immediately
     for (const msg of updatedMessages) {
       const toolCallProcesses = (msg.toolCallProcesses as Record<string, Record<string, unknown>>) || {};
-      for (const [tcId, tcProcess] of Object.entries(toolCallProcesses)) {
+      for (const [_tcId, tcProcess] of Object.entries(toolCallProcesses)) {
         if (tcProcess.isInProgress && !tcProcess.isComplete) {
           hasInProgressTool = true;
           currentToolName = (tcProcess.toolName as string) || '';

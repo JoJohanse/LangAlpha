@@ -125,7 +125,7 @@ function fallbackIndex(norm: string): IndexData {
  * Path uses normalized symbol (e.g. GSPC). Query: interval, from, to optional.
  * Returns the most recent data point for the index.
  */
-export async function getIndex(symbol: string, opts: Record<string, unknown> = {}): Promise<IndexData> {
+export async function getIndex(symbol: string, _opts: Record<string, unknown> = {}): Promise<IndexData> {
   const norm = normalizeIndexSymbol(String(symbol).trim());
   try {
     const { data } = await api.get(`/api/v1/market-data/intraday/indexes/${encodeURIComponent(norm)}`);
@@ -180,7 +180,7 @@ export async function getIndex(symbol: string, opts: Record<string, unknown> = {
  * Fetches indices data: snapshot batch for price/change, intraday for sparklines.
  * Returns { indices, failedCount }.
  */
-export async function getIndices(symbols: string[] = INDEX_SYMBOLS, opts: Record<string, unknown> = {}): Promise<IndicesResult> {
+export async function getIndices(symbols: string[] = INDEX_SYMBOLS, _opts: Record<string, unknown> = {}): Promise<IndicesResult> {
   const list = symbols.map((s: string) => normalizeIndexSymbol(String(s).trim()));
 
   // Fetch snapshot (price/change) and intraday (sparklines) in parallel

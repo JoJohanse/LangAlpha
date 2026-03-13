@@ -19,8 +19,8 @@ import { useTranslation } from 'react-i18next';
 import { sendChatMessageStream, replayThreadHistory, getWorkflowStatus, reconnectToWorkflowStream, sendHitlResponse, streamSubagentTaskEvents, fetchThreadTurns, submitFeedback, removeFeedback, getThreadFeedback } from '../utils/api';
 import { getStoredThreadId, setStoredThreadId } from './utils/threadStorage';
 export { removeStoredThreadId } from './utils/threadStorage';
-import { createUserMessage, createAssistantMessage, createNotificationMessage, insertMessage, appendMessage, updateMessage, type AttachmentMeta } from './utils/messageHelpers';
-import type { ChatMessage, AssistantMessage, UserMessage } from '@/types/chat';
+import { createUserMessage, createAssistantMessage, createNotificationMessage, appendMessage, updateMessage, type AttachmentMeta } from './utils/messageHelpers';
+import type { ChatMessage, AssistantMessage } from '@/types/chat';
 import type { ActionRequest, ToolCallData } from '@/types/sse';
 import { createRecentlySentTracker } from './utils/recentlySentTracker';
 import {

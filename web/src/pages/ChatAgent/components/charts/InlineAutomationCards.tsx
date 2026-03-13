@@ -186,7 +186,7 @@ interface InlineAutomationDetailCardProps {
 
 function InlineAutomationDetailCard({ artifact, onClick }: InlineAutomationDetailCardProps): React.ReactElement | null {
   const { t } = useTranslation();
-  const { automation, executions = [], total_executions = 0 } = artifact as {
+  const { automation, executions: _executions = [], total_executions = 0 } = artifact as {
     automation?: Record<string, unknown>;
     executions?: Record<string, unknown>[];
     total_executions?: number;

@@ -373,6 +373,7 @@ export function StockPriceChart({ data }: DataProps): React.ReactElement {
         chartRef.current = null;
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialOhlcv, chartInterval, updateAllSeries, handleScrollLoadMore]);
 
   if (!initialOhlcv?.length) {
@@ -1405,6 +1406,7 @@ function MiniCandlestick({ ohlcv, height = 180 }: MiniCandlestickProps): React.R
         chartRef.current = null;
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ohlcv, height, theme]);
 
   if (!ohlcv?.length) return null;
