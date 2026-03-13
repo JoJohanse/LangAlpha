@@ -148,6 +148,25 @@ function ChatAgent(): React.ReactElement | null {
   }
 
   const workspaceId = incomingWsId || resolvedWorkspaceId;
+
+  // Stable ChatView key: suppress remount when __default__ resolves to real thread ID
+  // (same conversation getting its permanent ID, not a genuine thread switch)
+  const prevChatWorkspaceRef = useRef(workspaceId);
+  const prevChatThreadRef = useRef(threadId);
+  const chatViewKeyRef = useRef(`${workspaceId}-${threadId}`);
+
+  if (workspaceId !== prevChatWorkspaceRef.current) {
+    chatViewKeyRef.current = `${workspaceId}-${threadId}`;
+  } else if (threadId !== prevChatThreadRef.current) {
+    const isDefaultResolving =
+      prevChatThreadRef.current === '__default__' && threadId && threadId !== '__default__';
+    if (!isDefaultResolving) {
+      chatViewKeyRef.current = `${workspaceId}-${threadId}`;
+    }
+  }
+  prevChatWorkspaceRef.current = workspaceId;
+  prevChatThreadRef.current = threadId;
+
   const queryClient = useQueryClient();
 
   /**
@@ -236,7 +255,7 @@ function ChatAgent(): React.ReactElement | null {
     } else {
       const cached = queryClient.getQueryData(queryKeys.workspaces.detail(workspaceId)) as Record<string, unknown> | undefined;
       const cachedWorkspaceName = (cached?.name as string) || state?.workspaceName || '';
-      content = <ChatView key={`${workspaceId}-${threadId}`} workspaceId={workspaceId} threadId={threadId} onBack={handleBackToThreadGallery} workspaceName={cachedWorkspaceName} />;
+      content = <ChatView key={chatViewKeyRef.current} workspaceId={workspaceId} threadId={threadId} onBack={handleBackToThreadGallery} workspaceName={cachedWorkspaceName} />;
     }
   } else if (urlWorkspaceId) {
     content = (
