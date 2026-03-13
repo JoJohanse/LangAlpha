@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { X, FileText, ArrowRight, Zap, Loader2, ExternalLink, ChevronRight } from 'lucide-react';
 import { getDisplayName, getToolIcon, stripLineNumbers, parseTruncatedResult } from './toolDisplayConfig';
@@ -79,6 +79,7 @@ interface DetailPanelProps {
 function DetailPanel({ toolCallProcess, planData, onClose, onOpenFile, onOpenSubagentTask }: DetailPanelProps): React.ReactElement | null {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Plan detail view
   if (planData) {
@@ -201,6 +202,7 @@ function DetailPanel({ toolCallProcess, planData, onClose, onOpenFile, onOpenSub
       {/* Content — on mobile, no overflow-y-auto so MobileBottomSheet's scroll container handles it.
            Exception: sec_filing needs flex layout because the iframe fills available height and scrolls internally. */}
       <div
+        ref={scrollContainerRef}
         className={`${isMobile && artifact?.type !== 'sec_filing' ? '' : 'flex-1'} px-4 py-4 overflow-x-hidden ${artifact?.type === 'sec_filing' ? 'flex flex-col overflow-hidden' : (isMobile ? '' : 'overflow-y-auto')}`}
         style={isMobile && artifact?.type !== 'sec_filing' ? undefined : { minHeight: 0 }}
       >
@@ -221,6 +223,7 @@ function DetailPanel({ toolCallProcess, planData, onClose, onOpenFile, onOpenSub
             toolName={toolName}
             toolCallProcess={toolCallProcess}
             onOpenFile={onOpenFile}
+            scrollContainerRef={scrollContainerRef}
           />
         )}
       </div>
@@ -445,9 +448,10 @@ interface ArtifactOrMarkdownProps {
   toolName: string;
   toolCallProcess: ToolCallProcessRecord;
   onOpenFile?: (filePath: string) => void;
+  scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
-function ArtifactOrMarkdown({ artifact, content, toolName, toolCallProcess, onOpenFile }: ArtifactOrMarkdownProps): React.ReactElement {
+function ArtifactOrMarkdown({ artifact, content, toolName, toolCallProcess, onOpenFile, scrollContainerRef }: ArtifactOrMarkdownProps): React.ReactElement {
   const { t } = useTranslation();
   // Route by artifact type first (takes priority over truncation display)
   if (artifact?.type) {
@@ -455,7 +459,7 @@ function ArtifactOrMarkdown({ artifact, content, toolName, toolCallProcess, onOp
       case 'stock_prices':
         return <StockPriceChart data={artifact} />;
       case 'company_overview':
-        return <CompanyOverviewCard data={artifact} />;
+        return <CompanyOverviewCard data={artifact} scrollContainerRef={scrollContainerRef} />;
       case 'market_indices':
         return <MarketIndicesChart data={artifact} />;
       case 'sector_performance':

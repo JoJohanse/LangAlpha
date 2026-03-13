@@ -868,7 +868,7 @@ const DETAIL_STATUS_COLORS: Record<string, string> = {
 };
 
 /** Defers rendering until the element scrolls into view (with 200px pre-load margin) */
-function LazyChart({ height, children }: { height: number; children: React.ReactNode }): React.ReactElement {
+function LazyChart({ height, children, root }: { height: number; children: React.ReactNode; root?: React.RefObject<HTMLDivElement | null> }): React.ReactElement {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
 
@@ -877,17 +877,18 @@ function LazyChart({ height, children }: { height: number; children: React.React
     if (!el) return;
     const observer = new IntersectionObserver(
       ([entry]) => { if (entry.isIntersecting) { setVisible(true); observer.disconnect(); } },
-      { rootMargin: '200px' },
+      { root: root?.current ?? null, rootMargin: '200px' },
     );
     observer.observe(el);
     return () => observer.disconnect();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- root is a stable ref object, observer is one-shot
   }, []);
 
   if (!visible) return <div ref={ref} style={{ minHeight: height, width: '100%' }} />;
   return <>{children}</>;
 }
 
-export const CompanyOverviewCard = memo(function CompanyOverviewCard({ data }: DataProps): React.ReactElement {
+export const CompanyOverviewCard = memo(function CompanyOverviewCard({ data, scrollContainerRef }: DataProps & { scrollContainerRef?: React.RefObject<HTMLDivElement | null> }): React.ReactElement {
   const { t } = useTranslation();
   const {
     symbol, name, quote, performance, analystRatings,
@@ -1050,10 +1051,10 @@ export const CompanyOverviewCard = memo(function CompanyOverviewCard({ data }: D
       {/* Quarterly Revenue & Net Income + Profit Margins (same data source) */}
       {(quarterlyFundamentals as unknown[])?.length > 0 && (
         <>
-          <LazyChart height={250}>
+          <LazyChart height={250} root={scrollContainerRef}>
             <QuarterlyRevenueChart data={quarterlyFundamentals as Record<string, unknown>[] | undefined} />
           </LazyChart>
-          <LazyChart height={250}>
+          <LazyChart height={250} root={scrollContainerRef}>
             <MarginsChart data={quarterlyFundamentals as Record<string, unknown>[] | undefined} />
           </LazyChart>
         </>
@@ -1061,14 +1062,14 @@ export const CompanyOverviewCard = memo(function CompanyOverviewCard({ data }: D
 
       {/* EPS Actual vs Estimate */}
       {(earningsSurprises as unknown[])?.length > 0 && (
-        <LazyChart height={250}>
+        <LazyChart height={250} root={scrollContainerRef}>
           <EarningsSurpriseChart data={earningsSurprises as Record<string, unknown>[] | undefined} />
         </LazyChart>
       )}
 
       {/* Cash Flow */}
       {(cashFlow as unknown[])?.length > 0 && (
-        <LazyChart height={250}>
+        <LazyChart height={250} root={scrollContainerRef}>
           <CashFlowChart data={cashFlow as Record<string, unknown>[] | undefined} />
         </LazyChart>
       )}
@@ -1076,7 +1077,7 @@ export const CompanyOverviewCard = memo(function CompanyOverviewCard({ data }: D
       {/* Revenue Breakdown */}
       {((revenueByProduct as Record<string, number> | undefined) && Object.keys(revenueByProduct as Record<string, number>).length > 0) ||
        ((revenueByGeo as Record<string, number> | undefined) && Object.keys(revenueByGeo as Record<string, number>).length > 0) ? (
-        <LazyChart height={220}>
+        <LazyChart height={220} root={scrollContainerRef}>
           <RevenueBreakdownChart revenueByProduct={revenueByProduct as Record<string, number> | undefined} revenueByGeo={revenueByGeo as Record<string, number> | undefined} />
         </LazyChart>
       ) : null}
