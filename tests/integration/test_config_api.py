@@ -104,20 +104,26 @@ class TestModelsEndpointIntegration:
         mock_llm_cls = MagicMock()
         mock_llm_cls.get_model_config.return_value = mock_mc
 
+        from ptc_agent.config.agent import AgentConfig, LLMConfig
+        from ptc_agent.config.core import DaytonaConfig, FilesystemConfig, LoggingConfig, MCPConfig, SecurityConfig
+
+        agent_cfg = AgentConfig(
+            llm=LLMConfig(
+                name="claude-sonnet-4-5",
+                flash="claude-haiku-4-5",
+                summarization="claude-haiku-4-5",
+                fallback=["gpt-4o"],
+            ),
+            security=SecurityConfig(),
+            logging=LoggingConfig(),
+            daytona=DaytonaConfig(api_key="test"),
+            mcp=MCPConfig(),
+            filesystem=FilesystemConfig(),
+        )
         with (
             patch("src.llms.llm.get_configured_llm_models", return_value=mock_models),
             patch("src.llms.llm.LLM", mock_llm_cls),
-            patch(
-                "src.config.settings.load_agent_config",
-                return_value={
-                    "llm": {
-                        "name": "claude-sonnet-4-5",
-                        "flash": "claude-haiku-4-5",
-                        "summarization": "claude-haiku-4-5",
-                        "fallback": ["gpt-4o"],
-                    }
-                },
-            ),
+            patch("src.server.app.setup.agent_config", agent_cfg),
         ):
             resp = await api_keys_client.get("/api/v1/models")
 
