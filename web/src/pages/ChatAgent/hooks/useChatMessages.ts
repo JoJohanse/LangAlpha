@@ -505,6 +505,8 @@ export function useChatMessages(
   const offloadBatchRef = useRef<OffloadBatch>({ args: 0, reads: 0, timer: null });
   // Track reconnection state for UI indicator
   const [isReconnecting, setIsReconnecting] = useState(false);
+  // Counter to re-trigger loadAndMaybeReconnect after failed reconnection
+  const [reloadTrigger, setReloadTrigger] = useState(0);
 
   // Track if this is a new conversation (for todo list card management)
   const isNewConversationRef = useRef(false);
@@ -1872,6 +1874,8 @@ export function useChatMessages(
 
     setIsReconnecting(false);
     cleanupAfterStreamEnd(assistantMessageId);
+    // Reload conversation to show complete response after failed reconnection
+    setReloadTrigger((n) => n + 1);
   };
 
   // Load history when workspace or threadId changes, then check for reconnection
@@ -2043,7 +2047,7 @@ export function useChatMessages(
     };
     // Note: loadConversationHistory is not in deps because it uses workspaceId and threadId from closure
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, threadId]);
+  }, [workspaceId, threadId, reloadTrigger]);
 
   /**
    * Marks all subagentTasks in messages as 'completed'.
