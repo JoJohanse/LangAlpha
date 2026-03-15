@@ -21,7 +21,7 @@ import { getStoredThreadId, setStoredThreadId } from './utils/threadStorage';
 export { removeStoredThreadId } from './utils/threadStorage';
 import { createUserMessage, createAssistantMessage, createNotificationMessage, appendMessage, updateMessage, type AttachmentMeta } from './utils/messageHelpers';
 import type { ChatMessage, AssistantMessage } from '@/types/chat';
-import type { ActionRequest, ToolCallData } from '@/types/sse';
+import type { ActionRequest, ToolCallData, TodoItem } from '@/types/sse';
 import { createRecentlySentTracker } from './utils/recentlySentTracker';
 import {
   handleReasoningSignal,
@@ -391,11 +391,11 @@ export function finalizeTodoListProcessesInMessages(
     const lastEntry = entries.reduce((a, b) => ((a[1].order || 0) >= (b[1].order || 0) ? a : b));
     const [lastKey, lastVal] = lastEntry;
     const hasIncomplete = lastVal.todos?.some(
-      (todo: Record<string, unknown>) => todo.status !== 'completed' && todo.status !== 'stale'
+      (todo: TodoItem) => todo.status !== 'completed' && todo.status !== 'stale'
     );
     if (!hasIncomplete) return m;
     anyChanged = true;
-    const finalizedTodos = lastVal.todos.map((todo: Record<string, unknown>) =>
+    const finalizedTodos: TodoItem[] = lastVal.todos.map((todo: TodoItem) =>
       todo.status === 'completed' || todo.status === 'stale'
         ? todo
         : { ...todo, status: 'stale' as const }
