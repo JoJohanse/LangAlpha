@@ -18,8 +18,11 @@ from ptc_agent.core.sandbox.runtime import RuntimeState
 pytestmark = [
     pytest.mark.asyncio,
     pytest.mark.skipif(
-        os.getenv("SANDBOX_TEST_PROVIDER", "memory") != "docker",
-        reason="Docker tests require SANDBOX_TEST_PROVIDER=docker",
+        "docker" not in os.getenv(
+            "SANDBOX_TEST_PROVIDERS",
+            os.getenv("SANDBOX_TEST_PROVIDER", "memory"),
+        ).lower().split(","),
+        reason="Docker tests require docker in SANDBOX_TEST_PROVIDERS",
     ),
 ]
 
