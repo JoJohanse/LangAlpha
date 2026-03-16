@@ -15,7 +15,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from ptc_agent.config.agent import AgentConfig, LLMConfig
-from ptc_agent.config.core import DaytonaConfig, FilesystemConfig, LoggingConfig, MCPConfig, SecurityConfig
+from ptc_agent.config.core import DaytonaConfig, FilesystemConfig, LoggingConfig, MCPConfig, SandboxConfig, SecurityConfig
 from tests.conftest import create_test_app
 
 DB = "src.server.app.api_keys"
@@ -29,7 +29,7 @@ def _mock_agent_config(**llm_overrides) -> AgentConfig:
         llm=LLMConfig(**llm_defaults),
         security=SecurityConfig(),
         logging=LoggingConfig(),
-        daytona=DaytonaConfig(api_key="test"),
+        sandbox=SandboxConfig(daytona=DaytonaConfig(api_key="test")),
         mcp=MCPConfig(),
         filesystem=FilesystemConfig(),
     )

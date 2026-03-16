@@ -245,36 +245,28 @@ async def _get_offline_sandbox_stats(
             resources=SandboxResources(),
         )
 
-    from daytona_sdk import AsyncDaytona, DaytonaConfig
+    from ptc_agent.core.sandbox.providers import create_provider
 
     manager = WorkspaceManager.get_instance()
-    daytona_config = DaytonaConfig(
-        api_key=manager.config.daytona.api_key,
-        api_url=manager.config.daytona.base_url,
-    )
+    provider = create_provider(manager.config.to_core_config())
     try:
-        async with AsyncDaytona(daytona_config) as daytona:
-            sandbox = await daytona.get(sandbox_id)
-            state = (
-                sandbox.state.value
-                if hasattr(sandbox.state, "value")
-                else str(sandbox.state)
-            )
-            return SandboxStatsResponse(
-                workspace_id=workspace_id,
-                sandbox_id=sandbox_id,
-                state=state,
-                created_at=str(sandbox.created_at) if sandbox.created_at else None,
-                auto_stop_interval=sandbox.auto_stop_interval,
-                resources=SandboxResources(
-                    cpu=sandbox.cpu,
-                    memory=sandbox.memory,
-                    disk=sandbox.disk,
-                    gpu=sandbox.gpu,
-                ),
-            )
+        runtime = await provider.get(sandbox_id)
+        meta = await runtime.get_metadata()
+        return SandboxStatsResponse(
+            workspace_id=workspace_id,
+            sandbox_id=sandbox_id,
+            state=meta.get("state"),
+            created_at=str(meta["created_at"]) if meta.get("created_at") else None,
+            auto_stop_interval=meta.get("auto_stop_interval"),
+            resources=SandboxResources(
+                cpu=meta.get("cpu"),
+                memory=meta.get("memory"),
+                disk=meta.get("disk"),
+                gpu=meta.get("gpu"),
+            ),
+        )
     except Exception as e:
-        logger.warning(f"Failed to query Daytona for sandbox {sandbox_id}: {e}")
+        logger.warning(f"Failed to query sandbox provider for {sandbox_id}: {e}")
         return SandboxStatsResponse(
             workspace_id=workspace_id,
             sandbox_id=sandbox_id,
@@ -282,6 +274,8 @@ async def _get_offline_sandbox_stats(
             created_at=str(workspace.get("created_at", "")),
             resources=SandboxResources(),
         )
+    finally:
+        await provider.close()
 
 
 async def _get_full_sandbox_stats(
@@ -292,34 +286,30 @@ async def _get_full_sandbox_stats(
     """Get full sandbox stats for running workspaces (disk, packages, MCP, skills)."""
     session, sandbox = await _get_sandbox(workspace_id, x_user_id)
 
-    # --- 1. Static properties from the Daytona sandbox object ---
-    daytona_sandbox = getattr(sandbox, "sandbox", None)
+    # --- 1. Static properties from the runtime metadata ---
     resources = SandboxResources()
     state = None
     created_at = None
     auto_stop_interval = None
     sandbox_id = getattr(sandbox, "sandbox_id", None)
 
-    if daytona_sandbox is not None:
+    runtime = getattr(sandbox, "runtime", None)
+    if runtime is not None:
         try:
+            meta = await runtime.get_metadata()
             resources = SandboxResources(
-                cpu=getattr(daytona_sandbox, "cpu", None),
-                memory=getattr(daytona_sandbox, "memory", None),
-                disk=getattr(daytona_sandbox, "disk", None),
-                gpu=getattr(daytona_sandbox, "gpu", None),
+                cpu=meta.get("cpu"),
+                memory=meta.get("memory"),
+                disk=meta.get("disk"),
+                gpu=meta.get("gpu"),
             )
+            state = meta.get("state")
+            raw_created = meta.get("created_at")
+            if raw_created is not None:
+                created_at = str(raw_created)
+            auto_stop_interval = meta.get("auto_stop_interval")
         except Exception:
             pass
-
-        raw_state = getattr(daytona_sandbox, "state", None)
-        if raw_state is not None:
-            state = raw_state.value if hasattr(raw_state, "value") else str(raw_state)
-
-        raw_created = getattr(daytona_sandbox, "created_at", None)
-        if raw_created is not None:
-            created_at = str(raw_created)
-
-        auto_stop_interval = getattr(daytona_sandbox, "auto_stop_interval", None)
 
     # --- 2. Concurrent bash commands for disk & packages ---
     async def _get_disk_usage():

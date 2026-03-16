@@ -231,7 +231,7 @@ class Session:
         if self.sandbox:
             await self.sandbox.stop_sandbox()
             try:
-                await self.sandbox.daytona_client.close()
+                await self.sandbox.close()
             except Exception:
                 pass
 

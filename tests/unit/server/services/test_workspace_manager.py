@@ -318,7 +318,8 @@ class TestDeleteWorkspace:
         result = await wm.delete_workspace(ws_id)
 
         assert result is True
-        mock_session.cleanup.assert_awaited_once()
+        # Cleanup goes through SessionManager (single path, no double-cleanup)
+        mock_sm.cleanup_session.assert_awaited_once_with(ws_id)
         mock_db_delete.assert_awaited_once_with(ws_id)
         assert ws_id not in wm._sessions
         assert ws_id not in wm._user_data_synced

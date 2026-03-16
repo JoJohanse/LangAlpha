@@ -857,15 +857,19 @@ class WorkspaceManager:
             if not sandbox_id:
                 raise RuntimeError("No sandbox associated with this workspace")
 
-            from daytona_sdk import AsyncDaytona, DaytonaConfig
+            from ptc_agent.core.sandbox.providers import create_provider
 
-            daytona_config = DaytonaConfig(
-                api_key=self.config.daytona.api_key,
-                api_url=self.config.daytona.base_url,
-            )
-            async with AsyncDaytona(daytona_config) as daytona:
-                sandbox = await daytona.get(sandbox_id)
-                await sandbox.archive()
+            provider = create_provider(self.config.to_core_config())
+            try:
+                runtime = await provider.get(sandbox_id)
+                if "archive" not in runtime.capabilities:
+                    raise RuntimeError(
+                        f"Provider does not support archiving "
+                        f"(capabilities: {runtime.capabilities})"
+                    )
+                await runtime.archive()
+            finally:
+                await provider.close()
 
             logger.info(f"Workspace {workspace_id} archived successfully")
             return workspace
@@ -894,21 +898,15 @@ class WorkspaceManager:
                 # Backup files to DB before deleting (if sandbox is accessible)
                 await self._backup_files_to_db(workspace_id)
 
-                # Stop and cleanup session if running
-                session = self._sessions.get(workspace_id)
-                if session:
-                    try:
-                        await session.cleanup()
-                    except Exception as e:
-                        logger.warning(f"Error cleaning up session: {e}")
-                    del self._sessions[workspace_id]
+                # Remove from local cache (SessionManager.cleanup_session handles actual cleanup)
+                self._sessions.pop(workspace_id, None)
 
                 # Clear user data sync tracking
                 self._user_data_synced.discard(workspace_id)
                 self._pending_lazy_sync.discard(workspace_id)
                 self._last_sync_at.pop(workspace_id, None)
 
-                # Also cleanup from SessionManager
+                # Cleanup session (single path — avoids double cleanup)
                 try:
                     await SessionManager.cleanup_session(workspace_id)
                 except Exception as e:

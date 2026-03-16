@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from ptc_agent.config.agent import AgentConfig, LLMConfig
+from ptc_agent.config.core import SandboxConfig
 from ptc_agent.config.core import (
     DaytonaConfig,
     FilesystemConfig,
@@ -43,7 +44,7 @@ def _make_config(**llm_overrides) -> AgentConfig:
         llm=LLMConfig(**llm_defaults),
         security=SecurityConfig(),
         logging=LoggingConfig(),
-        daytona=DaytonaConfig(api_key="test-key"),
+        sandbox=SandboxConfig(daytona=DaytonaConfig(api_key="test-key")),
         mcp=MCPConfig(),
         filesystem=FilesystemConfig(),
     )

@@ -105,7 +105,7 @@ class TestModelsEndpointIntegration:
         mock_llm_cls.get_model_config.return_value = mock_mc
 
         from ptc_agent.config.agent import AgentConfig, LLMConfig
-        from ptc_agent.config.core import DaytonaConfig, FilesystemConfig, LoggingConfig, MCPConfig, SecurityConfig
+        from ptc_agent.config.core import DaytonaConfig, FilesystemConfig, LoggingConfig, MCPConfig, SandboxConfig, SecurityConfig
 
         agent_cfg = AgentConfig(
             llm=LLMConfig(
@@ -116,7 +116,7 @@ class TestModelsEndpointIntegration:
             ),
             security=SecurityConfig(),
             logging=LoggingConfig(),
-            daytona=DaytonaConfig(api_key="test"),
+            sandbox=SandboxConfig(daytona=DaytonaConfig(api_key="test")),
             mcp=MCPConfig(),
             filesystem=FilesystemConfig(),
         )
