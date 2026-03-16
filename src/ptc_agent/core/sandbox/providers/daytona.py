@@ -467,6 +467,7 @@ class DaytonaProvider(SandboxProvider):
                         snapshot_name=snapshot_name,
                     )
                     # Wait for build to complete (poll up to 5 min)
+                    build_resolved = False
                     for _ in range(60):
                         await asyncio.sleep(5)
                         try:
@@ -486,16 +487,17 @@ class DaytonaProvider(SandboxProvider):
                                     if s2_state == "active":
                                         logger.info("Snapshot build completed")
                                         snapshot_exists = True
+                                        build_resolved = True
                                         break
                                     elif s2_state == "build_failed":
                                         logger.warning("Snapshot build failed")
                                         snapshot_exists = False
+                                        build_resolved = True
                                         break
                         except Exception:
                             pass
-                        else:
-                            continue
-                        break
+                        if build_resolved:
+                            break
                     else:
                         logger.warning("Snapshot build timed out")
                         snapshot_exists = False
