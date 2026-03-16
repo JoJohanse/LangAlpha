@@ -61,12 +61,16 @@ services:
       MEMORY_DB_USER: ${DB_USER:-postgres}
       MEMORY_DB_PASSWORD: ${DB_PASSWORD:-postgres}
       BYOK_ENCRYPTION_KEY: ${BYOK_ENCRYPTION_KEY:-langalpha-local-dev-encryption-key}
+      SANDBOX_PROVIDER: ${SANDBOX_PROVIDER:-daytona}
       SUPABASE_URL: ""  # disable auth — all requests use AUTH_USER_ID
     volumes:
       # Mount source for hot-reload
       - ./src:/app/src
       - ./server.py:/app/server.py
       - ./agent_config.yaml:/app/agent_config.yaml
+      # Docker socket — only needed when SANDBOX_PROVIDER=docker (DooD pattern).
+      # Safe to remove if using only the Daytona provider.
+      - /var/run/docker.sock:/var/run/docker.sock
       - ./config.yaml:/app/config.yaml
       - ./mcp_servers:/app/mcp_servers
       - ./skills:/app/skills

@@ -1,4 +1,8 @@
-.PHONY: help up down dev dev-web install test test-web test-all lint setup-db migrate deploy deploy-sync
+# Provider flag: daytona (default), docker, or future providers
+# Usage: make up PROVIDER=docker
+PROVIDER ?= daytona
+
+.PHONY: help up down clean dev dev-web install test test-sandbox test-web test-all lint setup-db migrate deploy deploy-sync
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -6,11 +10,23 @@ help: ## Show available targets
 # ---------------------------------------------------------------------------
 # Docker Compose (full-stack)
 # ---------------------------------------------------------------------------
-up: ## Start full stack (backend + frontend + DB + Redis) via Docker Compose
-	docker compose up --build
+up: _sandbox-prepare ## Start full stack (PROVIDER=docker|daytona)
+	SANDBOX_PROVIDER=$(PROVIDER) docker compose up --build
 
 down: ## Stop all Docker Compose services
 	docker compose down
+
+clean: down ## Stop everything and remove stale sandbox containers
+	@echo "Removing stale sandbox containers..."
+	@docker rm -f $$(docker ps -aq --filter "name=langalpha-sandbox") 2>/dev/null || true
+	@echo "Clean."
+
+# Build sandbox image only when provider needs it (docker)
+_sandbox-prepare:
+ifeq ($(PROVIDER),docker)
+	@echo "Building sandbox image for docker provider..."
+	docker build -f Dockerfile.sandbox -t langalpha-sandbox:latest .
+endif
 
 # ---------------------------------------------------------------------------
 # Manual development (without Docker for backend/frontend)
@@ -31,10 +47,14 @@ dev-web: ## Start frontend dev server
 test: ## Run backend unit tests
 	uv run pytest tests/unit/ -v --tb=short
 
+test-sandbox: _sandbox-prepare ## Run sandbox integration tests (PROVIDER=memory|docker|daytona)
+	SANDBOX_TEST_PROVIDER=$(PROVIDER) uv run pytest tests/integration/sandbox/ -v --tb=short
+
 test-web: ## Run frontend unit tests
 	cd web && pnpm vitest run
 
 test-all: test test-web ## Run all tests (backend + frontend)
+	$(MAKE) test-sandbox PROVIDER=memory
 
 # ---------------------------------------------------------------------------
 # Linting
