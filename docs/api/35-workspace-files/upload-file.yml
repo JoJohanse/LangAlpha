@@ -33,7 +33,7 @@ settings:
 docs: |
   ## Upload File
 
-  Upload a file to the workspace's live Daytona sandbox.
+  Upload a file to the workspace's live sandbox.
 
   ### Query Parameters
   - `path` (optional): Destination path (virtual or absolute). Defaults to uploaded filename
@@ -44,7 +44,7 @@ docs: |
   ### Path Handling
   - If path not specified, uses the uploaded file's filename
   - Accepts virtual paths (e.g., "data/input.csv")
-  - Accepts absolute sandbox paths (e.g., "/home/daytona/data/input.csv")
+  - Accepts absolute sandbox paths (e.g., "/home/workspace/data/input.csv")
   - Path is validated and normalized by sandbox
 
   ### Size Limits

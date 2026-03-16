@@ -29,10 +29,10 @@ export function isFilePath(href: string | undefined): boolean {
 }
 
 /**
- * Normalize a sandbox file path: strip /home/daytona/ prefix.
+ * Normalize a sandbox file path: strip /home/workspace/ prefix.
  */
 export function normalizeFilePath(path: string): string {
-  return path.replace(/^\/home\/daytona\//, '');
+  return path.replace(/^\/home\/workspace\//, '');
 }
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp']);
@@ -48,13 +48,13 @@ export function isImagePath(href: string | undefined): boolean {
 
 /**
  * Extract file paths from message text.
- * Matches patterns like dir/file.ext, dir/subdir/file.ext, /home/daytona/results/file.ext.
+ * Matches patterns like dir/file.ext, dir/subdir/file.ext, /home/workspace/results/file.ext.
  * Requires at least one `/` and a known file extension to avoid false positives.
  */
 export function extractFilePaths(text: string | undefined): string[] {
   if (!text) return [];
   // Match paths: must have at least one /, end with .extension
-  // Handles relative (dir/file.ext) and absolute (/home/daytona/file.ext) paths
+  // Handles relative (dir/file.ext) and absolute (/home/workspace/file.ext) paths
   // Handles paths in backticks, quotes, or bare
   const regex = /(?:^|[\s`"'([])(\/[a-zA-Z_][^\s`"')\]<>]*\/[^\s`"')\]<>]*\.[a-zA-Z0-9]{1,10}|[a-zA-Z_][^\s`"')\]<>]*\/[^\s`"')\]<>]*\.[a-zA-Z0-9]{1,10})(?=[\s`"')\],:;!?|]|$)/gm;
   const paths = new Set<string>();
@@ -68,7 +68,7 @@ export function extractFilePaths(text: string | undefined): string[] {
     // Skip URLs
     if (path.startsWith('http') || path.startsWith('www.') || path.startsWith('//')) continue;
     // Normalize absolute sandbox paths to relative
-    path = path.replace(/^\/home\/daytona\//, '');
+    path = path.replace(/^\/home\/workspace\//, '');
     paths.add(path);
   }
   return Array.from(paths);

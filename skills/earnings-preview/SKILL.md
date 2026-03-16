@@ -61,7 +61,7 @@ Identify the 3-5 things that will determine the stock's reaction:
 
 ### Step 5: Output
 
-Save all deliverables to `/home/daytona/work/{task}/`. One-page earnings preview with:
+Save all deliverables to `$WORK_DIR/work/{task}/`. One-page earnings preview with:
 - Company, quarter, earnings date
 - Consensus estimates table
 - Key metrics to watch (ranked by importance)
@@ -75,4 +75,4 @@ Save all deliverables to `/home/daytona/work/{task}/`. One-page earnings preview
 - "Whisper numbers" from buy-side surveys are often more relevant than published consensus
 - Historical earnings reactions help calibrate expectations — use `get_company_overview` for historical actual vs estimate data
 - Options-implied move tells you what the market expects — compare to your scenarios
-- Save all output files to `/home/daytona/work/{task}/`
+- Save all output files to `$WORK_DIR/work/{task}/`

@@ -79,7 +79,7 @@ If a coverage company reported, provide a quick reaction:
 
 ### Step 4: Output
 
-- Save output to `/home/daytona/work/{task}/` (e.g. `morning_note_YYYY-MM-DD.md`)
+- Save output to `$WORK_DIR/work/{task}/` (e.g. `morning_note_YYYY-MM-DD.md`)
 - Markdown text for email/Slack distribution
 - Keep to 1 page max — PMs and traders won't read more
 

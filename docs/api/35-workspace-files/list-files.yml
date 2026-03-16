@@ -34,7 +34,7 @@ settings:
 docs: |
   ## List Files
 
-  List files in a workspace's live Daytona sandbox.
+  List files in a workspace's live sandbox.
 
   ### Query Parameters
   - `path` (optional): Directory to list (virtual or absolute). Defaults to "."
@@ -43,7 +43,7 @@ docs: |
 
   ### Path Handling
   - Supports virtual paths (e.g., "results/foo.txt")
-  - Supports absolute sandbox paths (e.g., "/home/daytona/results/foo.txt")
+  - Supports absolute sandbox paths (e.g., "/home/workspace/results/foo.txt")
   - Returns virtual paths to clients (no leading slash for working directory paths)
   - Preserves /tmp paths as absolute
 

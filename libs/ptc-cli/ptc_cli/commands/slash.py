@@ -85,14 +85,14 @@ def _normalize_path(path: str) -> str:
     """Normalize server/sandbox paths for CLI display.
 
     The backend returns virtual paths (e.g. "results/foo.txt") but we also
-    accept absolute sandbox paths (e.g. "/home/daytona/results/foo.txt").
+    accept absolute sandbox paths (e.g. "/home/workspace/results/foo.txt").
     """
 
     if not path:
         return path
 
-    if path.startswith("/home/daytona/"):
-        return path[len("/home/daytona/"):]
+    if path.startswith("/home/workspace/"):
+        return path[len("/home/workspace/"):]
 
     if path.startswith("/") and not path.startswith("/tmp/"):
         return path.lstrip("/")

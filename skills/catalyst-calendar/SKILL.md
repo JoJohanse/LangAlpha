@@ -78,7 +78,7 @@ Each week, generate a forward-looking summary:
 
 ### Step 5: Output
 
-Save all outputs to `/home/daytona/work/{task}/`.
+Save all outputs to `$WORK_DIR/work/{task}/`.
 
 - Excel workbook with calendar view and sortable columns
 - Weekly preview note (markdown)

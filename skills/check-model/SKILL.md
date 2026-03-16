@@ -12,7 +12,7 @@ description: Debug and audit financial models for errors — circular references
 
 ### Step 1: Ingest the Model
 
-- Accept the user's Excel model (.xlsx or .xlsm) from `/home/daytona/work/{task}/`
+- Accept the user's Excel model (.xlsx or .xlsm) from `$WORK_DIR/work/{task}/`
 - Identify model type: DCF, LBO, merger, 3-statement, comps, returns, or custom
 - Map the structure: which tabs exist, how they're linked, where inputs vs. outputs live
 
@@ -126,7 +126,7 @@ Generate a model audit report:
 
 ### Step 7: Output
 
-Save all deliverables to `/home/daytona/work/{task}/`.
+Save all deliverables to `$WORK_DIR/work/{task}/`.
 
 - Issue log table (in chat or Excel)
 - Annotated model with comments on flagged cells (if user provides the file)
@@ -140,6 +140,6 @@ Save all deliverables to `/home/daytona/work/{task}/`.
 - Models that "work" can still be wrong — sanity-check outputs against industry benchmarks
 - If the model uses VBA macros, note any macro-driven calculations that can't be audited from formulas alone
 - Don't change the model without asking — report issues and let the user decide how to fix
-- Save all output files to `/home/daytona/work/{task}/`
+- Save all output files to `$WORK_DIR/work/{task}/`
 
 > For Excel formatting standards and recalculation, see `skills/xlsx/SKILL.md`.

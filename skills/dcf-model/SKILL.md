@@ -762,7 +762,7 @@ python skills/xlsx/scripts/recalc.py [path_to_excel_file] [timeout_seconds]
 
 Example:
 ```bash
-python skills/xlsx/scripts/recalc.py /home/daytona/work/{task}/AAPL_DCF_Model.xlsx 30
+python skills/xlsx/scripts/recalc.py $WORK_DIR/work/{task}/AAPL_DCF_Model.xlsx 30
 ```
 
 **Fix all errors** and re-run until status is "success" before delivering the model. See `skills/xlsx/SKILL.md` for output format and error handling details.

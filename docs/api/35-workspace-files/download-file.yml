@@ -29,14 +29,14 @@ settings:
 docs: |
   ## Download File
 
-  Download raw bytes from the workspace's live Daytona sandbox.
+  Download raw bytes from the workspace's live sandbox.
 
   ### Query Parameters
   - `path` (required): File path (virtual or absolute)
 
   ### Path Handling
   - Accepts virtual paths (e.g., "results/report.pdf")
-  - Accepts absolute sandbox paths (e.g., "/home/daytona/results/report.pdf")
+  - Accepts absolute sandbox paths (e.g., "/home/workspace/results/report.pdf")
   - Path is validated and normalized by sandbox
 
   ### Response

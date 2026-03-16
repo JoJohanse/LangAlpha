@@ -111,14 +111,14 @@ For each idea that passes the screen, present:
 
 ### Step 5: Output
 
-Save all deliverables to `/home/daytona/work/{task}/`:
+Save all deliverables to `$WORK_DIR/work/{task}/`:
 
 - Shortlist of 5-10 ideas with one-page summaries
 - Screening criteria and methodology documented
 - Comparison table across all ideas
 - Prioritized list: which ideas to research first
 
-Move final deliverables to `/home/daytona/work/{task}/results/`.
+Move final deliverables to `$WORK_DIR/work/{task}/results/`.
 
 ## Important Notes
 

@@ -29,7 +29,7 @@ settings:
 docs: |
   ## Read File
 
-  Read a file from the workspace's live Daytona sandbox.
+  Read a file from the workspace's live sandbox.
 
   ### Query Parameters
   - `path` (required): File path (virtual or absolute)
@@ -38,7 +38,7 @@ docs: |
 
   ### Path Handling
   - Accepts virtual paths (e.g., "results/report.md")
-  - Accepts absolute sandbox paths (e.g., "/home/daytona/results/report.md")
+  - Accepts absolute sandbox paths (e.g., "/home/workspace/results/report.md")
   - Path is validated and normalized by sandbox
 
   ### Response Fields
