@@ -180,8 +180,13 @@ class LLM:
         self.use_response_api = self.provider_info.get("use_response_api", False) if self.sdk in ("openai", "codex") else False
         self.use_previous_response_id = self.provider_info.get("use_previous_response_id", False) if self.sdk == "openai" else False
 
-        # Optional default headers from provider config
+        # Optional default headers from provider config, with model-level beta merging
         self.default_headers = self.provider_info.get("default_headers")
+        additional_betas = model_info.get("additional_betas")
+        if additional_betas and self.default_headers:
+            existing = self.default_headers.get("anthropic-beta", "")
+            merged = ",".join(filter(None, [existing, *additional_betas]))
+            self.default_headers = {**self.default_headers, "anthropic-beta": merged}
 
     @classmethod
     def from_custom_config(
