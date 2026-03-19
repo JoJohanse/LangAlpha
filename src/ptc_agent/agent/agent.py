@@ -71,6 +71,7 @@ from ptc_agent.agent.tools import (
     create_filesystem_tools,
     create_glob_tool,
     create_grep_tool,
+    create_preview_url_tool,
     TodoWrite,
 )
 from src.tools.search import get_web_search_tool
@@ -309,8 +310,11 @@ class PTCAgent:
         # Create the Bash tool for shell command execution
         bash_tool = create_execute_bash_tool(sandbox, thread_id=short_thread_id)
 
+        # Create the preview URL tool for sandbox service previews
+        preview_url_tool = create_preview_url_tool(sandbox)
+
         # Start with base tools
-        tools: list[Any] = [execute_code_tool, bash_tool, TodoWrite]
+        tools: list[Any] = [execute_code_tool, bash_tool, preview_url_tool, TodoWrite]
 
         # Create backend for SkillsMiddleware and LargeResultEvictionMiddleware
         backend = SandboxBackend(sandbox, operation_callback=operation_callback)

@@ -443,3 +443,47 @@ async def install_sandbox_packages(
             output="",
             error=str(e),
         )
+
+
+class PreviewUrlResponse(BaseModel):
+    url: str
+    port: int
+    expires_in: int
+
+
+@router.get("/{workspace_id}/sandbox/preview-url")
+async def get_sandbox_preview_url(
+    workspace_id: str,
+    x_user_id: CurrentUserId,
+    port: int,
+    expires_in: int = 3600,
+) -> PreviewUrlResponse:
+    """Get a signed preview URL for a service running in the workspace sandbox."""
+    if not (3000 <= port <= 9999):
+        raise HTTPException(
+            status_code=400, detail="Port must be between 3000 and 9999"
+        )
+
+    _session, sandbox = await _get_sandbox(workspace_id, x_user_id)
+
+    try:
+        preview_info = await sandbox.get_preview_url(port, expires_in=expires_in)
+        return PreviewUrlResponse(
+            url=preview_info.url,
+            port=port,
+            expires_in=expires_in,
+        )
+    except NotImplementedError:
+        raise HTTPException(
+            status_code=501,
+            detail="Preview URLs are not supported by the current sandbox provider",
+        ) from None
+    except Exception as e:
+        logger.exception(
+            "Failed to get preview URL for workspace %s port %d",
+            workspace_id,
+            port,
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Failed to generate preview URL: {e}"
+        ) from None

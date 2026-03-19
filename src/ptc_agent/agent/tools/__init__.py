@@ -25,6 +25,7 @@ from .code_execution import create_execute_code_tool
 from .file_ops import create_filesystem_tools
 from .glob import create_glob_tool
 from .grep import create_grep_tool
+from .preview_url import create_preview_url_tool
 from .think import think_tool
 
 # Todo tracking
@@ -54,6 +55,8 @@ __all__ = [
     # Search
     "create_glob_tool",
     "create_grep_tool",
+    # Preview URL
+    "create_preview_url_tool",
     # Helper
     "get_all_tools",
     # Research

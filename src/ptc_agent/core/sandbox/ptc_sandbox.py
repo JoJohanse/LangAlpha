@@ -20,6 +20,7 @@ from ptc_agent.core.sandbox._defaults import DEFAULT_DEPENDENCIES, SNAPSHOT_PYTH
 from ptc_agent.core.sandbox.providers import create_provider
 from ptc_agent.core.sandbox.retry import RetryPolicy, async_retry_with_backoff
 from ptc_agent.core.sandbox.runtime import (
+    PreviewInfo,
     RuntimeState,
     SandboxRuntime,
     SandboxTransientError,
@@ -2048,6 +2049,25 @@ class PTCSandbox:
                 charts=[],
             )
 
+    async def get_preview_url(self, port: int, expires_in: int = 3600) -> PreviewInfo:
+        """Get a signed preview URL for a service running on the given port.
+
+        Args:
+            port: Port number (3000-9999) the service is listening on.
+            expires_in: URL expiry in seconds (default: 3600 = 1 hour).
+
+        Returns:
+            PreviewInfo with url and token.
+        """
+        await self._wait_ready()
+        assert self.runtime is not None
+        return await self._runtime_call(
+            self.runtime.get_preview_url,
+            port,
+            expires_in,
+            retry_policy=RetryPolicy.SAFE,
+        )
+
     async def execute_bash_command(
         self,
         command: str,
@@ -2063,7 +2083,7 @@ class PTCSandbox:
             command: Bash command to execute
             working_dir: Working directory for command execution (default: sandbox working dir)
             timeout: Maximum execution time in seconds (default: 60)
-            background: Run command in background (not fully implemented yet)
+            background: Run command in background
             thread_id: Optional thread ID (first 8 chars) for thread-scoped script storage
 
         Returns:
@@ -2134,6 +2154,37 @@ class PTCSandbox:
                     bash_id=bash_id,
                     error=str(upload_err),
                 )
+
+            # Background execution: launch with nohup and return PID immediately
+            if background:
+                bg_log = f"/tmp/.bg_{bash_id}.log"
+                # Escape single quotes for safe embedding in bash -c '...'
+                escaped_command = full_command.replace("'", "'\\''")
+                bg_command = (
+                    f"nohup bash -c '{escaped_command}' > {bg_log} 2>&1 & echo $!"
+                )
+                assert self.runtime is not None
+                exec_result = await self._runtime_call(
+                    self.runtime.exec,
+                    bg_command,
+                    timeout=10,
+                    retry_policy=RetryPolicy.UNSAFE,
+                    total_timeout=40,
+                )
+                pid = exec_result.stdout.strip()
+                logger.info(
+                    "Background process started",
+                    bash_id=bash_id,
+                    pid=pid,
+                )
+                return {
+                    "success": True,
+                    "stdout": f"Background process started (PID: {pid})\nLog file: {bg_log}",
+                    "stderr": "",
+                    "exit_code": 0,
+                    "bash_id": bash_id,
+                    "command_hash": command_hash,
+                }
 
             # Execute directly via process.exec — no file upload dependency
             assert self.runtime is not None

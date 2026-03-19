@@ -22,6 +22,7 @@ from ptc_agent.core.sandbox.runtime import (
     Artifact,
     CodeRunResult,
     ExecResult,
+    PreviewInfo,
     RuntimeState,
     SandboxProvider,
     SandboxRuntime,
@@ -190,11 +191,18 @@ class DaytonaRuntime(SandboxRuntime):
             return [vars(f) for f in result]
         return result
 
+    # -- Preview URLs --
+
+    async def get_preview_url(self, port: int, expires_in: int = 3600) -> PreviewInfo:
+        """Get a signed preview URL for a service running on the given port."""
+        result = await self._sandbox.create_signed_preview_url(port, expires_in)
+        return PreviewInfo(url=result.url, token=result.token)
+
     # -- Capabilities & metadata --
 
     @property
     def capabilities(self) -> set[str]:
-        return {"exec", "code_run", "file_io", "archive", "snapshot"}
+        return {"exec", "code_run", "file_io", "archive", "snapshot", "preview_url"}
 
     async def archive(self) -> None:
         await self._sandbox.archive()

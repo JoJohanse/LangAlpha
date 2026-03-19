@@ -35,6 +35,14 @@ class ExecResult:
 
 
 @dataclass
+class PreviewInfo:
+    """Preview URL info for a service running in the sandbox."""
+
+    url: str
+    token: str
+
+
+@dataclass
 class Artifact:
     """An artifact produced by code execution (e.g. a chart image)."""
 
@@ -154,6 +162,13 @@ class SandboxRuntime(ABC):
         Not all providers support this; the default raises NotImplementedError.
         """
         raise NotImplementedError
+
+    async def get_preview_url(self, port: int, expires_in: int = 3600) -> PreviewInfo:
+        """Get a signed preview URL for a service running on the given port.
+
+        Not all providers support this; the default raises NotImplementedError.
+        """
+        raise NotImplementedError("Preview URLs not supported by this runtime")
 
     async def get_metadata(self) -> dict[str, Any]:
         """Return provider-specific metadata about the runtime."""
