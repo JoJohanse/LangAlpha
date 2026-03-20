@@ -225,28 +225,15 @@ class DaytonaRuntime(SandboxRuntime):
             stderr=result.stderr or "",
         )
 
-    async def session_command_status(
-        self, session_id: str, command_id: str
-    ) -> SessionCommandResult:
-        cmd = await self._sandbox.process.get_session_command(
-            session_id, command_id
-        )
-        return SessionCommandResult(
-            cmd_id=cmd.id,
-            exit_code=cmd.exit_code,
-            stdout="",
-            stderr="",
-        )
 
     async def session_command_logs(
         self, session_id: str, command_id: str
     ) -> SessionCommandResult:
-        # Get status for exit_code
-        cmd = await self._sandbox.process.get_session_command(
-            session_id, command_id
-        )
-        logs = await self._sandbox.process.get_session_command_logs(
-            session_id, command_id
+        cmd, logs = await asyncio.gather(
+            self._sandbox.process.get_session_command(session_id, command_id),
+            self._sandbox.process.get_session_command_logs(
+                session_id, command_id
+            ),
         )
         return SessionCommandResult(
             cmd_id=command_id,

@@ -196,12 +196,6 @@ class SandboxRuntime(ABC):
         """Execute a command in a session. Use run_async=True for background execution."""
         raise NotImplementedError("Sessions not supported by this runtime")
 
-    async def session_command_status(
-        self, session_id: str, command_id: str
-    ) -> SessionCommandResult:
-        """Get the status and exit code of a session command."""
-        raise NotImplementedError("Sessions not supported by this runtime")
-
     async def session_command_logs(
         self, session_id: str, command_id: str
     ) -> SessionCommandResult:
