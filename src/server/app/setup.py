@@ -209,6 +209,16 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Failed to initialize PTC Agent: {e}")
         logger.warning("PTC Agent endpoints may not work correctly")
 
+    # Start SharedWSConnectionManager (shared upstream WS to ginlix-data)
+    try:
+        from src.server.services.shared_ws_manager import SharedWSConnectionManager
+
+        shared_ws = SharedWSConnectionManager.get_instance()
+        await shared_ws.start()
+        logger.info("SharedWSConnectionManager started")
+    except Exception as e:
+        logger.warning(f"Failed to start SharedWSConnectionManager: {e}")
+
     # Start AutomationScheduler (polling loop for time-based triggers)
     try:
         from src.server.services.automation_scheduler import AutomationScheduler
@@ -251,6 +261,15 @@ async def lifespan(app: FastAPI):
         await scheduler.shutdown()
     except Exception as e:
         logger.warning(f"Error shutting down AutomationScheduler: {e}")
+
+    # 1.5. Shutdown SharedWSConnectionManager
+    try:
+        from src.server.services.shared_ws_manager import SharedWSConnectionManager
+
+        shared_ws_mgr = SharedWSConnectionManager.get_instance()
+        await shared_ws_mgr.stop()
+    except Exception as e:
+        logger.warning(f"Error shutting down SharedWSConnectionManager: {e}")
 
     # 2. Cancel background subagent tasks
     try:
