@@ -827,7 +827,25 @@ class WorkspaceManager:
                                 actual_state.value,
                             )
                             # Correct the DB status based on actual sandbox state
-                            corrected = "stopped" if actual_state.value != "running" else "running"
+                            # Only treat definitively stopped/archived as "stopped";
+                            # transient states (starting, stopping, archiving) should
+                            # not trigger a restart — let them finish naturally.
+                            stopped_states = {"stopped", "archived"}
+                            if actual_state.value in stopped_states:
+                                corrected = "stopped"
+                            elif actual_state.value == "running":
+                                corrected = "running"
+                            else:
+                                logger.info(
+                                    "Workspace %s sandbox in transient state '%s', "
+                                    "not correcting — will retry on next request",
+                                    workspace_id,
+                                    actual_state.value,
+                                )
+                                raise RuntimeError(
+                                    f"Workspace {workspace_id} sandbox is in transient "
+                                    f"state '{actual_state.value}'. Please wait and try again."
+                                )
                             workspace = await update_workspace_status(
                                 workspace_id=workspace_id,
                                 status=corrected,
