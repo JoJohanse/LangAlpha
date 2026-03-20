@@ -60,6 +60,27 @@ function RadioOption({ name, value, checked, onChange, label }: RadioOptionProps
   );
 }
 
+const PRICE_CONDITION_TYPES = [
+  { value: 'price_above', labelKey: 'automation.priceConditionAbove' },
+  { value: 'price_below', labelKey: 'automation.priceConditionBelow' },
+  { value: 'pct_change_above', labelKey: 'automation.pctChangeAbove' },
+  { value: 'pct_change_below', labelKey: 'automation.pctChangeBelow' },
+] as const;
+
+const PRICE_REFERENCE_OPTIONS = [
+  { value: 'previous_close', labelKey: 'automation.refPreviousClose' },
+  { value: 'day_open', labelKey: 'automation.refDayOpen' },
+] as const;
+
+const RETRIGGER_MODES = [
+  { value: 'one_shot', labelKey: 'automation.retriggerOneShot' },
+  { value: 'recurring', labelKey: 'automation.retriggerRecurring' },
+] as const;
+
+function isPctCondition(type: string): boolean {
+  return type === 'pct_change_above' || type === 'pct_change_below';
+}
+
 interface FormState {
   name: string;
   description: string;
@@ -73,6 +94,13 @@ interface FormState {
   thread_strategy: string;
   max_failures: number | string;
   delivery_method: string;
+  // Price trigger fields
+  price_symbol: string;
+  price_condition_type: string;
+  price_value: string;
+  price_reference: string;
+  price_retrigger_mode: string;
+  price_cooldown_minutes: number | string;
 }
 
 const INITIAL_FORM: FormState = {
@@ -88,6 +116,13 @@ const INITIAL_FORM: FormState = {
   thread_strategy: 'new',
   max_failures: 3,
   delivery_method: '',
+  // Price trigger defaults
+  price_symbol: '',
+  price_condition_type: 'price_above',
+  price_value: '',
+  price_reference: 'previous_close',
+  price_retrigger_mode: 'one_shot',
+  price_cooldown_minutes: '',
 };
 
 interface WorkspaceOption {
@@ -112,6 +147,8 @@ export default function AutomationFormDialog({ open, onOpenChange, onSubmit, aut
 
   useEffect(() => {
     if (automation) {
+      const tc = automation.trigger_config;
+      const condition = tc?.conditions?.[0];
       setForm({
         name: (automation.name as string) || '',
         description: (automation.description as string) || '',
@@ -125,6 +162,13 @@ export default function AutomationFormDialog({ open, onOpenChange, onSubmit, aut
         thread_strategy: (automation.thread_strategy as string) || 'new',
         max_failures: (automation.max_failures as number) ?? 3,
         delivery_method: (automation.delivery_config as any)?.methods?.[0] || '',
+        // Price trigger fields
+        price_symbol: tc?.symbol || '',
+        price_condition_type: condition?.type || 'price_above',
+        price_value: condition?.value != null ? String(condition.value) : '',
+        price_reference: condition?.reference || 'previous_close',
+        price_retrigger_mode: (tc?.retrigger?.mode as string) === 'cooldown' ? 'recurring' : (tc?.retrigger?.mode || 'one_shot'),
+        price_cooldown_minutes: tc?.retrigger?.cooldown_seconds ? Math.round(tc.retrigger.cooldown_seconds / 60) : '',
       });
     } else {
       setForm(INITIAL_FORM);
@@ -146,7 +190,42 @@ export default function AutomationFormDialog({ open, onOpenChange, onSubmit, aut
     e.preventDefault();
     const payload: Record<string, unknown> = { ...form };
 
-    if (payload.trigger_type === 'cron') {
+    // Clean up price trigger form fields — they get packed into trigger_config
+    delete payload.price_symbol;
+    delete payload.price_condition_type;
+    delete payload.price_value;
+    delete payload.price_reference;
+    delete payload.price_retrigger_mode;
+    delete payload.price_cooldown_minutes;
+
+    if (payload.trigger_type === 'price') {
+      // Build trigger_config for price triggers
+      delete payload.cron_expression;
+      delete payload.next_run_at;
+
+      const conditionType = form.price_condition_type;
+      const condition: Record<string, unknown> = {
+        type: conditionType,
+        value: parseFloat(form.price_value) || 0,
+      };
+      if (isPctCondition(conditionType)) {
+        condition.reference = form.price_reference;
+      }
+
+      const retrigger: Record<string, unknown> = { mode: form.price_retrigger_mode };
+      if (form.price_retrigger_mode === 'recurring' && form.price_cooldown_minutes) {
+        const mins = parseInt(String(form.price_cooldown_minutes), 10);
+        if (mins && mins >= 240) {
+          retrigger.cooldown_seconds = mins * 60;
+        }
+      }
+
+      payload.trigger_config = {
+        symbol: form.price_symbol.toUpperCase().trim(),
+        conditions: [condition],
+        retrigger,
+      };
+    } else if (payload.trigger_type === 'cron') {
       delete payload.next_run_at;
     } else {
       delete payload.cron_expression;
@@ -215,6 +294,7 @@ export default function AutomationFormDialog({ open, onOpenChange, onSubmit, aut
             <div className={radioGroupClass}>
               <RadioOption name="trigger_type" value="cron" checked={form.trigger_type === 'cron'} onChange={set('trigger_type')} label={t('automation.cronRecurring')} />
               <RadioOption name="trigger_type" value="once" checked={form.trigger_type === 'once'} onChange={set('trigger_type')} label={t('automation.once')} />
+              <RadioOption name="trigger_type" value="price" checked={form.trigger_type === 'price'} onChange={set('trigger_type')} label={t('automation.priceAlert')} />
             </div>
           </div>
 
@@ -251,7 +331,117 @@ export default function AutomationFormDialog({ open, onOpenChange, onSubmit, aut
             </div>
           )}
 
-          {/* Timezone */}
+          {/* Price Trigger Fields */}
+          {form.trigger_type === 'price' && (
+            <>
+              {/* Symbol */}
+              <div className="flex flex-col gap-1.5">
+                <label className={labelClass}>{t('automation.priceSymbol')}</label>
+                <Input
+                  value={form.price_symbol}
+                  onChange={set('price_symbol')}
+                  placeholder="AAPL"
+                  required
+                  className="placeholder:text-gray-500 border font-mono uppercase"
+                  style={inputStyle}
+                />
+              </div>
+
+              {/* Condition Type */}
+              <div className="flex flex-col gap-1.5">
+                <label className={labelClass}>{t('automation.priceCondition')}</label>
+                <select
+                  value={form.price_condition_type}
+                  onChange={set('price_condition_type')}
+                  className="flex h-10 w-full rounded-md border px-3 py-2 text-sm"
+                  style={inputStyle}
+                >
+                  {PRICE_CONDITION_TYPES.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Value */}
+              <div className="flex flex-col gap-1.5">
+                <label className={labelClass}>
+                  {t('automation.priceValue')} ({isPctCondition(form.price_condition_type) ? '%' : '$'})
+                </label>
+                <Input
+                  type="number"
+                  step="any"
+                  min={0}
+                  value={form.price_value}
+                  onChange={set('price_value')}
+                  placeholder={isPctCondition(form.price_condition_type) ? '5' : '150.00'}
+                  required
+                  className="placeholder:text-gray-500 border w-40"
+                  style={inputStyle}
+                />
+              </div>
+
+              {/* Reference (only for pct conditions) */}
+              {isPctCondition(form.price_condition_type) && (
+                <div className="flex flex-col gap-1.5">
+                  <label className={labelClass}>{t('automation.priceReference')}</label>
+                  <select
+                    value={form.price_reference}
+                    onChange={set('price_reference')}
+                    className="flex h-10 w-full rounded-md border px-3 py-2 text-sm"
+                    style={inputStyle}
+                  >
+                    {PRICE_REFERENCE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Retrigger Mode */}
+              <div className="flex flex-col gap-1.5">
+                <label className={labelClass}>{t('automation.priceRetrigger')}</label>
+                <div className={radioGroupClass}>
+                  {RETRIGGER_MODES.map((opt) => (
+                    <RadioOption
+                      key={opt.value}
+                      name="price_retrigger_mode"
+                      value={opt.value}
+                      checked={form.price_retrigger_mode === opt.value}
+                      onChange={set('price_retrigger_mode')}
+                      label={t(opt.labelKey)}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Cooldown Duration */}
+              {form.price_retrigger_mode === 'recurring' && (
+                <div className="flex flex-col gap-1.5">
+                  <label className={labelClass}>{t('automation.priceCooldown')}</label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={240}
+                      placeholder="Leave empty for daily"
+                      value={form.price_cooldown_minutes}
+                      onChange={set('price_cooldown_minutes')}
+                      className="border w-32"
+                      style={inputStyle}
+                    />
+                    <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                      {t('automation.minutes')}
+                    </span>
+                  </div>
+                  <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {t('automation.cooldownHint')}
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Timezone (hidden for price triggers) */}
+          {form.trigger_type !== 'price' && (
           <div className="flex flex-col gap-1.5">
             <label className={labelClass}>{t('settings.timezone')}</label>
             <select
@@ -265,6 +455,7 @@ export default function AutomationFormDialog({ open, onOpenChange, onSubmit, aut
               ))}
             </select>
           </div>
+          )}
 
           {/* Agent Mode */}
           <div className="flex flex-col gap-1.5">
