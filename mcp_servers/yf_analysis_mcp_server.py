@@ -234,7 +234,7 @@ def get_analyst_price_targets(ticker: str) -> dict:
         targets = stock.analyst_price_targets
         if not targets:
             return _make_response("analyst_price_targets", {}, ticker=ticker)
-        return _make_response("analyst_price_targets", targets, ticker=ticker)
+        return _make_response("analyst_price_targets", _clean_value(targets), ticker=ticker)
     except Exception as e:
         return _make_error(f"Failed to get analyst price targets for {ticker}: {e}")
 

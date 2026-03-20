@@ -147,7 +147,7 @@ def get_market_status(market: str = "US") -> dict:
         m = yf.Market(market)
         return _make_response(
             "market_status",
-            {"status": m.status, "summary": m.summary},
+            _clean_value({"status": m.status, "summary": m.summary}),
             market=market,
         )
     except Exception as e:
@@ -187,7 +187,7 @@ def screen_stocks(
         result = yf.screen(
             query, sortField=sort_field, sortAsc=sort_asc, size=count
         )
-        return _make_response("screen_results", result)
+        return _make_response("screen_results", _clean_value(result))
     except Exception as e:
         return _make_error(f"Screen failed: {e}")
 
@@ -213,7 +213,7 @@ def get_predefined_screen(screen_name: str) -> dict:
             )
         result = yf.screen(screen_name)
         return _make_response(
-            "predefined_screen", result, screen_name=screen_name
+            "predefined_screen", _clean_value(result), screen_name=screen_name
         )
     except Exception as e:
         return _make_error(f"Predefined screen failed: {e}")
@@ -258,9 +258,9 @@ def get_sector_info(sector_key: str) -> dict:
         return _make_response(
             "sector_info",
             {
-                "overview": s.overview,
+                "overview": _clean_value(s.overview),
                 "top_companies": _serialize_records(s.top_companies),
-                "top_etfs": s.top_etfs,
+                "top_etfs": _clean_value(s.top_etfs),
                 "industries": _serialize_records(s.industries),
             },
             sector=sector_key,
@@ -283,7 +283,7 @@ def get_industry_info(industry_key: str) -> dict:
         return _make_response(
             "industry_info",
             {
-                "overview": i.overview,
+                "overview": _clean_value(i.overview),
                 "top_performing_companies": _serialize_records(
                     i.top_performing_companies
                 ),
