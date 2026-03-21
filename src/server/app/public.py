@@ -330,7 +330,6 @@ async def read_shared_file(
                 except UnicodeDecodeError:
                     raise HTTPException(status_code=415, detail="File appears to be binary.")
 
-                vault_secrets = await get_vault_secrets_for_redaction(workspace_id)
                 text_content = get_redactor().redact(text_content, vault_secrets=vault_secrets)
                 lines = text_content.splitlines()
                 content = "\n".join(lines[offset:offset + limit])
@@ -429,7 +428,6 @@ async def download_shared_file(
                 mime, _ = mimetypes.guess_type(filename)
 
                 if mime and mime.startswith("text/"):
-                    vault_secrets = await get_vault_secrets_for_redaction(workspace_id)
                     content = get_redactor().redact_bytes(content, vault_secrets=vault_secrets)
 
                 return StreamingResponse(

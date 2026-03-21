@@ -91,7 +91,11 @@ async def create_secret(
     async with get_db_connection() as conn:
         async with conn.transaction():
             async with conn.cursor(row_factory=dict_row) as cur:
-                # Check limit atomically within the transaction
+                # Serialize concurrent creates for the same workspace
+                await cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (workspace_id,),
+                )
                 await cur.execute(
                     "SELECT COUNT(*) AS cnt FROM workspace_vault_secrets WHERE workspace_id = %s",
                     (workspace_id,),

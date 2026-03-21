@@ -39,13 +39,6 @@ def _load() -> dict[str, str]:
     return _cache
 
 
-def _reload() -> dict[str, str]:
-    """Force re-read from disk (picks up changes without restarting the process)."""
-    global _cache
-    _cache = None
-    return _load()
-
-
 def get(name: str) -> str:
     """Return the value of a vault secret by name.
 
