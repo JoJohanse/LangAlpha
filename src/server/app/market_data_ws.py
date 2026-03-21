@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_ALLOWED_MARKETS = {"stock", "index", "crypto", "forex"}
+_ALLOWED_MARKETS = {"stock", "index"}
 
 # Map WS interval param → cache interval key
 _WS_INTERVAL_TO_CACHE: dict[str, str] = {
@@ -268,6 +268,10 @@ async def ws_market_data_proxy(
     if market not in _ALLOWED_MARKETS:
         await websocket.close(code=1008, reason=f"Invalid market: {market}")
         return
+
+    # Index data is delayed-only; override any client-supplied tier
+    if market == "index":
+        tier = "delayed"
 
     if tier not in ("delayed", "realtime"):
         await websocket.close(code=1008, reason=f"Invalid tier: {tier}")
