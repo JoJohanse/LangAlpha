@@ -4,6 +4,7 @@ import { Clock, Timer, TrendingUp, ExternalLink } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cronToHuman } from '../../../Automations/utils/cron';
 import { formatPriceTrigger, formatRetriggerMode } from '../../../Automations/utils/price';
+import type { PriceTriggerConfig } from '@/types/automation';
 import { formatRelativeTime, formatDateTime, formatDuration } from '../../../Automations/utils/time';
 
 // ─── Constants ───────────────────────────────────────────────────────
@@ -104,7 +105,7 @@ function ConfigRow({ label, value }: ConfigRowProps): React.ReactElement {
 
 function scheduleLabel(auto: Record<string, unknown> | null | undefined): string {
   if (!auto) return '\u2014';
-  if (auto.trigger_type === 'price') return formatPriceTrigger(auto.trigger_config as any) || '\u2014';
+  if (auto.trigger_type === 'price') return formatPriceTrigger(auto.trigger_config as PriceTriggerConfig) || '\u2014';
   if (auto.trigger_type === 'cron' && auto.schedule) return cronToHuman(auto.schedule as string);
   if (auto.next_run_at) return formatRelativeTime(auto.next_run_at as string);
   return (auto.schedule as string) || '\u2014';
@@ -260,12 +261,12 @@ function DetailPanel({ automation, executions, totalExecutions }: DetailPanelPro
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
           <StatCard
             label={t('toolArtifact.trigger')}
-            value={formatPriceTrigger(automation.trigger_config as any) || '\u2014'}
-            sub={(automation.trigger_config as any)?.symbol || null}
+            value={formatPriceTrigger(automation.trigger_config as PriceTriggerConfig) || '\u2014'}
+            sub={(automation.trigger_config as PriceTriggerConfig)?.symbol || null}
           />
           <StatCard
             label={t('toolArtifact.retrigger')}
-            value={formatRetriggerMode(automation.trigger_config as any)}
+            value={formatRetriggerMode(automation.trigger_config as PriceTriggerConfig)}
           />
           <StatCard
             label={t('toolArtifact.lastRun')}
@@ -415,8 +416,8 @@ function CreatedPanel({ data }: CreatedPanelProps): React.ReactElement {
       {/* Details */}
       {isPrice ? (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <StatCard label={t('toolArtifact.trigger')} value={formatPriceTrigger(data.trigger_config as any) || '\u2014'} sub={(data.trigger_config as any)?.symbol || null} />
-          <StatCard label={t('toolArtifact.retrigger')} value={formatRetriggerMode(data.trigger_config as any)} />
+          <StatCard label={t('toolArtifact.trigger')} value={formatPriceTrigger(data.trigger_config as PriceTriggerConfig) || '\u2014'} sub={(data.trigger_config as PriceTriggerConfig)?.symbol || null} />
+          <StatCard label={t('toolArtifact.retrigger')} value={formatRetriggerMode(data.trigger_config as PriceTriggerConfig)} />
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
