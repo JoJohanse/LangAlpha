@@ -210,8 +210,8 @@ export default function AutomationInlineForm({
   const set = (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | string) =>
     setForm((f) => ({ ...f, [key]: typeof e === 'string' ? e : e.target.value }));
 
-  const setSelection = (key: keyof FormState) => (k: React.Key) =>
-    setForm((f) => ({ ...f, [key]: String(k) }));
+  const setSelection = (key: keyof FormState) => (k: React.Key | null) =>
+    setForm((f) => ({ ...f, [key]: k == null ? '' : String(k) }));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
