@@ -16,6 +16,7 @@ import iconRobo from '../../../assets/img/icon-robo.png';
 import iconRoboSing from '../../../assets/img/icon-robo-sing.png';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
+import { parseDisplayableResults, buildRichResultMap, resolveSnippet } from './webSearchUtils';
 
 // --- Types ---
 
@@ -523,6 +524,7 @@ interface WebSearchResultItem {
   snippet: string;
   date: string;
   domain: string;
+  source?: string;
 }
 
 interface WebSearchData {
@@ -535,31 +537,31 @@ function parseWebSearchResults(proc: ToolCallProcessRecord, t: TFunction): WebSe
   const raw = proc.toolCallResult?.content;
   if (!raw) return null;
 
-  let results: Array<Record<string, unknown>>;
-  try {
-    results = JSON.parse(typeof raw === 'string' ? raw : String(raw));
-    if (!Array.isArray(results)) return null;
-  } catch {
-    return null;
-  }
+  const displayableResults = parseDisplayableResults(raw);
+  if (!displayableResults) return null;
 
   const artifact = proc.toolCallResult?.artifact as Record<string, unknown> | undefined;
-  const richResults = artifact?.results as Array<Record<string, unknown>> | undefined;
+  const richResultByUrl = buildRichResultMap(artifact);
   const answerBox = artifact?.answer_box as Record<string, unknown> | undefined;
   const knowledgeGraph = artifact?.knowledge_graph as Record<string, unknown> | undefined;
 
   return {
     answer: (artifact?.answer as string) || answerBox?.answer as string || answerBox?.snippet as string || knowledgeGraph?.description as string || null,
     query: (artifact?.query as string) || (proc.toolCall?.args?.query as string) || '',
-    results: results.map((item, i) => ({
-      title: (item.title as string) || t('toolArtifact.untitled'),
-      url: (item.url as string) || '',
-      snippet: (richResults?.[i]?.snippet as string) || (item.content as string) || '',
-      date: (item.date as string) || '',
-      domain: (() => {
-        try { return new URL(item.url as string).hostname.replace(/^www\./, ''); } catch { return ''; }
-      })(),
-    })),
+    results: displayableResults.map((item) => {
+      const itemUrl = (item.url as string) || '';
+      const rich = richResultByUrl.get(itemUrl);
+      return {
+        title: (item.title as string) || t('toolArtifact.untitled'),
+        url: itemUrl,
+        snippet: resolveSnippet(item, rich),
+        date: (item.date as string) || (item.publish_time as string) || '',
+        domain: (() => {
+          try { return new URL(itemUrl).hostname.replace(/^www\./, ''); } catch { return ''; }
+        })(),
+        source: (item.source as string) || (item.site_name as string) || undefined,
+      };
+    }),
   };
 }
 
@@ -629,7 +631,7 @@ function WebSearchCards({ data }: WebSearchCardsProps): React.ReactElement {
               className="text-xs truncate"
               style={{ color: 'var(--color-text-tertiary)' }}
             >
-              {item.domain}
+              {item.source || item.domain}
             </span>
             <ExternalLink
               className="h-3 w-3 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"

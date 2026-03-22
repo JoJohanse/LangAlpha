@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, FileText } from 'lucide-react';
 import { TextShimmer } from '@/components/ui/text-shimmer';
 import { getDisplayName, getToolIcon, getInProgressText, stripLineNumbers, parseTruncatedResult } from './toolDisplayConfig';
 import Markdown from './Markdown';
+import { parseDisplayableResults, buildRichResultMap, resolveSnippet } from './webSearchUtils';
 
 /**
  * File-related tool names that support opening in the file panel.
@@ -104,13 +105,9 @@ function getExpandableSummary(toolName: string, displayProcess: ToolCallProcess)
     const queryLabel = query ? ` for '${query}'` : '';
     const content = displayProcess.toolCallResult?.content;
     if (content) {
-      try {
-        const results = JSON.parse(typeof content === 'string' ? content : String(content));
-        if (Array.isArray(results)) {
-          return `${results.length} result(s)${queryLabel}`;
-        }
-      } catch {
-        // Not JSON
+      const displayable = parseDisplayableResults(content);
+      if (displayable) {
+        return `${displayable.length} result(s)${queryLabel}`;
       }
     }
     return query ? `results${queryLabel}` : null;
@@ -128,16 +125,11 @@ function formatExpandedContent(toolName: string, proc: ToolCallProcess): string 
   const raw = proc.toolCallResult?.content;
   if (!raw) return null;
 
-  let results: Array<Record<string, unknown>>;
-  try {
-    results = JSON.parse(typeof raw === 'string' ? raw : String(raw));
-    if (!Array.isArray(results)) return null;
-  } catch {
-    return null;
-  }
+  const displayable = parseDisplayableResults(raw);
+  if (!displayable) return null;
 
   const artifact = proc.toolCallResult?.artifact as Record<string, unknown> | undefined;
-  const richResults = artifact?.results as Array<Record<string, unknown>> | undefined;
+  const richByUrl = buildRichResultMap(artifact);
 
   const lines: string[] = [];
 
@@ -153,10 +145,10 @@ function formatExpandedContent(toolName: string, proc: ToolCallProcess): string 
     lines.push('');
   }
 
-  results.forEach((item, i) => {
+  displayable.forEach((item, i) => {
     const title = (item.title as string) || 'Untitled';
     const url = (item.url as string) || '';
-    const snippet = ((richResults && (richResults[i]?.snippet as string)) || (item.content as string) || '');
+    const snippet = resolveSnippet(item, richByUrl.get(url));
     const date = (item.date as string) || '';
 
     lines.push(`**${i + 1}. [${title}](${url})**`);
