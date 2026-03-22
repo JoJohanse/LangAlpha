@@ -146,6 +146,9 @@ class TaskInfo:
     # Completion callback
     completion_callback: Optional[Callable[[], Coroutine[Any, Any, None]]] = None
 
+    # Signalled when _mark_completed finishes (persistence done)
+    persistence_complete: asyncio.Event = field(default_factory=asyncio.Event)
+
     # LangGraph compiled graph for state queries (stored per-task, not global)
     graph: Optional[Any] = None
 
@@ -1279,6 +1282,32 @@ class BackgroundTaskManager:
                             ),
                             name=f"subagent-collector-{thread_id}-post-tail",
                         )
+
+        # Signal that persistence is done so callers (e.g. automation_executor)
+        # can safely read persisted data from the DB.
+        async with self.task_lock:
+            task_info = self.tasks.get(thread_id)
+            if task_info:
+                task_info.persistence_complete.set()
+
+    async def wait_for_persistence(self, thread_id: str, timeout: float = 30.0) -> bool:
+        """Wait until _mark_completed has finished persisting for *thread_id*.
+
+        Returns True if persistence completed, False on timeout or missing task.
+        """
+        async with self.task_lock:
+            task_info = self.tasks.get(thread_id)
+        if not task_info:
+            return False
+        try:
+            await asyncio.wait_for(task_info.persistence_complete.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"[BackgroundTaskManager] wait_for_persistence timed out for {thread_id} "
+                f"after {timeout}s"
+            )
+            return False
 
     async def _mark_failed(self, thread_id: str, error: str):
         """Mark workflow as failed and notify live subscribers.

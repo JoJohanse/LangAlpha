@@ -165,6 +165,13 @@ class AutomationExecutor:
                 f"execution_id={execution_id} events={event_count}"
             )
 
+            # Wait for background persistence (sse_events) to finish before
+            # firing the completed webhook — otherwise the replay endpoint
+            # may return empty text because the DB write hasn't landed yet.
+            from src.server.services.background_task_manager import BackgroundTaskManager
+            manager = BackgroundTaskManager.get_instance()
+            await manager.wait_for_persistence(thread_id)
+
             # ─── Success ───────────────────────────────────────────
             await auto_db.update_execution_status(
                 execution_id,
