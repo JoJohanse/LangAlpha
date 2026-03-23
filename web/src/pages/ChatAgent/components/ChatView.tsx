@@ -151,6 +151,8 @@ interface ChatViewProps {
   initialTaskId?: string;
   onBack: () => void;
   workspaceName?: string;
+  isActive?: boolean;
+  onThreadResolved?: (oldThreadId: string, newThreadId: string) => void;
 }
 
 interface SubagentStatusIndicatorProps {
@@ -160,9 +162,9 @@ interface SubagentStatusIndicatorProps {
   messages?: SubagentMessage[];
 }
 
-// Module-level nav panel state — survives ChatView remount on thread navigation
-let _navPanelVisible = false;
-let _navLocked = false;
+// Shared nav panel state across ChatView instances — when switching threads,
+// the newly active instance inherits this so the panel stays open.
+const _sharedNav = { visible: false, locked: false };
 
 // Static main agent object — never changes, so defined once at module level
 const MAIN_AGENT: AgentInfo = {
@@ -256,7 +258,7 @@ function SubagentStatusIndicator({ status, currentTool, toolCalls = 0, messages 
  * @param {string} threadId - The thread ID to chat in
  * @param {Function} onBack - Callback to navigate back to thread gallery
  */
-function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName: initialWorkspaceName }: ChatViewProps): React.ReactElement | null {
+function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName: initialWorkspaceName, isActive = true, onThreadResolved }: ChatViewProps): React.ReactElement | null {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -280,26 +282,32 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   const [filePanelTargetDir, setFilePanelTargetDir] = useState<string | null>(null);
   const isDraggingRef = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
+  // True for exactly one render after drag ends — forces transition duration:0
+  // so Framer Motion jumps to the final width instead of animating from pre-drag.
+  const dragJustEndedRef = useRef(false);
 
   // Right panel management - can show 'file', 'detail', 'preview', or null (closed)
   const [rightPanelType, setRightPanelType] = useState<'file' | 'detail' | 'preview' | null>(null);
   const [rightPanelWidth, setRightPanelWidth] = useState(750);
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
-  const DIVIDER_WIDTH = 4; // px – matches .chat-split-divider
+  const panelWrapperRef = useRef<HTMLDivElement>(null);
+
+  // Clear the drag-just-ended flag after each render so future transitions animate normally.
+  useEffect(() => { dragJustEndedRef.current = false; });
   // Active agent in main view (default: 'main', or from URL taskId)
   const [activeAgentId, setActiveAgentId] = useState(
     initialTaskId ? `task:${initialTaskId}` : 'main'
   );
   // Navigation panel visibility (hover-triggered overlay)
-  // Initialize from module-level state to survive remounts on thread navigation
-  const [navPanelVisible, setNavPanelVisible] = useState(_navPanelVisible);
+  // Initialize from shared state so thread switches inherit the panel's open/closed state.
+  const [navPanelVisible, setNavPanelVisible] = useState(_sharedNav.visible);
+  const navPanelVisibleRef = useRef(_sharedNav.visible);
   const navHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const navLockedRef = useRef(_navLocked);
+  const navLockedRef = useRef(_sharedNav.locked);
   const contentAreaRef = useRef<HTMLDivElement>(null);
   const contentAreaWidthRef = useRef<number>(0);
-  // Skip nav panel slide-in on mount if it was already open (thread navigation);
-  // allow animation on subsequent hover opens.
-  const skipNavAnimRef = useRef(_navPanelVisible);
+  // Skip nav panel slide-in on mount if already open (inherited from previous thread).
+  const skipNavAnimRef = useRef(_sharedNav.visible);
   useEffect(() => { skipNavAnimRef.current = false; return () => { if (navHideTimerRef.current) clearTimeout(navHideTimerRef.current); }; }, []);
   // Auto-close nav panel when content area shrinks below threshold (e.g., right panel opens)
   useEffect(() => {
@@ -310,9 +318,13 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
       contentAreaWidthRef.current = width;
       // Skip auto-hide on mobile — hamburger controls nav drawer
       if (getIsMobileSnapshot()) return;
-      if (width < 1100 && _navPanelVisible) {
+      // Skip when view is hidden (display:none reports width 0) to avoid
+      // corrupting _sharedNav for the incoming active view.
+      if (!isActiveRef.current) return;
+      if (width < 1100 && navPanelVisibleRef.current) {
         if (navHideTimerRef.current) clearTimeout(navHideTimerRef.current);
-        _navPanelVisible = false;
+        navPanelVisibleRef.current = false;
+        _sharedNav.visible = false;
         setNavPanelVisible(false);
       }
     });
@@ -333,6 +345,9 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   const [wasInterrupted, setWasInterrupted] = useState(false);
   // Track intentional back navigation (skip session save on unmount)
   const intentionalExitRef = useRef(false);
+  // Ref mirrors isActive prop for use in unmount cleanup closures (R1)
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
 
   // --- Scroll position memory for tab switching ---
   // Stores scrollTop per agentId so switching tabs preserves position
@@ -402,12 +417,6 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
       }
     });
   }, [activeAgentId, getScrollContainer]);
-
-  // Reset module-level nav lock on thread change (state resets happen via remount from key change)
-  useEffect(() => {
-    _navLocked = false;
-    navLockedRef.current = false;
-  }, [threadId]);
 
   // Direct URL navigation fallback: detect flash workspace and resolve name from API
   const wsFetchedRef = useRef<string | null>(null); // tracks workspaceId we already fetched for
@@ -559,10 +568,10 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   resolvedThreadIdRef.current = currentThreadId || threadId;
 
   // Save chat session on unmount for cross-tab restoration (workspace + thread only).
-  // If user clicked back, save workspace-level only (no threadId) so tab
-  // switching returns to the workspace page, not the conversation.
+  // Only the active view saves — evicted hidden views must not overwrite (R1).
   useEffect(() => {
     return () => {
+      if (!isActiveRef.current) return;
       if (intentionalExitRef.current) {
         saveChatSession({ workspaceId });
         return;
@@ -575,8 +584,11 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   }, [workspaceId]);
 
   // Consume saved session on mount so it doesn't interfere with future navigations.
-  // Scroll position is NOT restored — we always start at the bottom.
+  // One-shot: fires once per instance, never re-fires on isActive changes (R5).
+  const sessionConsumedRef = useRef(false);
   useEffect(() => {
+    if (sessionConsumedRef.current) return;
+    sessionConsumedRef.current = true;
     const session = getChatSession();
     if (session && session.workspaceId === workspaceId) {
       clearChatSession();
@@ -791,7 +803,8 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     [],
   );
 
-  // Handle drag panel width
+  // Handle drag panel width — direct DOM manipulation for smooth, jank-free resize.
+  // React state is only updated once on mouseup; during drag we bypass React/Framer.
   const PREVIEW_MAX_RATIO = 0.92;
   const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -799,21 +812,35 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     setIsDragging(true);
     const startX = e.clientX;
     const startWidth = rightPanelWidth;
-    // Use total container width (chat area + panel + divider), not just the
-    // chat area — contentAreaWidthRef excludes the open panel, so clamping
-    // against it would immediately shrink the panel on the first mouse move.
     const containerW = containerRef.current?.offsetWidth || window.innerWidth;
     const maxRatio = rightPanelType === 'preview' ? PREVIEW_MAX_RATIO : undefined;
+
+    // Immediately disable pointer events on iframes to prevent them from
+    // capturing mouse events during resize (can't wait for React re-render).
+    const iframes = containerRef.current?.querySelectorAll('iframe');
+    iframes?.forEach(iframe => { (iframe as HTMLIFrameElement).style.pointerEvents = 'none'; });
+
+    // Grab DOM elements for direct manipulation (no React re-renders during drag)
+    const wrapperEl = panelWrapperRef.current;
+    const innerEl = wrapperEl?.querySelector<HTMLElement>('[data-panel-inner]');
+    let currentWidth = startWidth;
 
     const onMouseMove = (moveEvent: MouseEvent) => {
       if (!isDraggingRef.current) return;
       const delta = startX - moveEvent.clientX;
-      setRightPanelWidth(clampPanelWidthUtil(startWidth + delta, containerW, maxRatio));
+      currentWidth = clampPanelWidthUtil(startWidth + delta, containerW, maxRatio);
+      if (wrapperEl) wrapperEl.style.width = `${currentWidth}px`;
+      if (innerEl) innerEl.style.width = `${currentWidth}px`;
     };
 
     const onMouseUp = () => {
       isDraggingRef.current = false;
+      // Flag ensures the next render uses duration:0 so Framer doesn't
+      // animate from the stale pre-drag width to the final width.
+      dragJustEndedRef.current = true;
       setIsDragging(false);
+      setRightPanelWidth(currentWidth);
+      iframes?.forEach(iframe => { (iframe as HTMLIFrameElement).style.pointerEvents = ''; });
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
       document.body.style.cursor = '';
@@ -1120,14 +1147,17 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     // Don't open if content area is too narrow (e.g., right panel consuming space)
     if ((contentAreaRef.current?.offsetWidth ?? Infinity) < 1100) return;
     if (navHideTimerRef.current) clearTimeout(navHideTimerRef.current);
-    _navPanelVisible = true;
+    navPanelVisibleRef.current = true;
+    _sharedNav.visible = true;
     setNavPanelVisible(true);
   }, []);
 
   const handleNavLeave = useCallback(() => {
     if (navLockedRef.current) return;
     navHideTimerRef.current = setTimeout(() => {
-      _navPanelVisible = false;
+      if (!isActiveRef.current) return;
+      navPanelVisibleRef.current = false;
+      _sharedNav.visible = false;
       setNavPanelVisible(false);
     }, 30000);
   }, []);
@@ -1135,8 +1165,9 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   const handleNavMinimize = useCallback(() => {
     if (navHideTimerRef.current) clearTimeout(navHideTimerRef.current);
     navLockedRef.current = true;
-    _navLocked = true;
-    _navPanelVisible = false;
+    navPanelVisibleRef.current = false;
+    _sharedNav.visible = false;
+    _sharedNav.locked = true;
     setNavPanelVisible(false);
   }, []);
 
@@ -1152,9 +1183,10 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   // Expand button explicitly unlocks and opens the panel
   const handleNavExpand = useCallback(() => {
     navLockedRef.current = false;
-    _navLocked = false;
+    _sharedNav.locked = false;
     if (navHideTimerRef.current) clearTimeout(navHideTimerRef.current);
-    _navPanelVisible = true;
+    navPanelVisibleRef.current = true;
+    _sharedNav.visible = true;
     setNavPanelVisible(true);
   }, []);
 
@@ -1278,26 +1310,30 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   }, [initialTaskId, isLoadingHistory, refreshSubagentCard]);
 
   // Update URL when thread ID changes (e.g., when __default__ becomes actual thread ID)
-  // This triggers a re-render with the new threadId, which will then load history
+  // Hidden views notify parent via onThreadResolved but skip URL navigate.
   useEffect(() => {
     if (currentThreadId && currentThreadId !== '__default__' && currentThreadId !== threadId && workspaceId) {
       console.log('[ChatView] Thread ID changed from', threadId, 'to', currentThreadId, '- updating URL');
-      // Update URL to reflect the actual thread ID, preserving any active subagent taskId
-      // This will cause ChatAgent to re-render with new threadId prop, triggering history load
-      const activeTid = activeAgentIdRef.current !== 'main'
-        ? activeAgentIdRef.current.replace('task:', '')
-        : null;
-      const path = activeTid
-        ? `/chat/t/${currentThreadId}/${activeTid}`
-        : `/chat/t/${currentThreadId}`;
-      navigate(path, { replace: true, state: { workspaceId } });
+      // Notify parent so the cache key updates in-place (preserves instanceId)
+      onThreadResolved?.(threadId, currentThreadId);
+      if (isActive) {
+        const activeTid = activeAgentIdRef.current !== 'main'
+          ? activeAgentIdRef.current.replace('task:', '')
+          : null;
+        const path = activeTid
+          ? `/chat/t/${currentThreadId}/${activeTid}`
+          : `/chat/t/${currentThreadId}`;
+        navigate(path, { replace: true, state: { workspaceId } });
+      }
       // Invalidate thread cache so navigation panel picks up the new thread
       queryClient.invalidateQueries({ queryKey: queryKeys.threads.byWorkspace(workspaceId) });
     }
-  }, [currentThreadId, threadId, workspaceId, navigate, queryClient]);
+  }, [currentThreadId, threadId, workspaceId, navigate, queryClient, isActive, onThreadResolved]);
 
   // Auto-send initial message from navigation state (e.g., from Dashboard)
   useEffect(() => {
+    // Hidden views must not send initial messages (R7 — all views share useLocation)
+    if (!isActive) return;
     // Only proceed if we have the required IDs
     if (!workspaceId || !threadId) {
       return;
@@ -1370,7 +1406,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
         }, 100);
       }
     }
-  }, [location.state, workspaceId, threadId, isLoading, isLoadingHistory, handleSendMessage, navigate, location.pathname]);
+  }, [location.state, workspaceId, threadId, isLoading, isLoadingHistory, handleSendMessage, navigate, location.pathname, isActive]);
 
   // Smart auto-scroll: only scroll to bottom when user is already near the bottom
   const isNearBottomRef = useRef(true);
@@ -1437,6 +1473,34 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     }
   }, [activeAgent?.messages]);
 
+  // When this view becomes active (thread switch or new thread):
+  // 1. Inherit nav panel state from the shared signal so it stays open across switches
+  // 2. Scroll to bottom — while hidden (display:none) auto-scroll is a no-op
+  const prevIsActiveRef = useRef(false);
+  useEffect(() => {
+    if (isActive && !prevIsActiveRef.current) {
+      // Clear stale nav-hide timer from a previous activation period
+      if (navHideTimerRef.current) clearTimeout(navHideTimerRef.current);
+      // Reset nav lock — matches the old per-thread-change reset so the
+      // hover trigger zone works again after a minimize + thread switch.
+      navLockedRef.current = false;
+      _sharedNav.locked = false;
+      // Sync nav panel from shared state
+      navPanelVisibleRef.current = _sharedNav.visible;
+      setNavPanelVisible(_sharedNav.visible);
+      // Skip slide-in animation if inheriting open state
+      if (_sharedNav.visible) skipNavAnimRef.current = true;
+
+      requestAnimationFrame(() => {
+        if (_sharedNav.visible) skipNavAnimRef.current = false;
+        const container = getScrollContainer(scrollAreaRef);
+        if (container) {
+          container.scrollTo({ top: container.scrollHeight });
+        }
+      });
+    }
+    prevIsActiveRef.current = isActive;
+  }, [isActive, getScrollContainer]);
 
   // Early return if workspaceId or threadId is missing
   if (!workspaceId || !threadId) {
@@ -1453,7 +1517,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     <WorkspaceProvider workspaceId={workspaceId} downloadFile={null}>
     <motion.div
       ref={containerRef}
-      initial={_navPanelVisible ? false : { y: 10 }}
+      initial={navPanelVisibleRef.current ? false : { y: 10 }}
       animate={{ y: 0 }}
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
       className={`flex w-full overflow-hidden ${isMobile ? 'h-full' : 'h-screen'}`}
@@ -1955,21 +2019,28 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
           </motion.div>
         )
       ) : (
+        <>
+        {/* Resize divider — outside overflow-hidden panel so its wide hover zone isn't clipped */}
+        {rightPanelType && (
+          <div
+            className={`chat-split-divider${isDragging ? ' dragging' : ''}`}
+            onMouseDown={handleDividerMouseDown}
+          />
+        )}
         <AnimatePresence>
           {rightPanelType && (
             <motion.div
+              ref={panelWrapperRef}
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: rightPanelWidth + DIVIDER_WIDTH, opacity: 1 }}
+              animate={{ width: rightPanelWidth, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              transition={isDragging ? { duration: 0 } : { duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+              transition={(isDragging || dragJustEndedRef.current)
+                ? { duration: 0 }
+                : { duration: 0.25, ease: [0.22, 1, 0.36, 1] }
+              }
               className="flex flex-shrink-0 overflow-hidden"
-              style={isDragging ? { width: rightPanelWidth + DIVIDER_WIDTH } : undefined}
             >
-              <div
-                className="chat-split-divider"
-                onMouseDown={handleDividerMouseDown}
-              />
-              <div className="flex-shrink-0 h-full" style={{ width: rightPanelWidth }}>
+              <div data-panel-inner className="flex-shrink-0 h-full" style={{ width: rightPanelWidth }}>
                 <Suspense fallback={null}>
                   {rightPanelType === 'file' ? (
                     <FilePanel
@@ -2017,6 +2088,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
             </motion.div>
           )}
         </AnimatePresence>
+        </>
       )}
 
     </motion.div>

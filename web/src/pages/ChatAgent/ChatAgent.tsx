@@ -7,6 +7,7 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { queryKeys } from '../../lib/queryKeys';
 import { getWorkspaceThreads, getThread } from './utils/api';
 import { getChatSession } from './hooks/utils/chatSessionRestore';
+import { useChatViewCache } from './hooks/useChatViewCache';
 import ChatView from './components/ChatView';
 import './ChatAgent.css';
 
@@ -149,25 +150,26 @@ function ChatAgent(): React.ReactElement | null {
 
   const workspaceId = incomingWsId || resolvedWorkspaceId;
 
-  // Stable ChatView key: suppress remount when __default__ resolves to real thread ID
-  // (same conversation getting its permanent ID, not a genuine thread switch)
-  const prevChatWorkspaceRef = useRef(workspaceId);
-  const prevChatThreadRef = useRef(threadId);
-  const chatViewKeyRef = useRef(`${workspaceId}-${threadId}`);
-
-  if (workspaceId !== prevChatWorkspaceRef.current) {
-    chatViewKeyRef.current = `${workspaceId}-${threadId}`;
-  } else if (threadId !== prevChatThreadRef.current) {
-    const isDefaultResolving =
-      prevChatThreadRef.current === '__default__' && threadId && threadId !== '__default__';
-    if (!isDefaultResolving) {
-      chatViewKeyRef.current = `${workspaceId}-${threadId}`;
-    }
-  }
-  prevChatWorkspaceRef.current = workspaceId;
-  prevChatThreadRef.current = threadId;
+  // LRU cache for ChatView instances — keeps up to 5 alive simultaneously
+  const cache = useChatViewCache();
 
   const queryClient = useQueryClient();
+
+  // Ensure cache entry exists before first paint so chatViews is never empty
+  // when threadId is set (same setState-during-render pattern as setResolvedWorkspaceId above).
+  if (threadId && workspaceId && !cache.entries.some(e => e.workspaceId === workspaceId && e.threadId === threadId)) {
+    const cached = queryClient.getQueryData(queryKeys.workspaces.detail(workspaceId)) as Record<string, unknown> | undefined;
+    const wsName = (cached?.name as string) || state?.workspaceName || '';
+    cache.touch({ workspaceId, threadId, workspaceName: wsName, initialTaskId: taskId });
+  }
+
+  // Promote to MRU and update metadata (workspace name, taskId) on subsequent renders
+  useEffect(() => {
+    if (!threadId || !workspaceId) return;
+    const cached = queryClient.getQueryData(queryKeys.workspaces.detail(workspaceId)) as Record<string, unknown> | undefined;
+    const wsName = (cached?.name as string) || state?.workspaceName || '';
+    cache.touch({ workspaceId, threadId, workspaceName: wsName, initialTaskId: taskId });
+  }, [threadId, workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * Handles workspace selection from gallery
@@ -222,84 +224,121 @@ function ChatAgent(): React.ReactElement | null {
     });
   }, [queryClient]);
 
-  // Determine view key for AnimatePresence transitions
-  // threadId = chat view, urlWorkspaceId (no threadId) = thread gallery, neither = workspace gallery
-  const viewKey = threadId
-    ? `chat-${workspaceId || 'resolving'}`
-    : urlWorkspaceId
-      ? `threads-${urlWorkspaceId}`
-      : 'gallery';
+  // Determine view key for AnimatePresence transitions (gallery views only)
+  const viewKey = urlWorkspaceId
+    ? `threads-${urlWorkspaceId}`
+    : 'gallery';
 
-  let content: React.ReactNode;
-  if (threadId && accessDenied) {
-    content = (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: 'var(--text-secondary, #888)', padding: 24 }}>
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-        </svg>
-        <div style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-primary, #ccc)' }}>{t('chat.accessDeniedTitle')}</div>
-        <div style={{ fontSize: 14 }}>{t('chat.accessDeniedDesc')}</div>
-        <button
-          onClick={() => navigate('/chat', { replace: true })}
-          style={{ marginTop: 8, padding: '8px 20px', borderRadius: 8, border: '1px solid var(--border-color, #333)', background: 'transparent', color: 'var(--text-primary, #ccc)', cursor: 'pointer', fontSize: 14 }}
-        >
-          {t('chat.goToChats')}
-        </button>
-      </div>
-    );
-  } else if (threadId) {
-    if (!workspaceId) {
-      // Still resolving workspace from API — show nothing (loading state)
-      content = null;
+  // Gallery content (workspace gallery or thread gallery)
+  let galleryContent: React.ReactNode = null;
+  if (!threadId) {
+    if (urlWorkspaceId) {
+      galleryContent = (
+        <Suspense fallback={null}>
+          <ThreadGallery
+            workspaceId={urlWorkspaceId}
+            onBack={handleBackToWorkspaceGallery}
+            onThreadSelect={handleThreadSelect}
+          />
+        </Suspense>
+      );
     } else {
-      const cached = queryClient.getQueryData(queryKeys.workspaces.detail(workspaceId)) as Record<string, unknown> | undefined;
-      const cachedWorkspaceName = (cached?.name as string) || state?.workspaceName || '';
-      content = <ChatView key={chatViewKeyRef.current} workspaceId={workspaceId} threadId={threadId} initialTaskId={taskId} onBack={handleBackToThreadGallery} workspaceName={cachedWorkspaceName} />;
+      galleryContent = (
+        <Suspense fallback={<div style={{ height: '100%', background: 'var(--color-bg-page, #0a0a0a)' }} />}>
+          <WorkspaceGallery
+            onWorkspaceSelect={handleWorkspaceSelect}
+            prefetchThreads={prefetchThreads}
+          />
+        </Suspense>
+      );
     }
-  } else if (urlWorkspaceId) {
-    content = (
-      <Suspense fallback={null}>
-        <ThreadGallery
-          workspaceId={urlWorkspaceId}
-          onBack={handleBackToWorkspaceGallery}
-          onThreadSelect={handleThreadSelect}
-        />
-      </Suspense>
-    );
-  } else {
-    content = (
-      <Suspense fallback={<div style={{ height: '100%', background: 'var(--color-bg-page, #0a0a0a)' }} />}>
-        <WorkspaceGallery
-          onWorkspaceSelect={handleWorkspaceSelect}
-          prefetchThreads={prefetchThreads}
-        />
-      </Suspense>
-    );
   }
 
-  // On mobile, skip AnimatePresence entirely — iOS/Android provide their own
-  // back-gesture page transitions, and layering framer-motion on top causes flicker.
-  // Tap-based forward navigation is instant (acceptable on mobile).
+  // Access denied overlay (shown on top of everything)
+  const accessDeniedContent = threadId && accessDenied ? (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: 'var(--text-secondary, #888)', padding: 24, backgroundColor: 'var(--color-bg-page, #0a0a0a)' }}>
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      </svg>
+      <div style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-primary, #ccc)' }}>{t('chat.accessDeniedTitle')}</div>
+      <div style={{ fontSize: 14 }}>{t('chat.accessDeniedDesc')}</div>
+      <button
+        onClick={() => navigate('/chat', { replace: true })}
+        style={{ marginTop: 8, padding: '8px 20px', borderRadius: 8, border: '1px solid var(--border-color, #333)', background: 'transparent', color: 'var(--text-primary, #ccc)', cursor: 'pointer', fontSize: 14 }}
+      >
+        {t('chat.goToChats')}
+      </button>
+    </div>
+  ) : null;
+
+  // Cached ChatView instances — always rendered, visibility toggled via display
+  const chatViews = cache.entries.map(entry => {
+    const isEntryActive = entry.workspaceId === workspaceId && entry.threadId === threadId && !!threadId && !accessDenied;
+    return (
+      <div
+        key={entry.instanceId}
+        style={{
+          display: isEntryActive ? 'flex' : 'none',
+          flexDirection: 'column' as const,
+          height: '100%',
+        }}
+      >
+        <ChatView
+          workspaceId={entry.workspaceId}
+          threadId={entry.threadId}
+          initialTaskId={isEntryActive ? taskId : entry.initialTaskId}
+          onBack={handleBackToThreadGallery}
+          workspaceName={entry.workspaceName}
+          isActive={isEntryActive}
+          onThreadResolved={(oldTid, newTid) => {
+            cache.updateKey(
+              `${entry.workspaceId}-${oldTid}`,
+              `${entry.workspaceId}-${newTid}`,
+              { threadId: newTid },
+            );
+          }}
+        />
+      </div>
+    );
+  });
+
+  // On mobile, skip AnimatePresence — iOS/Android provide their own page transitions.
   if (isMobile) {
-    return <div style={{ height: '100%' }}>{content}</div>;
+    return (
+      <div style={{ height: '100%', position: 'relative' }}>
+        {!threadId && galleryContent}
+        {chatViews}
+        {accessDeniedContent}
+      </div>
+    );
   }
 
   return (
-    <AnimatePresence mode="wait" custom={navDirection}>
-      <motion.div
-        key={viewKey}
-        custom={navDirection}
-        variants={desktopFadeVariants}
-        initial="enter"
-        animate="center"
-        exit="exit"
-        transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-        style={{ height: '100%' }}
-      >
-        {content}
-      </motion.div>
-    </AnimatePresence>
+    <div style={{ height: '100%', position: 'relative' }}>
+      {/* Gallery views — animated transitions (R6: z-index:1 so exit fades above chat) */}
+      <div style={{ position: threadId ? 'absolute' : 'relative', height: threadId ? 0 : '100%', width: '100%', zIndex: 1, overflow: 'hidden' }}>
+        <AnimatePresence mode="wait" custom={navDirection}>
+          {!threadId && (
+            <motion.div
+              key={viewKey}
+              custom={navDirection}
+              variants={desktopFadeVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              style={{ height: '100%' }}
+            >
+              {galleryContent}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+      {/* Cached ChatViews — visibility toggled, never unmounted on thread switch */}
+      {chatViews}
+      {accessDeniedContent}
+    </div>
   );
 }
 

@@ -412,6 +412,45 @@ export function finalizeTodoListProcessesInMessages(
   return anyChanged ? updated : messages;
 }
 
+/**
+ * Map a task artifact event's tool_call_id to its agentId and drain the pending queue.
+ *
+ * When multiple Task tool calls are in a single tool_calls event, the pending queue
+ * holds their IDs in array order. Because LangGraph processes tool calls in parallel,
+ * artifact events may arrive in a different order. This function uses a direct mapping
+ * (by value) when tool_call_id is available, falling back to FIFO for legacy events.
+ *
+ * @returns Updated pending queue after draining.
+ */
+export function mapToolCallIdToAgentId(
+  eventToolCallId: string | undefined,
+  agentId: string,
+  action: string,
+  pendingToolCallIds: string[],
+  toolCallIdMap: Map<string, string>,
+): string[] {
+  if (eventToolCallId) {
+    toolCallIdMap.set(eventToolCallId, agentId);
+  }
+  if (action !== 'init') {
+    return pendingToolCallIds;
+  }
+  if (pendingToolCallIds.length === 0) {
+    return pendingToolCallIds;
+  }
+  if (eventToolCallId) {
+    // Direct mapping — remove by value (not FIFO) since parallel tool calls
+    // may complete in different order than the tool_calls array.
+    return pendingToolCallIds.filter(id => id !== eventToolCallId);
+  }
+  // Legacy fallback: FIFO drain for events without tool_call_id.
+  const [firstId, ...rest] = pendingToolCallIds;
+  if (!toolCallIdMap.has(firstId)) {
+    toolCallIdMap.set(firstId, agentId);
+  }
+  return rest;
+}
+
 export function useChatMessages(
   workspaceId: string,
   initialThreadId: string | null = null,
@@ -552,7 +591,7 @@ export function useChatMessages(
 
       // Only update and clear if we're switching to a different thread
       // Don't clear if we're just updating from '__default__' to the actual thread ID (handled by streaming)
-      const currentThreadId = threadId;
+      const currentThreadId = threadIdRef.current;
       const isThreadSwitch = currentThreadId &&
         currentThreadId !== '__default__' &&
         newThreadId !== '__default__' &&
@@ -994,35 +1033,13 @@ export function useChatMessages(
               if (action === 'update') {
                 steeredAgentIds.add(agentId);
               }
-              // Map tool_call_id from the event context
-              if (event.tool_call_id) {
-                toolCallIdToTaskIdMapRef.current.set(event.tool_call_id, agentId);
-              }
-              // Match pending tool call IDs from earlier tool_calls events.
-              // The artifact event drains the pending queue to establish
-              // the toolCallId → agentId mapping for replay.
-              if (action === 'init') {
-                const pendingToolCallIds = historyPendingTaskToolCallIdsRef.current;
-                if (pendingToolCallIds.length > 0) {
-                  if (event.tool_call_id) {
-                    // Direct mapping available — remove this specific ID from the
-                    // pending queue by value (not FIFO). LangGraph processes tool
-                    // calls in parallel, so artifact events may arrive in a
-                    // different order than the tool_calls array.
-                    historyPendingTaskToolCallIdsRef.current = pendingToolCallIds.filter(
-                      id => id !== event.tool_call_id
-                    );
-                  } else {
-                    // Legacy fallback: FIFO drain for events persisted without
-                    // tool_call_id. May be incorrect for parallel tool calls.
-                    const toolCallId = pendingToolCallIds[0];
-                    if (!toolCallIdToTaskIdMapRef.current.has(toolCallId)) {
-                      toolCallIdToTaskIdMapRef.current.set(toolCallId, agentId);
-                    }
-                    historyPendingTaskToolCallIdsRef.current = pendingToolCallIds.slice(1);
-                  }
-                }
-              }
+              historyPendingTaskToolCallIdsRef.current = mapToolCallIdToAgentId(
+                event.tool_call_id as string | undefined,
+                agentId,
+                action,
+                historyPendingTaskToolCallIdsRef.current,
+                toolCallIdToTaskIdMapRef.current,
+              );
             }
           }
           return;
@@ -2654,22 +2671,21 @@ export function useChatMessages(
           if (!task_id) return;
           const agentId = `task:${task_id}`;
 
+          // Establish toolCallId → agentId mapping immediately, so clicking
+          // the inline card before tool_call_result resolves correctly.
+          {
+            const updated = mapToolCallIdToAgentId(
+              event.tool_call_id as string | undefined,
+              agentId,
+              action,
+              pendingTaskToolCallIds,
+              toolCallIdToTaskIdMapRef.current,
+            );
+            pendingTaskToolCallIds.length = 0;
+            pendingTaskToolCallIds.push(...updated);
+          }
+
           if (action === 'init') {
-            // Establish toolCallId → agentId mapping immediately, so clicking
-            // the inline card before tool_call_result resolves correctly.
-            const eventToolCallId = event.tool_call_id as string | undefined;
-            if (eventToolCallId) {
-              // Direct mapping — always set regardless of queue state.
-              toolCallIdToTaskIdMapRef.current.set(eventToolCallId, agentId);
-              // Also drain from pending queue by value (not FIFO) since parallel
-              // tool calls may complete in different order than the tool_calls array.
-              const idx = pendingTaskToolCallIds.indexOf(eventToolCallId);
-              if (idx !== -1) pendingTaskToolCallIds.splice(idx, 1);
-            } else if (pendingTaskToolCallIds.length > 0) {
-              // Legacy fallback: FIFO drain
-              const toolCallId = pendingTaskToolCallIds.shift()!;
-              toolCallIdToTaskIdMapRef.current.set(toolCallId, agentId);
-            }
             const alreadyCompleted = completedTaskIdsRef.current.has(task_id as string);
             if (updateSubagentCard) {
               updateSubagentCard(agentId, {

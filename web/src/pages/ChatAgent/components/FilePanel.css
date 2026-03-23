@@ -189,18 +189,20 @@
     flex-shrink: 0;
     transition: background-color 0.15s;
     position: relative;
+    z-index: 2;
   }
   .chat-split-divider:hover,
   .chat-split-divider.dragging {
-    background-color: var(--color-accent-overlay);
+    background-color: var(--color-accent-primary);
   }
   .chat-split-divider::after {
     content: '';
     position: absolute;
     top: 0;
     bottom: 0;
-    left: -4px;
-    right: -4px;
+    left: -8px;
+    right: -8px;
+    cursor: col-resize;
   }
   
   .chat-split-right {
