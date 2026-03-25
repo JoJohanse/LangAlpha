@@ -32,6 +32,18 @@ import { motion, AnimatePresence, type PanInfo } from 'framer-motion';
 import { MobileBottomSheet } from '@/components/ui/mobile-bottom-sheet';
 
 
+/** Append an optional path suffix to a base URL (e.g. "/timeline.html"). */
+function appendPathSuffix(baseUrl: string, path?: string): string {
+  if (!path) return baseUrl;
+  try {
+    const parsed = new URL(baseUrl);
+    parsed.pathname = parsed.pathname.replace(/\/+$/, '') + path;
+    return parsed.toString();
+  } catch {
+    return baseUrl;
+  }
+}
+
 const FilePanel = React.lazy(() => import('./FilePanel'));
 const DetailPanel = React.lazy(() => import('./DetailPanel'));
 const PreviewViewer = React.lazy(() => import('./viewers/PreviewViewer'));
@@ -290,6 +302,11 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   // Right panel management - can show 'file', 'detail', 'preview', or null (closed)
   const [rightPanelType, setRightPanelType] = useState<'file' | 'detail' | 'preview' | null>(null);
   const [rightPanelWidth, setRightPanelWidth] = useState(750);
+  // Multi-port preview state: Map keyed by port lives in a ref (non-active updates don't re-render).
+  // activePreviewPort + derived previewData drive the panel render.
+  const previewMapRef = useRef<Map<number, PreviewData>>(new Map());
+  const activePreviewPortRef = useRef<number | null>(null);
+  const reloadCounterRef = useRef(0);
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
   const panelWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -959,14 +976,18 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     return clampPanelWidth(desired);
   }, [clampPanelWidth]);
 
-  // Resolve preview URL: get signed URL from backend, restart server on 503.
+  // Resolve preview URL: always pass command so the backend can start the
+  // server if the port is idle (common for history sessions where the
+  // original server process is long gone).  The backend skips the start
+  // when the port is already listening, so this is safe for live sessions.
   const resolvePreviewUrl = useCallback(async (wid: string, port: number, command?: string): Promise<string> => {
     try {
-      const result = await getPreviewUrl(wid, port, undefined);
+      const result = await getPreviewUrl(wid, port, command);
       return result.url;
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 503 && command) {
+        // Sandbox was stopped — retry (may trigger workspace start)
         const result = await getPreviewUrl(wid, port, command);
         return result.url;
       }
@@ -974,23 +995,32 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     }
   }, []);
 
-  // Resolve a preview URL and update previewData state with the result
+  // Resolve a preview URL and update the Map entry for this port.
+  // Only syncs to render state if this port is still active.
+  // If the entry has a `path` suffix (e.g. "/timeline.html"), it's appended to the signed URL.
   const resolveAndSetPreview = useCallback((wid: string, port: number, command?: string) => {
     resolvePreviewUrl(wid, port, command)
-      .then((url: string) => {
-        setPreviewData(prev => prev?.port === port
-          ? { ...prev, url, loading: false, error: undefined }
-          : prev);
+      .then((baseUrl: string) => {
+        const entry = previewMapRef.current.get(port);
+        if (!entry) return;
+        const url = appendPathSuffix(baseUrl, entry.path);
+        const updated = { ...entry, url, loading: false, error: undefined };
+        previewMapRef.current.set(port, updated);
+        if (activePreviewPortRef.current === port) setPreviewData(updated);
       })
       .catch(() => {
-        setPreviewData(prev => prev?.port === port
-          ? { ...prev, url: '', loading: false, error: true }
-          : prev);
+        const entry = previewMapRef.current.get(port);
+        if (!entry) return;
+        const updated = { ...entry, url: '', loading: false, error: true };
+        previewMapRef.current.set(port, updated);
+        if (activePreviewPortRef.current === port) setPreviewData(updated);
       });
   }, [resolvePreviewUrl]);
 
   // Open preview URL in right panel
   const handleOpenPreview = useCallback((data: PreviewData) => {
+    previewMapRef.current.set(data.port, data);
+    activePreviewPortRef.current = data.port;
     setPreviewData(data);
     setRightPanelType('preview');
     const containerW = containerRef.current?.offsetWidth || window.innerWidth;
@@ -1012,15 +1042,18 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
       const port = artifact.port as number;
       const title = artifact.title as string | undefined;
       const command = artifact.command as string | undefined;
-      // Show cached URL instantly, then verify in background (handles sandbox recreation + dead server)
-      if (previewData?.port === port && previewData.url) {
-        handleOpenPreview({ ...previewData, loading: false, error: undefined });
+      const path = artifact.path as string | undefined;
+      const token = ++reloadCounterRef.current;
+      // Check Map cache (not single state) — show cached URL instantly, then verify in background
+      const cached = previewMapRef.current.get(port);
+      if (cached?.url) {
+        handleOpenPreview({ ...cached, url: '', loading: true, error: undefined, reloadToken: token, path });
         resolveAndSetPreview(workspaceId, port, command);
         return;
       }
       // No cache — resolve (restarts server if needed via 503 fallback)
       // handleOpenPreview will trigger resolution since loading=true and url=''
-      handleOpenPreview({ url: '', port, title, command, loading: true });
+      handleOpenPreview({ url: '', port, title, command, path, loading: true, reloadToken: token });
       return;
     }
     setDetailToolCall(toolCallProcess);
@@ -1028,7 +1061,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     setRightPanelWidth(getDetailPanelWidth(toolCallProcess));
     setRightPanelType('detail');
     pushPanelHistory();
-  }, [getDetailPanelWidth, pushPanelHistory, workspaceId, handleOpenPreview, previewData, resolveAndSetPreview]);
+  }, [getDetailPanelWidth, pushPanelHistory, workspaceId, handleOpenPreview, resolveAndSetPreview]);
 
   // Open plan detail in right panel
   const handlePlanDetailClick = useCallback((planData: PlanData) => {
@@ -1047,8 +1080,9 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
     popPanelHistory();
   }, [popPanelHistory]);
 
-  // Close preview panel (keep previewData cached for instant reopen)
+  // Close preview panel (keep Map cache for instant reopen, but stop background state updates)
   const handleClosePreview = useCallback(() => {
+    activePreviewPortRef.current = null;
     setRightPanelType(null);
     popPanelHistory();
   }, [popPanelHistory]);
@@ -1056,13 +1090,25 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
   // Refresh preview: restart process + resolve fresh signed URL (force bypasses cache)
   const handleRefreshPreview = useCallback(async () => {
     if (!previewData || !workspaceId) return;
-    setPreviewData(prev => prev ? { ...prev, loading: true, error: undefined } : null);
+    // Capture values before async gap to avoid stale closure if user switches ports
+    const { port, command, path } = previewData;
+    const loadingEntry = { ...previewData, loading: true, error: undefined };
+    previewMapRef.current.set(port, loadingEntry);
+    setPreviewData(loadingEntry);
     try {
-      const result = await getPreviewUrl(workspaceId, previewData.port, previewData.command, true);
-      setPreviewData(prev => prev ? { ...prev, url: result.url, loading: false } : null);
+      const result = await getPreviewUrl(workspaceId, port, command, true);
+      const token = ++reloadCounterRef.current;
+      const url = appendPathSuffix(result.url, path);
+      const entry = previewMapRef.current.get(port);
+      const updated = { ...(entry ?? previewData), url, loading: false, reloadToken: token };
+      previewMapRef.current.set(port, updated);
+      if (activePreviewPortRef.current === port) setPreviewData(updated);
     } catch (e) {
       console.error('Failed to refresh preview:', e);
-      setPreviewData(prev => prev ? { ...prev, loading: false, error: true } : null);
+      const entry = previewMapRef.current.get(port);
+      const updated = { ...(entry ?? previewData), loading: false, error: true };
+      previewMapRef.current.set(port, updated);
+      if (activePreviewPortRef.current === port) setPreviewData(updated);
     }
   }, [previewData, workspaceId]);
 
@@ -1971,6 +2017,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
               error={previewData?.error}
               onClose={handleClosePreview}
               onRefresh={handleRefreshPreview}
+              reloadToken={previewData?.reloadToken}
             />
           </Suspense>
         </MobileBottomSheet>
@@ -2089,6 +2136,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
                       onClose={handleClosePreview}
                       onRefresh={handleRefreshPreview}
                       isDragging={isDragging}
+                      reloadToken={previewData.reloadToken}
                     />
                   ) : null}
                 </Suspense>
