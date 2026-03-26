@@ -289,7 +289,7 @@ class PTCAgent:
             plan_mode: If True, adds submit_plan tool for plan review workflow.
                 HITL middleware is always added for future interrupt features.
             thread_id: Optional thread ID for thread-scoped workspace directories.
-                First 8 chars used as thread directory name in .agent/threads/{id}/.
+                First 8 chars used as thread directory name in .agents/threads/{id}/.
             on_agent_md_write: Optional callback invoked when agent.md is written/edited.
                 Used to invalidate Session's agent.md cache.
             on_signed_url: Optional async callback(sandbox_id, port, url) to cache
@@ -521,9 +521,9 @@ class PTCAgent:
 
         # Build system prompt and eviction dir (short_thread_id computed earlier)
         eviction_dir = (
-            f".agent/threads/{short_thread_id}/large_tool_results"
+            f".agents/threads/{short_thread_id}/large_tool_results"
             if short_thread_id
-            else ".agent/large_tool_results"
+            else ".agents/large_tool_results"
         )
         system_prompt = self._build_system_prompt(
             tool_summary,

@@ -54,7 +54,7 @@ async def aoffload_to_backend(backend: Any, messages: list[AnyMessage]) -> str |
     """Persist evicted messages to sandbox before summarization (async).
 
     Each message is written to its own file keyed by message ID:
-    `.agent/threads/{tid}/evicted_{message_id}.md`
+    `.agents/threads/{tid}/evicted_{message_id}.md`
 
     Previous summary messages are filtered out to avoid summary-of-summary noise.
     Individual messages are truncated at 5000 chars for storage.
@@ -76,7 +76,7 @@ async def aoffload_to_backend(backend: Any, messages: list[AnyMessage]) -> str |
         return None
 
     thread_id = get_thread_id()
-    thread_dir = f".agent/threads/{thread_id}"
+    thread_dir = f".agents/threads/{thread_id}"
     written = 0
 
     for msg in filtered_messages:
@@ -133,7 +133,7 @@ async def aoffload_truncated_args(
     """Persist original tool call args to sandbox before truncation discards them.
 
     Each truncated tool call gets its own file at
-    `.agent/threads/{tid}/truncated_args_{toolcall_id}.md`.
+    `.agents/threads/{tid}/truncated_args_{toolcall_id}.md`.
 
     Non-fatal -- logs warnings on failure but never raises.
 
@@ -148,7 +148,7 @@ async def aoffload_truncated_args(
     thread_id = get_thread_id()
 
     for tool_call_id, original in originals.items():
-        path = f".agent/threads/{thread_id}/truncated_args_{tool_call_id}.md"
+        path = f".agents/threads/{thread_id}/truncated_args_{tool_call_id}.md"
         tool_name = original["name"]
         args = original["args"]
 
@@ -248,7 +248,7 @@ async def aoffload_base64_content(
 
     For each message containing base64 content blocks:
     1. Decode the base64 data
-    2. Upload to ``.agent/threads/{thread_id}/`` via ``backend.aupload_files``
+    2. Upload to ``.agents/threads/{thread_id}/`` via ``backend.aupload_files``
     3. Replace the block with a text reference to the saved file
 
     When ``backend`` is None (e.g. flash agent with no sandbox), falls back to
@@ -267,7 +267,7 @@ async def aoffload_base64_content(
         return strip_base64_from_messages(messages)
 
     thread_id = get_thread_id()
-    thread_dir = f".agent/threads/{thread_id}"
+    thread_dir = f".agents/threads/{thread_id}"
 
     result: list[AnyMessage] = []
     changed = False

@@ -65,7 +65,7 @@ class SkillsConfig(BaseModel):
     project_skills_dir: str = (
         "skills"  # Project skills directory (relative to project root)
     )
-    sandbox_skills_base: str = "/home/workspace/skills"  # Where skills live in sandbox
+    sandbox_skills_base: str = "/home/workspace/.agents/skills"  # Where skills live in sandbox
 
     def local_skill_dirs_with_sandbox(
         self, *, cwd: Path | None = None
@@ -352,7 +352,7 @@ class AgentConfig(BaseModel):
             project_skills_dir=kwargs.pop("project_skills_dir", "skills"),
             sandbox_skills_base=kwargs.pop(
                 "sandbox_skills_base",
-                f"{filesystem_config.working_directory}/skills",
+                f"{filesystem_config.working_directory}/.agents/skills",
             ),
         )
 

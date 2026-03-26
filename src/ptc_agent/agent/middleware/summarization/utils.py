@@ -373,7 +373,7 @@ def truncate_read_results(
     1. **Duplicate reads**: Same file read multiple times with identical
        (file_path, offset, limit) — earlier results are superseded.
     2. **Non-critical reads**: Reads of paths matching NON_CRITICAL_READ_PREFIXES
-       (e.g. .agent/threads/) — content already processed by the agent.
+       (e.g. .agents/threads/) — content already processed by the agent.
 
     Only messages before cutoff_index are eligible for truncation.
 

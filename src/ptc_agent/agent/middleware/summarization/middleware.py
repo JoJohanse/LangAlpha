@@ -786,7 +786,7 @@ class SummarizationMiddleware(AgentMiddleware):
         # Compute thread_dir so truncation markers can reference the offload path
         thread_dir = None
         if self._backend is not None:
-            thread_dir = f".agent/threads/{get_thread_id()}"
+            thread_dir = f".agents/threads/{get_thread_id()}"
 
         return truncate_message_args(
             messages,

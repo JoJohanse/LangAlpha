@@ -13,13 +13,30 @@ from __future__ import annotations
 # These are agent-infrastructure dirs at the sandbox root (/home/workspace/).
 # Update this set when adding new agent infrastructure directories.
 AGENT_SYSTEM_DIRS: frozenset[str] = frozenset({
-    "code",
+    ".system",
     "tools",
     "mcp_servers",
-    "skills",
-    ".agent",
+    ".agents",
     ".self-improve",
 })
+
+# ---------------------------------------------------------------------------
+# Backup exclusion — dirs NOT persisted to DB during file sync.
+# .agents is intentionally EXCLUDED here so .agents/skills/ gets backed up.
+# ---------------------------------------------------------------------------
+BACKUP_EXCLUDE_DIRS: frozenset[str] = frozenset({
+    ".system",
+    "tools",
+    "mcp_servers",
+    ".self-improve",
+})
+
+# Subdirs of .agents/ excluded from backup (ephemeral agent data).
+BACKUP_EXCLUDE_AGENT_SUBDIRS: tuple[str, ...] = (
+    ".agents/threads",
+    ".agents/user",
+    ".agents/large_tool_results",
+)
 
 # ---------------------------------------------------------------------------
 # Hidden path filters (always hidden from listings and completions)

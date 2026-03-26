@@ -426,7 +426,7 @@ async def _get_full_sandbox_stats(
         try:
             # Read SKILL.md frontmatter from each skill directory
             cmd = (
-                f"for d in {work_dir}/skills/*/; do "
+                f"for d in {work_dir}/.agents/skills/*/; do "
                 '  [ -f "$d/SKILL.md" ] && echo "=== $(basename "$d") ===" && head -5 "$d/SKILL.md"; '
                 "done 2>/dev/null || true"
             )

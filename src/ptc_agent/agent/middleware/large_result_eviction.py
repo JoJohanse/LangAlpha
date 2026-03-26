@@ -113,7 +113,7 @@ class LargeResultEvictionMiddleware(AgentMiddleware):
         *,
         backend: BackendProtocol,
         tool_token_limit_before_evict: int = 40000,
-        eviction_dir: str = ".agent/large_tool_results",
+        eviction_dir: str = ".agents/large_tool_results",
     ) -> None:
         """Initialize the large result eviction middleware.
 

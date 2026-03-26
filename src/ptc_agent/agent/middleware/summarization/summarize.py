@@ -105,7 +105,7 @@ async def summarize_messages(
         cutoff = max(0, len(effective) - truncate_keep)
         thread_dir = None
         if backend is not None:
-            thread_dir = f".agent/threads/{get_thread_id()}"
+            thread_dir = f".agents/threads/{get_thread_id()}"
 
         effective, truncated, originals = truncate_message_args(
             effective,
@@ -279,7 +279,7 @@ async def offload_tool_args(
 
     thread_dir = None
     if backend is not None:
-        thread_dir = f".agent/threads/{get_thread_id()}"
+        thread_dir = f".agents/threads/{get_thread_id()}"
 
     messages, truncated, originals = truncate_message_args(
         messages,

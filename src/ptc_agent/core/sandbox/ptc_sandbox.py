@@ -17,6 +17,7 @@ import structlog
 
 from ptc_agent.config.core import CoreConfig
 from ptc_agent.core.sandbox._defaults import DEFAULT_DEPENDENCIES, SNAPSHOT_PYTHON_VERSION
+from ptc_agent.core.sandbox.migration import CURRENT_LAYOUT_VERSION, run_layout_migrations
 from ptc_agent.core.sandbox.providers import create_provider
 from ptc_agent.core.sandbox.retry import RetryPolicy, async_retry_with_backoff
 from ptc_agent.core.sandbox.runtime import (
@@ -101,6 +102,17 @@ def _entry_is_dir(entry) -> bool:
     if isinstance(entry, dict):
         return bool(entry.get("is_dir", False))
     return bool(getattr(entry, "is_dir", False))
+
+
+def _get_sandbox_eligible_skills() -> tuple[set[str], set[str]]:
+    """Return (sandbox_skill_names, all_registry_names) for flash-only filtering.
+
+    Skills present in SKILL_REGISTRY but not in sandbox_skill_names are
+    flash-only and should be skipped during sandbox operations.
+    """
+    from ptc_agent.agent.middleware.skills import SKILL_REGISTRY, get_sandbox_skill_names
+
+    return get_sandbox_skill_names(), set(SKILL_REGISTRY.keys())
 
 
 class PTCSandbox:
@@ -727,9 +739,10 @@ class PTCSandbox:
             f"{work_dir}/tools/docs",
             f"{work_dir}/results",
             f"{work_dir}/data",
-            f"{work_dir}/code",
+            f"{work_dir}/.system/code",
             f"{work_dir}/work",
-            f"{work_dir}/.agent/threads",
+            f"{work_dir}/.agents/threads",
+            f"{work_dir}/.agents/skills",
             f"{work_dir}/_internal/src",
         ]
 
@@ -851,19 +864,14 @@ class PTCSandbox:
         actual file contents so the manifest is deterministic and portable.
         """
 
-        skills_base = f"{self._work_dir}/skills"
+        skills_base = f"{self._work_dir}/.agents/skills"
 
         def build() -> dict[str, Any]:
-            from ptc_agent.agent.middleware.skills import (
-                get_sandbox_skill_names,
-                SKILL_REGISTRY,
-            )
             from ptc_agent.agent.middleware.skills.discovery import (
                 parse_skill_metadata,
             )
 
-            sandbox_skill_names = get_sandbox_skill_names()
-            all_registry_names = set(SKILL_REGISTRY.keys())
+            sandbox_skill_names, all_registry_names = _get_sandbox_eligible_skills()
 
             files: dict[str, str] = {}  # rel_path → sha256
             skills_metadata: dict[str, dict[str, Any]] = {}
@@ -913,7 +921,32 @@ class PTCSandbox:
                     meta = parse_skill_metadata(content, sandbox_path, skill_name)
                     skills_metadata[skill_name] = dict(meta)
 
+                    # Build lock entry for platform skill
+                    from ptc_agent.agent.middleware.skills.lock import build_lock_entry
+
+                    content_hash = f"sha256:{_sha256_file(skill_dir / 'SKILL.md')}"
+                    lock_entry = build_lock_entry(
+                        meta,
+                        owner="platform",
+                        source="platform",
+                        source_type="platform",
+                        content_hash=content_hash,
+                    )
+                    skills_metadata[skill_name]["lock_entry"] = dict(lock_entry)
+
             version = _hash_dict(files)
+
+            # Include lock entries in version hash so manifest detects ownership changes
+            lock_hash_parts = []
+            for name in sorted(skills_metadata):
+                entry = skills_metadata[name].get("lock_entry")
+                if entry:
+                    lock_hash_parts.append(f"{name}:{json.dumps(entry, sort_keys=True)}")
+            if lock_hash_parts:
+                lock_payload = "\n".join(lock_hash_parts)
+                combined = f"{version}\n{lock_payload}"
+                version = hashlib.sha256(combined.encode()).hexdigest()
+
             return {"version": version, "files": files, "skills": skills_metadata}
 
         return await asyncio.to_thread(build)
@@ -996,7 +1029,11 @@ class PTCSandbox:
                 "workspace_id": workspace_id or "",
             }
 
-        return {"schema_version": 1, "modules": modules}
+        return {
+            "schema_version": 1,
+            "layout_version": CURRENT_LAYOUT_VERSION,
+            "modules": modules,
+        }
 
     # ── Unified manifest I/O ─────────────────────────────────────────
 
@@ -1043,6 +1080,7 @@ class PTCSandbox:
         legacy_paths = [
             f"{work_dir}/mcp_servers/.mcp_manifest.json",
             f"{work_dir}/skills/.skills_manifest.json",
+            f"{work_dir}/.agents/skills/.skills_manifest.json",
         ]
         assert self.runtime is not None
         try:
@@ -1193,6 +1231,12 @@ class PTCSandbox:
                 self._read_unified_manifest(),
             )
 
+            # 2b. Run layout migrations if needed (zero cost when current)
+            remote_layout = (remote_manifest or {}).get("layout_version", 1)
+            await run_layout_migrations(
+                self.runtime, self._work_dir, remote_layout
+            )
+
             # 3. Determine which modules changed (pure CPU)
             if force_refresh or remote_manifest is None or not reusing_sandbox:
                 changed_modules = set(local_manifest["modules"].keys())
@@ -1229,13 +1273,25 @@ class PTCSandbox:
                     [d for d, _ in skill_dirs]  # type: ignore[union-attr]
                 )
                 sandbox_base = skill_dirs[-1][1].rstrip("/")  # type: ignore[index]
-                await self._prune_remote_skills(sandbox_base, local_skill_names)
+
+                # Download existing lock file once (shared by prune + upload)
+                existing_lock = await self._download_skills_lock(sandbox_base)
+
+                await self._prune_remote_skills(
+                    sandbox_base, local_skill_names, existing_lock=existing_lock
+                )
                 skills_mod = local_manifest["modules"].get("skills", {})
                 if skills_mod.get("files"):
-                    await self._upload_skills(
+                    merged_lock = await self._upload_skills(
                         skill_dirs,
                         manifest=skills_mod,  # type: ignore[arg-type]
+                        existing_lock=existing_lock,
                     )
+                    # Build complete skills cache from merged lock data
+                    if merged_lock:
+                        self._build_complete_skills_cache(
+                            skills_mod, merged_lock, sandbox_base
+                        )
 
             # Group 1: independent uploads in parallel
             parallel_uploads: list[tuple[str, Any]] = []
@@ -1275,8 +1331,9 @@ class PTCSandbox:
                 except Exception as e:
                     logger.warning("Failed to refresh MCP servers", error=str(e))
 
-            # Cache skills metadata
-            if "skills" in local_manifest["modules"]:
+            # Cache skills metadata (only if not already set by _build_complete_skills_cache,
+            # which includes user-installed skills from the lock file)
+            if self._skills_manifest is None and "skills" in local_manifest["modules"]:
                 self._skills_manifest = local_manifest["modules"]["skills"]
 
             # Steps 5+6: independent — parallelize
@@ -1344,10 +1401,6 @@ class PTCSandbox:
         await asyncio.gather(*[remove_one(path) for path in paths])
         self._disabled_modules_pruned = True
         logger.debug("Pruned disabled tool modules", removed=len(paths))
-
-    SKILLS_MANIFEST_FILENAME = (
-        ".skills_manifest.json"  # Legacy; used by _prune_remote_skills
-    )
 
     @staticmethod
     def _classify_execution_error(
@@ -1430,13 +1483,7 @@ class PTCSandbox:
         self, local_skill_roots: list[str]
     ) -> set[str]:
         def build() -> set[str]:
-            from ptc_agent.agent.middleware.skills import (
-                get_sandbox_skill_names,
-                SKILL_REGISTRY,
-            )
-
-            sandbox_skill_names = get_sandbox_skill_names()
-            all_registry_names = set(SKILL_REGISTRY.keys())
+            sandbox_skill_names, all_registry_names = _get_sandbox_eligible_skills()
 
             names: set[str] = set()
             for root_str in local_skill_roots:
@@ -1460,9 +1507,220 @@ class PTCSandbox:
 
         return await asyncio.to_thread(build)
 
-    async def _prune_remote_skills(
-        self, sandbox_base: str, local_skill_names: set[str]
+    async def _download_skills_lock(
+        self, sandbox_skills_base: str
+    ) -> dict[str, Any] | None:
+        """Download and parse the existing skills-lock.json from sandbox.
+
+        Returns parsed skill entries dict, or None if missing/corrupt.
+        """
+        from ptc_agent.agent.middleware.skills.lock import LOCK_FILENAME, parse_skills_lock
+
+        lock_path = f"{sandbox_skills_base}/{LOCK_FILENAME}"
+        assert self.runtime is not None
+        try:
+            raw = await self._runtime_call(
+                self.runtime.download_file,
+                lock_path,
+                retry_policy=RetryPolicy.SAFE,
+            )
+            if raw:
+                text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                return parse_skills_lock(text)
+        except Exception:
+            logger.debug("No existing skills-lock.json (fresh sandbox or error)")
+        return None
+
+    def _build_complete_skills_cache(
+        self,
+        skills_mod: dict[str, Any],
+        merged_lock: dict[str, Any],
+        sandbox_skills_base: str,
     ) -> None:
+        """Merge user-installed skills from lock file into the skills manifest cache.
+
+        This ensures known_skills in agent.py includes both platform and
+        user-installed skills, eliminating per-message downloads.
+        """
+        from ptc_agent.agent.middleware.skills.lock import lock_entry_to_skill_metadata
+
+        all_skills = dict(skills_mod.get("skills", {}))
+
+        lock_skills = (
+            merged_lock.get("skills", {})
+            if isinstance(merged_lock, dict)
+            else merged_lock
+        )
+        for name, entry in lock_skills.items():
+            if entry.get("owner") == "user" and name not in all_skills:
+                skill_path = f"{sandbox_skills_base}/{name}/SKILL.md"
+                meta = lock_entry_to_skill_metadata(entry, skill_path)
+                all_skills[name] = dict(meta)
+
+        self._skills_manifest = {**skills_mod, "skills": all_skills}
+
+    async def sync_skills_lock(self) -> None:
+        """Reconcile skills-lock.json with the actual filesystem state.
+
+        Bidirectional sync in a single sandbox exec (1 API call):
+        - **Remove** lock entries whose skill directories no longer exist
+        - **Add** lock entries for skill directories not yet in the lock
+          (parses SKILL.md frontmatter to populate name/description/metadata)
+
+        Fast path: if no lock file exists and no skill directories exist,
+        exits immediately.  If lock is perfectly in sync, no write occurs.
+
+        Intended to be called post-completion alongside file backup.
+        Self-healing in discovery.py serves as a fallback if this fails.
+        """
+        if not self.runtime:
+            return
+        sb = f"{self._work_dir}/.agents/skills"
+        lock = f"{sb}/skills-lock.json"
+
+        # Single inline Python script that runs entirely in the sandbox.
+        # Reads dirs + lock file, diffs, parses SKILL.md for new entries,
+        # writes updated lock — all in one exec round trip.
+        script = textwrap.dedent(f"""\
+            python3 -c '
+import json, os, re, hashlib, sys
+from datetime import datetime, timezone
+
+SKILLS_BASE = {shlex.quote(sb)}
+LOCK_PATH = {shlex.quote(lock)}
+
+# 1. List skill dirs (only dirs containing SKILL.md)
+dirs = set()
+if os.path.isdir(SKILLS_BASE):
+    for name in os.listdir(SKILLS_BASE):
+        p = os.path.join(SKILLS_BASE, name)
+        if os.path.isdir(p) and os.path.isfile(os.path.join(p, "SKILL.md")):
+            dirs.add(name)
+
+# 2. Read existing lock
+lock = {{"version": 1, "skills": {{}}}}
+if os.path.isfile(LOCK_PATH):
+    try:
+        with open(LOCK_PATH) as f:
+            lock = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        pass
+skills = lock.get("skills", {{}})
+
+# 3. Compute diff
+locked_names = set(skills.keys())
+to_remove = locked_names - dirs
+to_add = dirs - locked_names
+
+if not to_remove and not to_add:
+    print(json.dumps({{"status": "noop", "removed": 0, "added": 0}}))
+    sys.exit(0)
+
+# 4. Remove stale entries
+for name in to_remove:
+    del skills[name]
+
+# 5. Add new entries by parsing SKILL.md frontmatter
+now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+for name in sorted(to_add):
+    skill_md = os.path.join(SKILLS_BASE, name, "SKILL.md")
+    desc = ""
+    confirmed = False
+    meta = {{}}
+    license_val = None
+    allowed_tools = []
+    try:
+        with open(skill_md) as f:
+            content = f.read(1048576)  # 1MB cap
+        m = re.match(r"^---\\s*\\n(.*?)\\n---\\s*\\n", content, re.DOTALL)
+        if m:
+            # Minimal YAML-like parser for simple key: value frontmatter
+            # Avoids PyYAML dependency in sandbox
+            for line in m.group(1).splitlines():
+                line = line.strip()
+                if ":" in line:
+                    k, _, v = line.partition(":")
+                    k, v = k.strip(), v.strip()
+                    if k == "description":
+                        desc = v.strip("\\"\\x27")
+                        confirmed = True
+                    elif k == "license":
+                        license_val = v.strip("\\"\\x27") or None
+            confirmed = confirmed and bool(name)
+        content_hash = "sha256:" + hashlib.sha256(content.encode()).hexdigest()
+    except OSError:
+        content_hash = ""
+
+    skills[name] = {{
+        "name": name,
+        "description": desc,
+        "owner": "user",
+        "source": "local",
+        "sourceType": "local",
+        "computedHash": content_hash,
+        "confirmed": confirmed,
+        "license": license_val,
+        "metadata": meta,
+        "allowed_tools": allowed_tools,
+        "installedAt": now,
+        "updatedAt": now,
+    }}
+
+# 6. Write updated lock atomically
+lock["skills"] = skills
+tmp = LOCK_PATH + ".tmp"
+try:
+    with open(tmp, "w") as f:
+        json.dump(lock, f, sort_keys=True, indent=2, ensure_ascii=False)
+        f.write("\\n")
+    os.replace(tmp, LOCK_PATH)
+    print(json.dumps({{"status": "ok", "removed": len(to_remove), "added": len(to_add)}}))
+except OSError as e:
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    print(json.dumps({{"status": "error", "error": str(e)}}))
+    sys.exit(1)
+'
+        """)
+
+        try:
+            result = await self._runtime_call(
+                self.runtime.exec,
+                script.strip(),
+                retry_policy=RetryPolicy.SAFE,
+            )
+            stdout = (getattr(result, "stdout", "") or "").strip()
+            if stdout:
+                try:
+                    info = json.loads(stdout)
+                    if info.get("status") == "ok":
+                        logger.info(
+                            "Skills lock synced",
+                            removed=info.get("removed", 0),
+                            added=info.get("added", 0),
+                            skills_base=sb,
+                        )
+                    elif info.get("status") == "noop":
+                        logger.debug("Skills lock already in sync")
+                except json.JSONDecodeError:
+                    pass
+        except Exception as e:
+            logger.debug("Skills lock sync failed (non-critical)", error=str(e))
+
+    async def _prune_remote_skills(
+        self,
+        sandbox_base: str,
+        local_skill_names: set[str],
+        *,
+        existing_lock: dict[str, Any] | None = None,
+    ) -> None:
+        """Prune stale platform skills from sandbox, protecting user-installed ones.
+
+        Safe default: if lock is unavailable or a skill has no lock entry,
+        it is preserved to prevent data loss on transient failures.
+        """
         assert self.runtime is not None
         sandbox = self.runtime
         entries = await self.als_directory(sandbox_base)
@@ -1474,13 +1732,25 @@ class PTCSandbox:
             name = entry.get("name")
             if not name:
                 continue
-            if name == self.SKILLS_MANIFEST_FILENAME:
-                if not local_skill_names:
-                    paths_to_remove.append(entry["path"])
+            if not entry.get("is_dir", False):
                 continue
-            if entry.get("is_dir", False):
-                if name not in local_skill_names:
-                    paths_to_remove.append(entry["path"])
+            if name in local_skill_names:
+                continue  # Current platform skill — will be re-uploaded
+
+            # Unknown skill — check lock for ownership
+            if existing_lock is None:
+                # Lock unavailable — safe default: preserve everything
+                continue
+            lock_entry = existing_lock.get(name)
+            if lock_entry is None:
+                # Not in lock — unknown origin, preserve (safe default)
+                continue
+            if lock_entry.get("owner") == "user":
+                # User-installed — never prune
+                logger.debug("Preserving user-installed skill", skill=name)
+                continue
+            # Platform skill no longer in local set — stale, prune it
+            paths_to_remove.append(entry["path"])
 
         if not paths_to_remove:
             return
@@ -1494,7 +1764,7 @@ class PTCSandbox:
 
         await asyncio.gather(*[remove_one(path) for path in paths_to_remove])
         logger.info(
-            "Pruned skills from sandbox",
+            "Pruned stale platform skills from sandbox",
             removed=len(paths_to_remove),
             sandbox_root=sandbox_base,
         )
@@ -1504,7 +1774,8 @@ class PTCSandbox:
         local_skills_dirs: list[tuple[str, str]],
         *,
         manifest: dict[str, Any] | None = None,
-    ) -> None:
+        existing_lock: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         """Upload skill files from local filesystem to sandbox.
 
         Uses a two-pass approach to fix override precedence:
@@ -1516,6 +1787,10 @@ class PTCSandbox:
             local_skills_dirs: List of (local_path, sandbox_path) tuples.
                 Example: [("~/.ptc-agent/skills", "{working_directory}/skills")]
             manifest: Pre-computed skills manifest. If None, computed from local_skills_dirs.
+            existing_lock: Previously downloaded lock entries, or None for fresh sandbox.
+
+        Returns:
+            Merged lock file dict if lock entries were written, else None.
         """
         assert self.runtime is not None
         sandbox = self.runtime
@@ -1529,13 +1804,7 @@ class PTCSandbox:
             return
 
         # Skills eligible for sandbox upload (exposure "ptc" or "both")
-        from ptc_agent.agent.middleware.skills import (
-            get_sandbox_skill_names,
-            SKILL_REGISTRY,
-        )
-
-        sandbox_skill_names = get_sandbox_skill_names()
-        all_registry_names = set(SKILL_REGISTRY.keys())
+        sandbox_skill_names, all_registry_names = _get_sandbox_eligible_skills()
 
         # ── Pass 1: Planning (local I/O only) ──
         # For each skill, collect files from the *last* source that provides it.
@@ -1651,6 +1920,48 @@ class PTCSandbox:
             skill_count=len(final_skills),
             file_count=len(manifest.get("files", {})),
         )
+
+        # --- Lock file merge + write ---
+        # Build platform lock entries from the manifest
+        platform_entries = {}
+        skills_metadata = manifest.get("skills", {})
+        for skill_name, skill_meta in skills_metadata.items():
+            lock_entry = skill_meta.get("lock_entry")
+            if lock_entry:
+                platform_entries[skill_name] = lock_entry
+
+        if platform_entries or existing_lock:
+            from ptc_agent.agent.middleware.skills.lock import (
+                LOCK_FILENAME,
+                merge_lock_files,
+                serialize_skills_lock,
+            )
+
+            merged = merge_lock_files(platform_entries, existing_lock)
+            lock_content = serialize_skills_lock(merged)
+
+            # Write lock file to sandbox
+            sandbox_base = local_skills_dirs[-1][1].rstrip("/")
+            lock_path = f"{sandbox_base}/{LOCK_FILENAME}"
+            await self._runtime_call(
+                sandbox.upload_file,
+                lock_content.encode("utf-8"),
+                lock_path,
+                retry_policy=RetryPolicy.SAFE,
+            )
+            logger.info(
+                "Skills lock file written",
+                path=lock_path,
+                platform_count=len(platform_entries),
+                user_count=sum(
+                    1
+                    for e in merged["skills"].values()
+                    if e.get("owner") == "user"
+                ),
+            )
+            return dict(merged)
+
+        return None
 
     async def _install_dependencies(self) -> None:
         """Install required Python packages in sandbox (no-snapshot fallback)."""
@@ -1970,17 +2281,17 @@ class PTCSandbox:
         try:
             # Write code to thread dir or fallback to code/
             if thread_id:
-                code_path = f".agent/threads/{thread_id}/code/{execution_id}.py"
+                code_path = f".agents/threads/{thread_id}/code/{execution_id}.py"
                 # Ensure per-thread code dir exists (lazy, once per thread)
                 if thread_id not in self._thread_dirs_created:
                     await self._runtime_call(
                         self.runtime.exec,
-                        f"mkdir -p {self.normalize_path(f'.agent/threads/{thread_id}/code')}",
+                        f"mkdir -p {self.normalize_path(f'.agents/threads/{thread_id}/code')}",
                         retry_policy=RetryPolicy.SAFE,
                     )
                     self._thread_dirs_created.add(thread_id)
             else:
-                code_path = f"code/{execution_id}.py"
+                code_path = f".system/code/{execution_id}.py"
             try:
                 await self._runtime_call(
                     self.runtime.upload_file,
@@ -2620,16 +2931,16 @@ class PTCSandbox:
             """)
 
             if thread_id:
-                script_relative_path = f".agent/threads/{thread_id}/code/{bash_id}.sh"
+                script_relative_path = f".agents/threads/{thread_id}/code/{bash_id}.sh"
                 if thread_id not in self._thread_dirs_created:
                     await self._runtime_call(
                         self.runtime.exec,
-                        f"mkdir -p {self.normalize_path(f'.agent/threads/{thread_id}/code')}",
+                        f"mkdir -p {self.normalize_path(f'.agents/threads/{thread_id}/code')}",
                         retry_policy=RetryPolicy.SAFE,
                     )
                     self._thread_dirs_created.add(thread_id)
             else:
-                script_relative_path = f"code/{bash_id}.sh"
+                script_relative_path = f".system/code/{bash_id}.sh"
 
             try:
                 assert self.runtime is not None

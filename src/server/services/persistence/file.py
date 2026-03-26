@@ -17,7 +17,7 @@ import shlex
 from datetime import datetime, timezone
 from typing import Any
 
-from ptc_agent.core.paths import AGENT_SYSTEM_DIRS, ALWAYS_HIDDEN_DIR_NAMES, HIDDEN_DIR_NAMES
+from ptc_agent.core.paths import BACKUP_EXCLUDE_AGENT_SUBDIRS, BACKUP_EXCLUDE_DIRS, ALWAYS_HIDDEN_DIR_NAMES, HIDDEN_DIR_NAMES
 from src.server.database.workspace_file import (
     bulk_update_file_mtimes,
     bulk_upsert_files,
@@ -105,7 +105,7 @@ class FilePersistenceService:
 
     # Directories excluded from sync (relative to /home/workspace/).
     # All patterns match at any depth via find's -not -path '*/{d}/*'.
-    EXCLUDE_DIRS = AGENT_SYSTEM_DIRS | HIDDEN_DIR_NAMES | ALWAYS_HIDDEN_DIR_NAMES
+    EXCLUDE_DIRS = BACKUP_EXCLUDE_DIRS | HIDDEN_DIR_NAMES | ALWAYS_HIDDEN_DIR_NAMES
 
     # File extensions to exclude
     EXCLUDE_EXTENSIONS = {".pyc", ".pyo", ".so", ".dylib", ".o"}
@@ -128,6 +128,8 @@ class FilePersistenceService:
         exclude_flags = []
         for d in cls.EXCLUDE_DIRS:
             exclude_flags.append(f"-not -path '*/{d}/*'")
+        for subdir in BACKUP_EXCLUDE_AGENT_SUBDIRS:
+            exclude_flags.append(f"-not -path '*/{subdir}/*'")
         for ext in cls.EXCLUDE_EXTENSIONS:
             exclude_flags.append(f"-not -name '*{ext}'")
         for name in cls.EXCLUDE_BASENAMES:
