@@ -685,8 +685,8 @@ export function handleHtmlWidget({ assistantMessageId, artifactType, artifactId,
         html: html || '',
         title: title || '',
       };
-      if ((payload as Record<string, unknown>).data) {
-        widgetEntry.data = (payload as Record<string, unknown>).data as Record<string, string>;
+      if (payload.data) {
+        widgetEntry.data = payload.data;
       }
       htmlWidgetProcesses[segmentId] = widgetEntry;
 
