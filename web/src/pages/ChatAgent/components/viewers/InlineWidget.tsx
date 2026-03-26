@@ -163,6 +163,10 @@ export default function InlineWidget({ html, onSendPrompt, data }: InlineWidgetP
     return () => observer.disconnect();
   }, []);
 
+  // No max-height cap — widgets span naturally to fit content (charts, tables,
+  // dashboards). The agent controls HTML output and the skill doc guides it to
+  // keep widgets reasonable. A cap would add scroll-in-scroll UX that's worse
+  // than a tall widget pushing chat down.
   return (
     <div className="inline-widget-container">
       <iframe
