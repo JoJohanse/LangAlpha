@@ -538,11 +538,18 @@ async def _resolve_preview(
         cmd = await get_preview_command(workspace_id, port)
 
     if cmd:
+        # Short-lived cache (60s) when a command is stored — covers burst
+        # asset requests (CSS/JS/images) without risking long-lived stale URLs.
+        if not force:
+            cached_url = await _get_cached_signed_url(sandbox.sandbox_id, port)
+            if cached_url and await _check_signed_url_healthy(cached_url):
+                return cached_url
+
         preview_info = await sandbox.start_and_get_preview_url(
             cmd, port, expires_in=expires_in,
         )
         await _set_cached_signed_url(
-            sandbox.sandbox_id, port, preview_info.url, expires_in=expires_in,
+            sandbox.sandbox_id, port, preview_info.url, expires_in=60,
         )
         return preview_info.url
 
