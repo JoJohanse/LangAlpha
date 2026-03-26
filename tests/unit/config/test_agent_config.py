@@ -292,7 +292,7 @@ class TestSkillsConfig:
         project_dir, project_sandbox = dirs[1]
         assert "ptc-agent/skills" in user_dir
         assert "/test/project/skills" in project_dir
-        assert user_sandbox == "/home/workspace/skills"
+        assert user_sandbox == "/home/workspace/.agents/skills"
 
 
 # ---------------------------------------------------------------------------

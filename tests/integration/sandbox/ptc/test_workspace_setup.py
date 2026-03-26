@@ -23,9 +23,10 @@ class TestWorkspaceSetup:
             "tools/docs",
             "results",
             "data",
-            "code",
+            ".system/code",
             "work",
-            ".agent/threads",
+            ".agents/threads",
+            ".agents/skills",
             "_internal/src",
         ]
         for d in expected_dirs:

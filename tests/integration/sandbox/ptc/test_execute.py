@@ -25,11 +25,11 @@ class TestExecute:
         assert result.success is False
 
     async def test_execute_creates_code_file(self, shared_sandbox):
-        """execute() should save the code to code/ directory."""
+        """execute() should save the code to .system/code/ directory."""
         result = await shared_sandbox.execute("print('saved')")
         assert result.success is True
         # Check code dir has files
-        ls_result = await shared_sandbox.runtime.exec(f"ls {shared_sandbox._work_dir}/code/")
+        ls_result = await shared_sandbox.runtime.exec(f"ls {shared_sandbox._work_dir}/.system/code/")
         assert ls_result.exit_code == 0
 
     async def test_execute_with_thread_id(self, shared_sandbox):
@@ -39,7 +39,7 @@ class TestExecute:
         assert result.success is True
         # Check thread dir was created
         ls_result = await shared_sandbox.runtime.exec(
-            f"test -d {shared_sandbox._work_dir}/.agent/threads/test-thread-123/code && echo OK"
+            f"test -d {shared_sandbox._work_dir}/.agents/threads/test-thread-123/code && echo OK"
         )
         assert "OK" in ls_result.stdout
 
