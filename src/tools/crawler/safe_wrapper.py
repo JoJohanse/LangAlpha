@@ -149,6 +149,9 @@ class CrawlerCircuitBreaker:
         return self.state == CircuitState.OPEN
 
 
+_VALID_BACKENDS = frozenset({"scrapling", "router"})
+
+
 class SafeCrawlerWrapper:
     """
     Safe wrapper for web crawling with comprehensive fault tolerance.
@@ -198,7 +201,6 @@ class SafeCrawlerWrapper:
         )
         self._lock = asyncio.Lock()
         self._crawler = None  # Lazy-initialized
-        _VALID_BACKENDS = frozenset({"scrapling", "router"})
         if backend not in _VALID_BACKENDS:
             raise ValueError(f"Unknown crawler backend: {backend!r}. Must be one of {_VALID_BACKENDS}")
         self._backend = backend
