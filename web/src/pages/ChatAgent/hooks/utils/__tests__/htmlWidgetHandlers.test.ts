@@ -251,6 +251,27 @@ describe('handleHtmlWidget (streaming)', () => {
     expect(segments).toHaveLength(1);
     expect(segments[0]).toMatchObject({ type: 'html_widget' });
   });
+
+  it('passes data field through to htmlWidgetProcesses when present in payload', () => {
+    const refs = makeStreamRefs();
+    const initial = [makeAssistantMessage(assistantMessageId)];
+
+    const messages = applySetMessages(initial, (setMessages) => {
+      handleHtmlWidget({
+        assistantMessageId,
+        artifactType: 'html_widget',
+        artifactId,
+        payload: { html: '<p>chart</p>', title: 'Chart', data: { 'prices.json': '{"AAPL": 150}' } },
+        refs,
+        setMessages,
+      });
+    });
+
+    const msg = messages[0];
+    const segmentId = `widget-${artifactId}`;
+    const processes = msg.htmlWidgetProcesses as Record<string, { html: string; title: string; data?: Record<string, string> }>;
+    expect(processes[segmentId].data).toEqual({ 'prices.json': '{"AAPL": 150}' });
+  });
 });
 
 // ---- handleHistoryHtmlWidget (history) --------------------------------------
@@ -437,5 +458,26 @@ describe('handleHistoryHtmlWidget (history)', () => {
     const segments = target.contentSegments as Record<string, unknown>[];
     expect(segments).toHaveLength(1);
     expect(segments[0]).toMatchObject({ type: 'html_widget' });
+  });
+
+  it('passes data field through to htmlWidgetProcesses when present in payload', () => {
+    const pairState = makePairState();
+    const initial = [makeAssistantMessage(assistantMessageId)];
+
+    const messages = applySetMessages(initial, (setMessages) => {
+      handleHistoryHtmlWidget({
+        assistantMessageId,
+        artifactType: 'html_widget',
+        artifactId,
+        payload: { html: '<p>chart</p>', title: 'Chart', data: { 'data.csv': 'a,b\n1,2' } },
+        pairState,
+        setMessages,
+      });
+    });
+
+    const msg = messages[0];
+    const segmentId = `widget-${artifactId}`;
+    const processes = msg.htmlWidgetProcesses as Record<string, { html: string; title: string; data?: Record<string, string> }>;
+    expect(processes[segmentId].data).toEqual({ 'data.csv': 'a,b\n1,2' });
   });
 });

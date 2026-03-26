@@ -225,3 +225,170 @@ class TestShowWidgetTool:
         assert result.artifact["title"] == ""
         # Content should contain the widget_id fallback since no title
         assert "widget_" in result.content
+
+
+# ---------------------------------------------------------------------------
+# _is_text_file
+# ---------------------------------------------------------------------------
+
+from src.ptc_agent.agent.tools.show_widget import _is_text_file
+
+
+class TestIsTextFile:
+    def test_json_is_text(self):
+        assert _is_text_file("data.json") is True
+
+    def test_csv_is_text(self):
+        assert _is_text_file("report.csv") is True
+
+    def test_png_is_not_text(self):
+        assert _is_text_file("image.png") is False
+
+    def test_jpg_is_not_text(self):
+        assert _is_text_file("photo.jpg") is False
+
+    def test_uppercase_extension_is_text(self):
+        assert _is_text_file("DATA.JSON") is True
+
+    def test_no_extension_is_not_text(self):
+        assert _is_text_file("README") is False
+
+
+# ---------------------------------------------------------------------------
+# _resolve_data_files
+# ---------------------------------------------------------------------------
+
+from unittest.mock import AsyncMock
+
+from src.ptc_agent.agent.tools.show_widget import _resolve_data_files
+
+
+class TestResolveDataFiles:
+    @pytest.mark.asyncio
+    async def test_text_file_reads_via_aread_file_text(self):
+        sandbox = AsyncMock()
+        sandbox.aread_file_text.return_value = '{"key": "value"}'
+
+        result = await _resolve_data_files(sandbox, ["/work/data.json"])
+
+        sandbox.aread_file_text.assert_awaited_once_with("/work/data.json")
+        assert result == {"data.json": '{"key": "value"}'}
+
+    @pytest.mark.asyncio
+    async def test_binary_file_reads_via_adownload_file_bytes(self):
+        sandbox = AsyncMock()
+        raw_bytes = b"\x89PNG\r\n\x1a\n"
+        sandbox.adownload_file_bytes.return_value = raw_bytes
+
+        result = await _resolve_data_files(sandbox, ["/work/chart.png"])
+
+        sandbox.adownload_file_bytes.assert_awaited_once_with("/work/chart.png")
+        assert "chart.png" in result
+        value = result["chart.png"]
+        assert value.startswith("data:image/png;base64,")
+
+    @pytest.mark.asyncio
+    async def test_empty_filename_is_skipped(self):
+        sandbox = AsyncMock()
+
+        result = await _resolve_data_files(sandbox, ["/"])
+
+        assert result == {}
+        sandbox.aread_file_text.assert_not_awaited()
+        sandbox.adownload_file_bytes.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_file_not_found_returns_none_skipped(self):
+        sandbox = AsyncMock()
+        sandbox.aread_file_text.return_value = None
+
+        result = await _resolve_data_files(sandbox, ["/work/missing.json"])
+
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_read_exception_is_skipped_and_logs_warning(self):
+        sandbox = AsyncMock()
+        sandbox.aread_file_text.side_effect = OSError("disk error")
+
+        with patch.object(_mod.logger, "warning") as mock_warn:
+            result = await _resolve_data_files(sandbox, ["/work/bad.csv"])
+
+        assert result == {}
+        mock_warn.assert_called_once()
+        assert "failed to read" in mock_warn.call_args[0][0].lower()
+
+    @pytest.mark.asyncio
+    async def test_size_cap_exceeded_skips_file(self):
+        sandbox = AsyncMock()
+        sandbox.aread_file_text.return_value = "x" * 100
+
+        with patch.object(_mod, "_INLINE_DATA_CAP", 50):
+            result = await _resolve_data_files(sandbox, ["/work/big.json"])
+
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_multiple_files_returns_all(self):
+        sandbox = AsyncMock()
+        sandbox.aread_file_text.return_value = "text content"
+        raw_bytes = b"\xff\xd8\xff\xe0"
+        sandbox.adownload_file_bytes.return_value = raw_bytes
+
+        result = await _resolve_data_files(
+            sandbox, ["/work/notes.txt", "/work/thumb.jpg"]
+        )
+
+        assert "notes.txt" in result
+        assert "thumb.jpg" in result
+        assert result["notes.txt"] == "text content"
+        assert result["thumb.jpg"].startswith("data:")
+
+
+# ---------------------------------------------------------------------------
+# ShowWidget tool with data_files
+# ---------------------------------------------------------------------------
+
+
+class TestShowWidgetWithDataFiles:
+    @pytest.mark.asyncio
+    async def test_data_files_with_sandbox_resolves_data_in_stream(self):
+        mock_sandbox = AsyncMock()
+        mock_sandbox.aread_file_text.return_value = '["a","b"]'
+
+        tool = create_show_widget_tool(sandbox=mock_sandbox)
+        mock_writer = MagicMock()
+
+        with patch("langgraph.config.get_stream_writer", return_value=mock_writer):
+            result = await tool.ainvoke(
+                _tool_call({
+                    "html": "<div>chart</div>",
+                    "title": "Chart",
+                    "data_files": ["/work/data.json"],
+                })
+            )
+
+        assert result.artifact["type"] == "html_widget"
+        mock_writer.assert_called_once()
+        stream_payload = mock_writer.call_args[0][0]["payload"]
+        assert "data" in stream_payload
+        assert "data.json" in stream_payload["data"]
+
+    @pytest.mark.asyncio
+    async def test_data_files_without_sandbox_no_resolution(self):
+        tool = create_show_widget_tool(sandbox=None)
+        mock_writer = MagicMock()
+
+        with patch("langgraph.config.get_stream_writer", return_value=mock_writer):
+            result = await tool.ainvoke(
+                _tool_call({
+                    "html": "<div>chart</div>",
+                    "title": "Chart",
+                    "data_files": ["/work/data.json"],
+                })
+            )
+
+        assert result.artifact["type"] == "html_widget"
+        mock_writer.assert_called_once()
+        stream_payload = mock_writer.call_args[0][0]["payload"]
+        assert "data" not in stream_payload
