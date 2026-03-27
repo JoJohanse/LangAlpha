@@ -84,6 +84,11 @@ def get_crawler_queue_slot_timeout(default: int = 10) -> int:
     return int(_get_tool_config('crawler.queue.slot_timeout', default))
 
 
+def get_crawler_backend(default: str = "scrapling") -> str:
+    """Get the crawler backend to use (default: 'scrapling')."""
+    return str(_get_tool_config('crawler.backend', default))
+
+
 # =============================================================================
 # Sitemap Configuration
 # =============================================================================

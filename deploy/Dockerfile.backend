@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1
 
-# Install minimal system dependencies (Playwright will install its own browser + deps)
+# Install minimal system dependencies (patchright will install its own browser + deps)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     fonts-liberation \
@@ -22,8 +22,11 @@ COPY libs/ptc-cli/ libs/ptc-cli/
 # Install dependencies (frozen = use lockfile exactly)
 RUN uv sync --frozen --no-dev
 
-# Install Playwright's managed Chromium + required OS libraries
-RUN uv run playwright install --with-deps chromium
+# Install browsers for Scrapling crawling
+# patchright: Chromium for DynamicFetcher (Tier 2)
+# scrapling install: Camoufox for StealthyFetcher (Tier 3)
+RUN uv run patchright install --with-deps chromium \
+    && uv run scrapling install
 
 # Copy application source
 COPY src/ src/

@@ -857,7 +857,7 @@ interface MessageContentSegmentsProps {
 const MIN_LIVE_EXPOSURE_MS = 5000; // minimum time an item stays in the live zone
 const MAX_IN_PROGRESS_MS = 15000; // max time a tool call can stay in-progress in live view before archiving
 /** Tools that should stay in the live zone for their entire duration (no MAX_IN_PROGRESS_MS cap) */
-const ALWAYS_LIVE_TOOLS = new Set(['TaskOutput']);
+const ALWAYS_LIVE_TOOLS = new Set(['TaskOutput', 'WebFetch']);
 /** Tool calls that are never rendered as visible activity items — they have dedicated UI or are internal */
 const HIDDEN_TOOL_CALL_NAMES = new Set(['TodoWrite', 'task', 'Task', 'SubmitPlan', 'AskUserQuestion', 'create_workspace', 'start_question', 'ShowWidget']);
 

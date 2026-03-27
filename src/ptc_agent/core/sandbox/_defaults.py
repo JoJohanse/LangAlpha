@@ -39,6 +39,10 @@ DEFAULT_DEPENDENCIES = [
     "pdfplumber",
     "reportlab",
     "markitdown[pptx]",
+    # Web scraping
+    "scrapling[all]",
+    "html2text",
+    "youtube-transcript-api",
     # Browser automation
     "playwright",
     # Utilities

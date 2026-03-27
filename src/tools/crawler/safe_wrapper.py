@@ -1,5 +1,5 @@
 """
-Safe wrapper for Crawl4AI operations with isolation and fault tolerance.
+Safe wrapper for crawler operations with isolation and fault tolerance.
 
 Provides defense-in-depth protection:
 - Circuit breaker for fault tolerance (fail fast after repeated failures)
@@ -7,6 +7,9 @@ Provides defense-in-depth protection:
 - Resource limiting (queue size, concurrency)
 - Auto browser reset on circuit open
 - Graceful degradation (never crash, always return structured errors)
+
+Backend-agnostic: pluggable via CrawlerBackend protocol,
+selectable via `crawler.backend` in agent_config.yaml.
 """
 
 import asyncio
@@ -146,9 +149,12 @@ class CrawlerCircuitBreaker:
         return self.state == CircuitState.OPEN
 
 
+_VALID_BACKENDS = frozenset({"scrapling", "router"})
+
+
 class SafeCrawlerWrapper:
     """
-    Safe wrapper for Crawl4AI with comprehensive fault tolerance.
+    Safe wrapper for web crawling with comprehensive fault tolerance.
 
     Features:
     - Circuit breaker: Fail fast after repeated failures
@@ -156,6 +162,7 @@ class SafeCrawlerWrapper:
     - Resource limiting: Queue size and concurrency limits
     - Auto recovery: Browser reset when circuit opens
     - Graceful degradation: Never raises, always returns CrawlResult
+    - Backend-agnostic: pluggable via CrawlerBackend protocol
     """
 
     def __init__(
@@ -167,6 +174,7 @@ class SafeCrawlerWrapper:
         circuit_failure_threshold: int = 5,
         circuit_recovery_timeout: float = 60.0,
         circuit_success_threshold: int = 2,
+        backend: str = "scrapling",
     ):
         """
         Initialize safe crawler wrapper.
@@ -179,6 +187,7 @@ class SafeCrawlerWrapper:
             circuit_failure_threshold: Failures before opening circuit
             circuit_recovery_timeout: Seconds before testing recovery
             circuit_success_threshold: Successes to close circuit
+            backend: Crawler backend (default: "scrapling")
         """
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._queue_count = 0
@@ -192,23 +201,26 @@ class SafeCrawlerWrapper:
         )
         self._lock = asyncio.Lock()
         self._crawler = None  # Lazy-initialized
+        if backend not in _VALID_BACKENDS:
+            raise ValueError(f"Unknown crawler backend: {backend!r}. Must be one of {_VALID_BACKENDS}")
+        self._backend = backend
 
     async def _get_crawler(self):
-        """Lazy-initialize crawler."""
+        """Lazy-initialize crawler based on configured backend."""
         if self._crawler is None:
-            from .crawl4ai_crawler import Crawl4AICrawler
-            self._crawler = Crawl4AICrawler()
+            if self._backend == "scrapling":
+                from .scrapling_crawler import ScraplingCrawler
+                self._crawler = ScraplingCrawler()
+            elif self._backend == "router":
+                from .router import ContentRouter
+                self._crawler = ContentRouter()
+            else:
+                raise ValueError(f"Unknown crawler backend: {self._backend}")
         return self._crawler
 
     async def _trigger_browser_reset(self) -> None:
-        """Reset browser when circuit opens to recover from corrupted state."""
-        try:
-            from .crawl4ai_client import Crawl4AIBrowserManager
-            manager = await Crawl4AIBrowserManager.get_instance()
-            await manager._reset_browser()
-            logger.info("Browser reset completed after circuit open")
-        except Exception as e:
-            logger.error(f"Browser reset failed: {e}")
+        """Reset browser state when circuit opens. Scrapling manages its own lifecycle."""
+        logger.debug(f"Circuit open — backend '{self._backend}' has no persistent browser state to reset")
 
     async def crawl(
         self,
@@ -266,15 +278,28 @@ class SafeCrawlerWrapper:
             try:
                 # Execute crawl with timeout
                 crawler = await self._get_crawler()
-                markdown = await asyncio.wait_for(
-                    crawler.crawl(url),
+                output = await asyncio.wait_for(
+                    crawler.crawl_with_metadata(url),
                     timeout=timeout,
                 )
+
+                # Treat empty/near-empty content as a failed crawl —
+                # prevents blocked/errored pages from counting as circuit successes
+                if not output.markdown or len(output.markdown.strip()) < 10:
+                    await self._circuit.record_failure(self._trigger_browser_reset)
+                    return CrawlResult(
+                        success=False,
+                        markdown=output.markdown,
+                        title=output.title,
+                        error="Page returned empty content",
+                        error_type="empty_content",
+                    )
 
                 await self._circuit.record_success()
                 return CrawlResult(
                     success=True,
-                    markdown=markdown,
+                    markdown=output.markdown,
+                    title=output.title,
                 )
 
             except asyncio.TimeoutError:
@@ -348,6 +373,35 @@ _safe_wrapper: Optional[SafeCrawlerWrapper] = None
 _wrapper_lock = asyncio.Lock()
 
 
+def _build_configured_wrapper() -> SafeCrawlerWrapper:
+    """Build a SafeCrawlerWrapper from agent_config settings."""
+    try:
+        from src.config.tool_settings import (
+            get_crawler_max_concurrent,
+            get_crawler_page_timeout,
+            get_crawler_queue_max_size,
+            get_crawler_queue_slot_timeout,
+            get_crawler_circuit_failure_threshold,
+            get_crawler_circuit_recovery_timeout,
+            get_crawler_circuit_success_threshold,
+            get_crawler_backend,
+        )
+
+        return SafeCrawlerWrapper(
+            max_concurrent=get_crawler_max_concurrent(),
+            default_timeout=get_crawler_page_timeout() / 1000,
+            max_queue_size=get_crawler_queue_max_size(),
+            slot_timeout=get_crawler_queue_slot_timeout(),
+            circuit_failure_threshold=get_crawler_circuit_failure_threshold(),
+            circuit_recovery_timeout=get_crawler_circuit_recovery_timeout(),
+            circuit_success_threshold=get_crawler_circuit_success_threshold(),
+            backend=get_crawler_backend(),
+        )
+    except Exception as e:
+        logger.warning(f"Failed to load crawler config, using defaults: {e}")
+        return SafeCrawlerWrapper()
+
+
 async def get_safe_crawler() -> SafeCrawlerWrapper:
     """
     Get or create safe crawler wrapper singleton.
@@ -364,31 +418,7 @@ async def get_safe_crawler() -> SafeCrawlerWrapper:
         if _safe_wrapper is not None:
             return _safe_wrapper
 
-        # Load config via helper functions
-        try:
-            from src.config.tool_settings import (
-                get_crawler_max_concurrent,
-                get_crawler_page_timeout,
-                get_crawler_queue_max_size,
-                get_crawler_queue_slot_timeout,
-                get_crawler_circuit_failure_threshold,
-                get_crawler_circuit_recovery_timeout,
-                get_crawler_circuit_success_threshold,
-            )
-
-            _safe_wrapper = SafeCrawlerWrapper(
-                max_concurrent=get_crawler_max_concurrent(),
-                default_timeout=get_crawler_page_timeout() / 1000,
-                max_queue_size=get_crawler_queue_max_size(),
-                slot_timeout=get_crawler_queue_slot_timeout(),
-                circuit_failure_threshold=get_crawler_circuit_failure_threshold(),
-                circuit_recovery_timeout=get_crawler_circuit_recovery_timeout(),
-                circuit_success_threshold=get_crawler_circuit_success_threshold(),
-            )
-        except Exception as e:
-            logger.warning(f"Failed to load crawler config, using defaults: {e}")
-            _safe_wrapper = SafeCrawlerWrapper()
-
+        _safe_wrapper = _build_configured_wrapper()
         return _safe_wrapper
 
 
@@ -401,29 +431,6 @@ def get_safe_crawler_sync() -> SafeCrawlerWrapper:
     global _safe_wrapper
 
     if _safe_wrapper is None:
-        # Load config via helper functions
-        try:
-            from src.config.tool_settings import (
-                get_crawler_max_concurrent,
-                get_crawler_page_timeout,
-                get_crawler_queue_max_size,
-                get_crawler_queue_slot_timeout,
-                get_crawler_circuit_failure_threshold,
-                get_crawler_circuit_recovery_timeout,
-                get_crawler_circuit_success_threshold,
-            )
-
-            _safe_wrapper = SafeCrawlerWrapper(
-                max_concurrent=get_crawler_max_concurrent(),
-                default_timeout=get_crawler_page_timeout() / 1000,
-                max_queue_size=get_crawler_queue_max_size(),
-                slot_timeout=get_crawler_queue_slot_timeout(),
-                circuit_failure_threshold=get_crawler_circuit_failure_threshold(),
-                circuit_recovery_timeout=get_crawler_circuit_recovery_timeout(),
-                circuit_success_threshold=get_crawler_circuit_success_threshold(),
-            )
-        except Exception as e:
-            logger.warning(f"Failed to load crawler config, using defaults: {e}")
-            _safe_wrapper = SafeCrawlerWrapper()
+        _safe_wrapper = _build_configured_wrapper()
 
     return _safe_wrapper

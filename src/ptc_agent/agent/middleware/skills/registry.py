@@ -268,6 +268,14 @@ SKILL_REGISTRY: dict[str, SkillDefinition] = {
         exposure="ptc",
         command="initiating-coverage",
     ),
+    "web-scraping": SkillDefinition(
+        name="web-scraping",
+        description="Web scraping with Scrapling: fast HTTP, browser rendering, anti-bot bypass, CSS/XPath selectors, multi-page spiders",
+        tools=[],
+        skill_md_path="skills/web-scraping/SKILL.md",
+        exposure="ptc",
+        command="web-scraping",
+    ),
 }
 
 

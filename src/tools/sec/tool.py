@@ -3,7 +3,7 @@ LangChain tool for SEC filing extraction.
 
 Provides a unified interface to fetch and parse SEC filings (10-K, 10-Q).
 Uses edgartools for direct SEC EDGAR access with structured section extraction.
-Falls back to crawl4ai + regex if edgartools fails.
+Falls back to regex-based extraction if edgartools fails.
 """
 
 import asyncio

@@ -1,8 +1,8 @@
 """
-SEC filing parser using Crawl4AI and regex extraction.
+SEC filing parser using regex extraction.
 
-This parser uses Crawl4AI to convert HTML to markdown, then extracts
-sections using regex patterns. Works as a fallback when sec-parsers fails.
+Converts HTML to markdown using html2text, then extracts sections using
+regex patterns. Works as a fallback when edgartools parser fails.
 """
 
 import re
@@ -58,16 +58,16 @@ FORM_10Q_PATTERNS: Dict[str, Tuple[str, str]] = {
 }
 
 
-class Crawl4AIParser(BaseSECParser):
+class RegexParser(BaseSECParser):
     """
-    Parser using Crawl4AI for HTML-to-markdown conversion and regex extraction.
+    Parser using html2text for HTML-to-markdown conversion and regex extraction.
 
     This parser is a reliable fallback that works for both 10-K and 10-Q filings.
     """
 
     @property
     def name(self) -> str:
-        return "crawl4ai-regex"
+        return "regex"
 
     def supports_filing_type(self, filing_type: FilingType) -> bool:
         """Supports both 10-K and 10-Q."""
@@ -226,13 +226,13 @@ class Crawl4AIParser(BaseSECParser):
             )
 
         logger.debug(
-            f"crawl4ai-regex extracted {len(result)} sections from {filing_type.value}"
+            f"regex extracted {len(result)} sections from {filing_type.value}"
         )
         return result
 
     def _html_to_markdown(self, html: str) -> str:
         """
-        Convert HTML to markdown using Crawl4AI or simple text extraction.
+        Convert HTML to markdown using html2text.
 
         Args:
             html: Raw HTML content
@@ -241,21 +241,15 @@ class Crawl4AIParser(BaseSECParser):
             Markdown/text content
         """
         try:
-            # Try using Crawl4AI's HTML-to-markdown converter
-            from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
+            import html2text
 
-            generator = DefaultMarkdownGenerator()
-            result = generator.generate_markdown(
-                html=html,
-                base_url="",
-            )
-            if result and hasattr(result, "raw_markdown"):
-                return result.raw_markdown
-            elif isinstance(result, str):
-                return result
-
+            converter = html2text.HTML2Text()
+            converter.ignore_links = False
+            converter.ignore_images = False
+            converter.body_width = 0
+            return converter.handle(html)
         except Exception as e:
-            logger.debug(f"Crawl4AI markdown generation failed: {e}")
+            logger.debug(f"html2text conversion failed: {e}")
 
         # Fallback: Simple HTML text extraction
         return self._simple_html_to_text(html)

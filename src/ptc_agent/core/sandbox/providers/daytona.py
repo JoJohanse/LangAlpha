@@ -500,7 +500,16 @@ class DaytonaProvider(SandboxProvider):
                 "apt-get clean",
                 "rm -rf /var/lib/apt/lists/*",
             )
-            .pip_install(*dependencies)
+            .run_commands(
+                # yfinance pins curl_cffi<0.14 but scrapling[all] requires >=0.14.
+                # Override resolves the conflict (tested, yfinance works with 0.14+).
+                "echo 'curl_cffi>=0.14' > /tmp/overrides.txt",
+                "uv pip install --system --override /tmp/overrides.txt "
+                + " ".join(dependencies),
+                "rm /tmp/overrides.txt",
+                # Scrapling browser setup (Camoufox for StealthyFetcher)
+                "scrapling install || true",
+            )
             .run_commands(
                 'python -c "'
                 "import matplotlib as mpl; "

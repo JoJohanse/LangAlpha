@@ -1967,7 +1967,13 @@ except OSError as e:
         """Install required Python packages in sandbox (no-snapshot fallback)."""
         logger.info("Installing dependencies (no snapshot)")
 
-        install_cmd = f"uv pip install -q {' '.join(DEFAULT_DEPENDENCIES)}"
+        # yfinance pins curl_cffi<0.14 but scrapling[all] requires >=0.14.
+        # Override resolves the conflict (tested, yfinance works with 0.14+).
+        install_cmd = (
+            "echo 'curl_cffi>=0.14' > /tmp/_overrides.txt && "
+            f"uv pip install -q --override /tmp/_overrides.txt {' '.join(DEFAULT_DEPENDENCIES)} && "
+            "rm -f /tmp/_overrides.txt"
+        )
 
         try:
             assert self.runtime is not None
@@ -1987,6 +1993,23 @@ except OSError as e:
         except OSError as e:
             logger.error(f"Failed to install dependencies: {e}")
             raise
+
+        # Install Scrapling browsers (Camoufox for StealthyFetcher)
+        try:
+            result = await self._runtime_call(
+                self.runtime.exec,
+                "scrapling install",
+                retry_policy=RetryPolicy.SAFE,
+            )
+            if result.exit_code != 0:
+                logger.warning(
+                    "Scrapling browser install failed",
+                    output=result.stdout[:300] if result.stdout else "",
+                )
+            else:
+                logger.info("Scrapling browsers installed")
+        except Exception as e:
+            logger.warning(f"Scrapling browser install skipped: {e}")
 
     async def _install_tool_modules(self) -> None:
         """Generate and install tool modules from MCP servers."""

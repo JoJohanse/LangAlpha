@@ -4,7 +4,7 @@ Sitemap fetching and summarization for web_fetch.
 Discovers sitemap URLs via robots.txt and well-known paths, parses sitemap XML,
 and produces a grouped summary for LLM context injection.
 
-Uses httpx + stdlib xml.etree.ElementTree (no crawl4ai dependency).
+Uses httpx + stdlib xml.etree.ElementTree.
 """
 
 import logging

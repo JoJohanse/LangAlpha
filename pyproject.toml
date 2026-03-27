@@ -22,7 +22,11 @@ dependencies = [
     "langgraph-checkpoint-postgres>=2.0.0",
     # Other dependencies
     "python-dotenv>=1.0.1",
-    "crawl4ai>=0.4.0",
+    "scrapling[fetchers]>=0.4.2",
+    "html2text>=2024.2.26",
+    "pdfplumber>=0.10.0",
+    "pypdf>=4.0.0",
+    "youtube-transcript-api>=1.0.0",
     "playwright",
     "fastapi>=0.110.0",
     "uvicorn>=0.27.1",
@@ -85,6 +89,10 @@ packages = ["src/ptc_agent"]
 
 [tool.uv]
 required-version = ">=0.6.15"
+
+# yfinance caps curl_cffi<0.14 but works fine with 0.14+ (tested).
+# scrapling[fetchers] requires curl_cffi>=0.14. Override to resolve the conflict.
+override-dependencies = ["curl_cffi>=0.14"]
 
 [tool.ruff.lint]
 ignore = ["E741"]  # allow short names like l, O, I (common in OHLCV code)

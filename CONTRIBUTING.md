@@ -33,7 +33,7 @@ cd web && pnpm install && cd ..
 
 # Optional: install browser dependencies for web crawling
 source .venv/bin/activate
-crawl4ai-setup
+scrapling install
 ```
 
 ### 2. Configure environment

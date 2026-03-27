@@ -6,7 +6,7 @@ Provides parser implementations for extracting sections from SEC filings.
 
 from .base import BaseSECParser, ParserError, ParsingFailedError, SectionNotFoundError
 from .edgartools_parser import EdgarToolsParser
-from .crawl4ai_parser import Crawl4AIParser
+from .regex_parser import RegexParser
 
 __all__ = [
     # Base classes
@@ -16,5 +16,5 @@ __all__ = [
     "SectionNotFoundError",
     # Implementations
     "EdgarToolsParser",  # Primary parser (direct SEC access)
-    "Crawl4AIParser",  # Fallback: regex-based extraction
+    "RegexParser",  # Fallback: regex-based extraction
 ]
