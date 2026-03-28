@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import * as HoverCard from '@radix-ui/react-hover-card';
 import { useCitationMetadata } from './CitationMetadataContext';
 import './CitationBubble.css';
@@ -53,29 +53,18 @@ function CitationBubble({ node: _node, label, href, ...props }: MarkdownComponen
   const displayName = meta?.source || domain.replace(/\.[^.]+$/, '') || domain;
   const url = href || '';
 
-  const handlePillClick = useCallback(() => {
-    if (url && /^https?:\/\//.test(url)) window.open(url, '_blank', 'noopener,noreferrer');
-  }, [url]);
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      handlePillClick();
-    }
-  }, [handlePillClick]);
-
   // Note: Radix HoverCard is mouse-only by design. Keyboard/screen-reader users
   // can still click through via Enter/Space but won't see the preview card.
   // Switch to Popover if keyboard preview becomes a requirement.
   return (
     <HoverCard.Root openDelay={300} closeDelay={100}>
       <HoverCard.Trigger asChild>
-        <span
-          role="link"
-          tabIndex={0}
+        <a
+          href={url || undefined}
+          target="_blank"
+          rel="noopener noreferrer"
           aria-label={`Source: ${displayName}`}
-          onClick={handlePillClick}
-          onKeyDown={handleKeyDown}
+          onClick={(e) => { if (!url || !/^https?:\/\//.test(url)) e.preventDefault(); }}
           className="cite-bubble-pill"
           style={{
             display: 'inline-flex',
@@ -87,6 +76,7 @@ function CitationBubble({ node: _node, label, href, ...props }: MarkdownComponen
             fontSize: '0.8125rem',
             fontWeight: 400,
             color: 'var(--color-text-secondary)',
+            textDecoration: 'none',
             lineHeight: 1.4,
             verticalAlign: 'baseline',
             cursor: 'pointer',
@@ -101,7 +91,7 @@ function CitationBubble({ node: _node, label, href, ...props }: MarkdownComponen
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {displayName}
           </span>
-        </span>
+        </a>
       </HoverCard.Trigger>
 
       <HoverCard.Portal>
