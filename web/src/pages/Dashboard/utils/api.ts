@@ -602,6 +602,11 @@ export async function getInsightDetail(marketInsightId: string): Promise<Record<
   return data;
 }
 
+export async function generatePersonalizedInsight(): Promise<Record<string, unknown>> {
+  const { data } = await api.post('/api/v1/insights/generate');
+  return data;
+}
+
 // --- InfoFlow (content feed — kept for PopularCard) ---
 
 /**

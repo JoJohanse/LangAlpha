@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Sparkles, ArrowRight, Newspaper, Clock, ChevronDown } from 'lucide-react';
+import { Sparkles, ArrowRight, Newspaper, Clock, ChevronDown, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import TopicBadge from './TopicBadge';
-import { getTodayInsights } from '../utils/api';
+import { getTodayInsights, getInsightDetail, generatePersonalizedInsight } from '../utils/api';
 import { useIsMobile } from '@/hooks/useIsMobile';
 
 interface InsightTopic {
@@ -36,6 +36,7 @@ const TYPE_CONFIG: Record<string, TypeConfigEntry> = {
   pre_market: { label: 'Pre-Market', accent: 'var(--color-profit)' },
   market_update: { label: 'Market Update', accent: 'var(--color-accent-primary)' },
   post_market: { label: 'Post-Market', accent: '#a78bfa' },
+  personalized: { label: 'Personalized', accent: '#f59e0b' },
 };
 
 function formatRelativeTime(timestamp: string | undefined): string {
@@ -126,6 +127,13 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
   const [insights, setInsights] = useState<Insight[]>(insightsCache || []);
   const [loading, setLoading] = useState(!insightsCache);
   const [expanded, setExpanded] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     if (insightsCache) return;
@@ -150,6 +158,69 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
     if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('a')) return;
     if (older.length > 0) setExpanded((v) => !v);
   }, [older.length]);
+
+  const handleGeneratePersonalized = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (generating) return;
+    setGenerating(true);
+    setGenerateError(null);
+    try {
+      const row = await generatePersonalizedInsight() as unknown as Insight;
+      if (!row?.market_insight_id) return;
+      const insightId = row.market_insight_id;
+
+      // Poll until completed or failed
+      const poll = async () => {
+        const maxAttempts = 120; // 10 min at 5s intervals
+        for (let i = 0; i < maxAttempts; i++) {
+          if (!mountedRef.current) return;
+          await new Promise((r) => setTimeout(r, 5000));
+          if (!mountedRef.current) return;
+          try {
+            const detail = await getInsightDetail(insightId) as unknown as Insight & { status?: string };
+            if (detail.status === 'completed') {
+              // Prepend to insights list (functional update to avoid stale closure)
+              setInsights(prev => {
+                const updated = [detail, ...prev.filter((ins) => ins.market_insight_id !== insightId)];
+                return updated;
+              });
+              // Update module cache outside the updater (side-effect-free updater)
+              insightsCache = null; // invalidate — next mount will refetch
+              onReadFull?.(insightId);
+              return;
+            }
+            if (detail.status === 'failed') {
+              if (mountedRef.current) {
+                setGenerateError('Brief generation failed. Please try again.');
+              }
+              return;
+            }
+          } catch {
+            // 404 means row not visible yet, keep polling
+          }
+        }
+        // Poll exhausted without completion
+        if (mountedRef.current) {
+          setGenerateError('Generation timed out. Please try again later.');
+        }
+      };
+      await poll();
+    } catch (err: unknown) {
+      console.error('[Insights] Failed to start personalized brief:', err);
+      const status = (err as Record<string, unknown>)?.response
+        ? ((err as Record<string, unknown>).response as Record<string, unknown>)?.status
+        : undefined;
+      if (status === 409) {
+        setGenerateError('Brief is already being generated. Try again in a moment.');
+      } else if (status === 429) {
+        setGenerateError('Credit limit reached. Upgrade to generate more briefs.');
+      } else {
+        setGenerateError('Failed to generate brief. Please try again.');
+      }
+    } finally {
+      setGenerating(false);
+    }
+  }, [generating, onReadFull]);
 
   // Loading skeleton
   if (loading) {
@@ -200,7 +271,8 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
 
   const updatedAgo = formatRelativeTime(latest.completed_at);
   const topics = latest.topics || [];
-  const _latestType = TYPE_CONFIG[latest.type] || TYPE_CONFIG.market_update;
+  const latestType = TYPE_CONFIG[latest.type] || TYPE_CONFIG.market_update;
+  const isPersonalized = latest.type === 'personalized';
 
   return (
     <div className="relative">
@@ -265,8 +337,19 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
                 }}
               >
                 <Sparkles size={12} />
-                AI Generated Insight
+                {isPersonalized ? 'Personalized Brief' : 'AI Generated Insight'}
               </div>
+              {isPersonalized && (
+                <span
+                  className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
+                  style={{
+                    color: latestType.accent,
+                    backgroundColor: `color-mix(in srgb, ${latestType.accent} 15%, transparent)`,
+                  }}
+                >
+                  Based on your watchlist & portfolio
+                </span>
+              )}
               {updatedAgo && (
                 <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                   Updated {updatedAgo}
@@ -295,20 +378,39 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
 
             {/* Mobile: full-width CTA + stack indicator */}
             <div className="flex flex-col gap-2 mt-4 sm:hidden">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onReadFull?.(latest.market_insight_id);
-                }}
-                className="group/btn flex items-center justify-center gap-1.5 w-full py-2.5 rounded-lg text-sm font-semibold transition-colors"
-                style={{
-                  backgroundColor: 'var(--color-btn-primary-bg, var(--color-accent-primary))',
-                  color: 'var(--color-btn-primary-text, #fff)',
-                }}
-              >
-                Read Full Brief
-                <ArrowRight size={14} className="group-hover/btn:translate-x-1 transition-transform" />
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReadFull?.(latest.market_insight_id);
+                  }}
+                  className="group/btn flex items-center justify-center gap-1.5 flex-1 py-2.5 rounded-lg text-sm font-semibold transition-colors"
+                  style={{
+                    backgroundColor: 'var(--color-btn-primary-bg, var(--color-accent-primary))',
+                    color: 'var(--color-btn-primary-text, #fff)',
+                  }}
+                >
+                  Read Full Brief
+                  <ArrowRight size={14} className="group-hover/btn:translate-x-1 transition-transform" />
+                </button>
+                <button
+                  onClick={handleGeneratePersonalized}
+                  disabled={generating}
+                  title="Generate a personalized market brief based on your watchlist and portfolio holdings"
+                  className="group/btn flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors border"
+                  style={{
+                    borderColor: 'var(--color-border-default)',
+                    color: 'var(--color-text-secondary)',
+                    opacity: generating ? 0.6 : 1,
+                  }}
+                >
+                  {generating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                  {generating ? 'Generating...' : 'Generate Personalized Brief'}
+                </button>
+              </div>
+              {generateError && (
+                <p className="text-xs mt-1" style={{ color: 'var(--color-loss, #ef4444)' }}>{generateError}</p>
+              )}
               {older.length > 0 && (
                 <button
                   onClick={(e) => {
@@ -332,22 +434,43 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
 
           {/* Desktop CTA + stack indicator */}
           <div className="hidden sm:flex w-auto flex-col items-end justify-end gap-3 self-stretch">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onReadFull?.(latest.market_insight_id);
-              }}
-              className="group/btn flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-colors shadow-lg"
-              style={{
-                backgroundColor: 'var(--color-btn-primary-bg, var(--color-accent-primary))',
-                color: 'var(--color-btn-primary-text, #fff)',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.9')}
-              onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
-            >
-              Read Full Brief
-              <ArrowRight size={16} className="group-hover/btn:translate-x-1 transition-transform" />
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleGeneratePersonalized}
+                disabled={generating}
+                title="Generate a personalized market brief based on your watchlist and portfolio holdings"
+                className="group/btn flex items-center gap-2 px-5 py-3 rounded-xl font-semibold transition-colors border"
+                style={{
+                  borderColor: 'var(--color-border-default)',
+                  color: 'var(--color-text-secondary)',
+                  opacity: generating ? 0.6 : 1,
+                }}
+                onMouseEnter={(e) => { if (!generating) e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+              >
+                {generating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                {generating ? 'Generating...' : 'Generate Personalized Brief'}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onReadFull?.(latest.market_insight_id);
+                }}
+                className="group/btn flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-colors shadow-lg"
+                style={{
+                  backgroundColor: 'var(--color-btn-primary-bg, var(--color-accent-primary))',
+                  color: 'var(--color-btn-primary-text, #fff)',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.9')}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
+              >
+                Read Full Brief
+                <ArrowRight size={16} className="group-hover/btn:translate-x-1 transition-transform" />
+              </button>
+            </div>
+            {generateError && (
+              <p className="text-xs text-right" style={{ color: 'var(--color-loss, #ef4444)' }}>{generateError}</p>
+            )}
 
             {/* Stack indicator */}
             {older.length > 0 && (

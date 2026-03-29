@@ -166,6 +166,7 @@ class FlashAgent:
         llm: Any | None = None,
         user_profile: dict | None = None,
         store: Any | None = None,
+        response_format: Any | None = None,
     ) -> Any:
         """Create a Flash agent with minimal middleware stack.
 
@@ -175,6 +176,8 @@ class FlashAgent:
             checkpointer: Optional LangGraph checkpointer for state persistence
             llm: Optional LLM override
             user_profile: Optional user profile dict with name, timezone, locale
+            response_format: Optional structured output schema (Pydantic model or dict).
+                When set, the agent is forced to return structured data matching this schema.
 
         Returns:
             Configured LangGraph agent
@@ -291,13 +294,19 @@ class FlashAgent:
         )
 
         # Create agent
-        agent = create_agent(
-            model,
+        create_kwargs: dict[str, Any] = dict(
             system_prompt=system_prompt,
             tools=tools,
             middleware=middleware,
             checkpointer=checkpointer,
             store=store,
+        )
+        if response_format is not None:
+            create_kwargs["response_format"] = response_format
+
+        agent = create_agent(
+            model,
+            **create_kwargs,
         ).with_config({"recursion_limit": 100})
 
         return agent

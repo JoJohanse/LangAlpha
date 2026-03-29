@@ -163,11 +163,8 @@ function InsightBody({
             }}
           >
             {detail.content!.map((item, i) => {
-              const source = item.url ? detail.sources?.find(
-                (s) => item.url!.startsWith(s.url) || s.url.startsWith(item.url!)
-              ) : undefined;
-              const favicon = source?.favicon;
               const domain = item.url ? (() => { try { return new URL(item.url).hostname.replace('www.', ''); } catch { return ''; } })() : '';
+              const favicon = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=32` : undefined;
 
               return (
                 <div

@@ -14,6 +14,7 @@ def build_flash_graph(
     checkpointer: Any | None = None,
     user_profile: dict | None = None,
     store: Any | None = None,
+    response_format: Any | None = None,
 ) -> Any:
     """Build flash agent graph without sandbox.
 
@@ -24,6 +25,8 @@ def build_flash_graph(
         config: AgentConfig with LLM and flash settings
         checkpointer: Optional LangGraph checkpointer for state persistence
         user_profile: Optional user profile dict with name, timezone, locale
+        response_format: Optional structured output schema (Pydantic model or dict).
+            When set, the agent is forced to return structured data matching this schema.
 
     Returns:
         Compiled LangGraph agent
@@ -35,4 +38,5 @@ def build_flash_graph(
         checkpointer=checkpointer,
         user_profile=user_profile,
         store=store,
+        response_format=response_format,
     )

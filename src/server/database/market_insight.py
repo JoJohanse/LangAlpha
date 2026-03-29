@@ -39,12 +39,41 @@ async def create_market_insight(
                 INSERT INTO market_insights
                     (market_insight_id, user_id, type, status, model, metadata, created_at)
                 VALUES (%s, %s, %s, 'generating', %s, %s, %s)
-                RETURNING market_insight_id, created_at
+                RETURNING market_insight_id, user_id, type, status, model, metadata, created_at
                 """,
                 (insight_id, user_id, type, model, Json(metadata), now),
             )
             row = await cur.fetchone()
             return dict(row)
+
+
+async def create_market_insight_if_not_generating(
+    model: str,
+    type: str = "daily_brief",
+    user_id: Optional[str] = None,
+    metadata: Optional[dict] = None,
+) -> Optional[dict]:
+    """Atomically insert a generating insight, respecting the partial unique index.
+
+    Returns the new row, or None if a generating row already exists for this user
+    (ON CONFLICT from idx_market_insights_user_generating).
+    """
+    insight_id = str(uuid4())
+    now = datetime.now(timezone.utc)
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                INSERT INTO market_insights
+                    (market_insight_id, user_id, type, status, model, metadata, created_at)
+                VALUES (%s, %s, %s, 'generating', %s, %s, %s)
+                ON CONFLICT DO NOTHING
+                RETURNING market_insight_id, user_id, type, status, model, metadata, created_at
+                """,
+                (insight_id, user_id, type, model, Json(metadata), now),
+            )
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
 
 async def complete_market_insight(
@@ -55,8 +84,12 @@ async def complete_market_insight(
     topics: list,
     sources: list,
     generation_time_ms: int,
-) -> None:
-    """Mark an insight as completed with generated content."""
+) -> bool:
+    """Mark an insight as completed with generated content.
+
+    Only transitions from 'generating' → 'completed' (atomic).
+    Returns True if the row was updated, False if it was already completed/failed.
+    """
     now = datetime.now(timezone.utc)
     async with get_db_connection() as conn:
         async with conn.cursor() as cur:
@@ -72,6 +105,7 @@ async def complete_market_insight(
                     generation_time_ms = %s,
                     completed_at = %s
                 WHERE market_insight_id = %s
+                  AND status = 'generating'
                 """,
                 (
                     headline,
@@ -84,10 +118,11 @@ async def complete_market_insight(
                     market_insight_id,
                 ),
             )
+            return cur.rowcount > 0
 
 
 async def fail_market_insight(market_insight_id: str, error_message: str) -> None:
-    """Mark an insight as failed."""
+    """Mark an insight as failed. Only transitions from 'generating'."""
     async with get_db_connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -95,6 +130,7 @@ async def fail_market_insight(market_insight_id: str, error_message: str) -> Non
                 UPDATE market_insights
                 SET status = 'failed', error_message = %s
                 WHERE market_insight_id = %s
+                  AND status = 'generating'
                 """,
                 (error_message, market_insight_id),
             )
@@ -122,9 +158,9 @@ async def get_todays_market_insights(
     """Get all completed insights for today (America/New_York).
 
     Returns card columns only, ordered newest first.
-    If no insights exist for today, falls back to the most recent insight
-    from yesterday so there is never a gap between post-market close and
-    the next day's first insight.
+    When user_id is provided, returns UNION ALL of system insights (user_id IS NULL)
+    and user's personal insights, each hitting its own partial index.
+    System insights fall back to yesterday if none today; user insights do not.
     """
     et = ZoneInfo("America/New_York")
     today = datetime.now(et).date()
@@ -135,63 +171,105 @@ async def get_todays_market_insights(
         today + timedelta(days=1), datetime.min.time(), tzinfo=et
     ).astimezone(timezone.utc)
 
-    user_cond = "user_id IS NULL" if user_id is None else "user_id = %s"
-
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
-            conditions = [
-                "status = 'completed'",
-                "created_at >= %s",
-                "created_at < %s",
-                user_cond,
-            ]
-            params: list = [day_start, day_end]
-            if user_id is not None:
-                params.append(user_id)
-
-            where = " AND ".join(conditions)
+            # Query 1: system insights (always)
             await cur.execute(
                 f"""
                 SELECT {CARD_COLUMNS}
                 FROM market_insights
-                WHERE {where}
+                WHERE status = 'completed'
+                  AND created_at >= %s AND created_at < %s
+                  AND user_id IS NULL
                 ORDER BY created_at DESC
                 """,
-                params,
+                (day_start, day_end),
             )
-            rows = await cur.fetchall()
+            system_rows = [dict(r) for r in await cur.fetchall()]
 
-            if rows:
-                return [dict(r) for r in rows]
+            # System fallback: yesterday's most recent if none today
+            if not system_rows:
+                yesterday_start = datetime.combine(
+                    today - timedelta(days=1), datetime.min.time(), tzinfo=et
+                ).astimezone(timezone.utc)
+                await cur.execute(
+                    f"""
+                    SELECT {CARD_COLUMNS}
+                    FROM market_insights
+                    WHERE status = 'completed'
+                      AND created_at >= %s AND created_at < %s
+                      AND user_id IS NULL
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (yesterday_start, day_start),
+                )
+                fallback = await cur.fetchone()
+                if fallback:
+                    system_rows = [dict(fallback)]
 
-            # No insights today yet — fall back to yesterday's most recent
-            yesterday_start = datetime.combine(
-                today - timedelta(days=1), datetime.min.time(), tzinfo=et
-            ).astimezone(timezone.utc)
-
-            fallback_conditions = [
-                "status = 'completed'",
-                "created_at >= %s",
-                "created_at < %s",
-                user_cond,
-            ]
-            fallback_params: list = [yesterday_start, day_start]
+            # Query 2: user insights (only if user_id provided)
+            user_rows: list[dict] = []
             if user_id is not None:
-                fallback_params.append(user_id)
+                await cur.execute(
+                    f"""
+                    SELECT {CARD_COLUMNS}
+                    FROM market_insights
+                    WHERE status = 'completed'
+                      AND created_at >= %s AND created_at < %s
+                      AND user_id = %s
+                    ORDER BY created_at DESC
+                    """,
+                    (day_start, day_end, user_id),
+                )
+                user_rows = [dict(r) for r in await cur.fetchall()]
 
-            fallback_where = " AND ".join(fallback_conditions)
+            # Merge and sort by created_at DESC
+            merged = system_rows + user_rows
+            merged.sort(key=lambda r: r["created_at"], reverse=True)
+            return merged
+
+
+async def get_user_generating_insight(user_id: str) -> Optional[dict]:
+    """Get an in-progress insight for the user (idempotency check)."""
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 f"""
-                SELECT {CARD_COLUMNS}
+                SELECT {ALL_COLUMNS}
                 FROM market_insights
-                WHERE {fallback_where}
+                WHERE user_id = %s AND status = 'generating'
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
-                fallback_params,
+                (user_id,),
             )
-            fallback_row = await cur.fetchone()
-            return [dict(fallback_row)] if fallback_row else []
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def get_user_recent_completed_insight(
+    user_id: str, within_minutes: int = 5
+) -> Optional[dict]:
+    """Get a recently completed personalized insight for dedup."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=within_minutes)
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                f"""
+                SELECT {ALL_COLUMNS}
+                FROM market_insights
+                WHERE user_id = %s
+                  AND status = 'completed'
+                  AND type = 'personalized'
+                  AND completed_at >= %s
+                ORDER BY completed_at DESC
+                LIMIT 1
+                """,
+                (user_id, cutoff),
+            )
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
 
 async def get_latest_completed_at(
