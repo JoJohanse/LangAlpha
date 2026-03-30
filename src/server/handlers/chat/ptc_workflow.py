@@ -38,10 +38,14 @@ from src.server.utils.directive_context import (
     build_directive_reminder,
     parse_directive_contexts,
 )
+from src.llms.llm import get_input_modalities
 from src.server.utils.multimodal_context import (
     build_attachment_metadata,
+    build_unsupported_reminder,
+    filter_multimodal_by_capability,
     inject_multimodal_context,
     parse_multimodal_contexts,
+    upload_unsupported_to_sandbox,
 )
 from src.utils.tracking import ExecutionTracker
 from src.server.dependencies.usage_limits import release_burst_slot
@@ -298,12 +302,41 @@ async def astream_ptc_workflow(
             loaded_skill_names = []
 
         # Multimodal Context Injection (images and PDFs)
+        # Filter by model capability: supported items are injected as native
+        # content blocks; unsupported items are uploaded to the sandbox so the
+        # agent can process them via code execution.
         multimodal_contexts = parse_multimodal_contexts(request.additional_context)
         if multimodal_contexts and not request.hitl_response:
-            messages = inject_multimodal_context(messages, multimodal_contexts)
-            logger.info(
-                f"[PTC_CHAT] Multimodal context injected: {len(multimodal_contexts)} attachment(s)"
+            modalities = get_input_modalities(effective_model) if effective_model else ["text"]
+            supported, unsupported = filter_multimodal_by_capability(
+                multimodal_contexts, modalities
             )
+            if supported:
+                messages = inject_multimodal_context(messages, supported)
+                logger.info(
+                    f"[PTC_CHAT] Multimodal context injected: {len(supported)} supported attachment(s)"
+                )
+            if unsupported and session and session.sandbox:
+                notes = await upload_unsupported_to_sandbox(
+                    unsupported, session.sandbox
+                )
+                _append_to_last_user_message(
+                    messages, build_unsupported_reminder(notes)
+                )
+                logger.info(
+                    f"[PTC_CHAT] Uploaded {len(unsupported)} unsupported attachment(s) to sandbox"
+                )
+            elif unsupported:
+                types = list(set(
+                    "PDF" if (c.data if hasattr(c, "data") else "").startswith("data:application/pdf") else "file"
+                    for c in unsupported
+                ))
+                _append_to_last_user_message(
+                    messages,
+                    build_unsupported_reminder(
+                        [f"The user attached {', '.join(types)} file(s)."]
+                    ),
+                )
 
         # Build input state or resume command
         if request.hitl_response:

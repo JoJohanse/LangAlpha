@@ -30,8 +30,11 @@ from src.server.utils.directive_context import (
     build_directive_reminder,
     parse_directive_contexts,
 )
+from src.llms.llm import get_input_modalities
 from src.server.utils.multimodal_context import (
     build_attachment_metadata,
+    build_unsupported_reminder,
+    filter_multimodal_by_capability,
     inject_multimodal_context,
     parse_multimodal_contexts,
 )
@@ -232,13 +235,36 @@ async def astream_flash_workflow(
 
         # Multimodal Context Injection (images and PDFs) -- Flash-specific
         # ordering: inject multimodal before skills.
+        # Filter by model capability: supported items are injected as native
+        # content blocks; unsupported items get a text note (Flash has no
+        # sandbox for file upload).
         multimodal_contexts = parse_multimodal_contexts(request.additional_context)
         if multimodal_contexts:
-            messages = inject_multimodal_context(messages, multimodal_contexts)
-            logger.info(
-                f"[FLASH_CHAT] Multimodal context injected: "
-                f"{len(multimodal_contexts)} attachment(s)"
+            modalities = get_input_modalities(effective_model) if effective_model else ["text"]
+            supported, unsupported = filter_multimodal_by_capability(
+                multimodal_contexts, modalities
             )
+            if supported:
+                messages = inject_multimodal_context(messages, supported)
+                logger.info(
+                    f"[FLASH_CHAT] Multimodal context injected: "
+                    f"{len(supported)} supported attachment(s)"
+                )
+            if unsupported:
+                types = list(set(
+                    "PDF" if (c.data if hasattr(c, "data") else "").startswith("data:application/pdf") else "image"
+                    for c in unsupported
+                ))
+                _append_to_last_user_message(
+                    messages,
+                    build_unsupported_reminder(
+                        [f"The user attached {', '.join(types)} file(s)."]
+                    ),
+                )
+                logger.info(
+                    f"[FLASH_CHAT] {len(unsupported)} unsupported attachment(s) "
+                    f"noted for {effective_model}"
+                )
 
         # Skill Context Injection (Flash mode)
         loaded_skill_names = inject_skills(messages, request, config, mode="flash")
