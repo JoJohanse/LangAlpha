@@ -105,7 +105,7 @@ if STORAGE_PROVIDER == "none":
                 ext = ".pdf"
             elif data_url.startswith("data:image/"):
                 mime = data_url.split(";")[0].split("/")[-1]
-                ext = f".{mime}" if mime else ".png"
+                ext = f".{mime}" if mime and mime.isalnum() else ".png"
         if ext and not safe.lower().endswith(ext):
             safe = f"{safe}{ext}"
         return safe

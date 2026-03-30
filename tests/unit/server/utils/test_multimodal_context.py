@@ -14,7 +14,7 @@ from src.server.utils.multimodal_context import (
     inject_multimodal_context,
     parse_multimodal_contexts,
 )
-from src.utils.storage.s3_compatible import sanitize_storage_key
+from src.utils.storage import sanitize_storage_key
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +78,10 @@ class TestSanitizeStorageKey:
         result = sanitize_storage_key("chart.png", "data:image/png;base64,abc")
         assert result == "chart.png"
         assert not result.endswith(".png.png")
+
+    def test_svg_xml_mime_falls_back_to_png(self):
+        result = sanitize_storage_key("chart", "data:image/svg+xml;base64,abc")
+        assert result == "chart.png"
 
     def test_truncation_leaves_room_for_extension(self):
         long_name = "A" * 200
