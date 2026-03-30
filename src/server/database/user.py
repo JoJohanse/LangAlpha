@@ -19,8 +19,13 @@ from src.server.utils.db import UpdateQueryBuilder
 logger = logging.getLogger(__name__)
 
 # Computed columns appended to user SELECT queries for gate logic.
-# Uses "users" as the default table alias; the get_user_with_preferences
-# query uses "u" and must substitute manually.
+def _gate_cols(alias: str = "users") -> str:
+    """Return the has_api_key + has_oauth_token EXISTS subqueries for a given table alias."""
+    return (
+        f"EXISTS (SELECT 1 FROM user_api_keys WHERE user_api_keys.user_id = {alias}.user_id) AS has_api_key,\n"
+        f"                    EXISTS (SELECT 1 FROM user_oauth_tokens WHERE user_oauth_tokens.user_id = {alias}.user_id) AS has_oauth_token"
+    )
+
 _HAS_API_KEY = "EXISTS (SELECT 1 FROM user_api_keys WHERE user_api_keys.user_id = users.user_id) AS has_api_key"
 _HAS_OAUTH = "EXISTS (SELECT 1 FROM user_oauth_tokens WHERE user_oauth_tokens.user_id = users.user_id) AS has_oauth_token"
 
@@ -556,8 +561,7 @@ async def get_user_with_preferences(user_id: str) -> Optional[Dict[str, Any]]:
                     COALESCE(u.personalization_completed, FALSE) AS personalization_completed,
                     u.auth_provider,
                     u.created_at, u.updated_at, u.last_login_at,
-                    """ + _HAS_API_KEY.replace("users.user_id", "u.user_id") + """,
-                    """ + _HAS_OAUTH.replace("users.user_id", "u.user_id") + """,
+                    """ + _gate_cols("u") + """,
                     p.user_preference_id, p.risk_preference, p.investment_preference,
                     p.agent_preference, p.other_preference,
                     p.created_at as pref_created_at, p.updated_at as pref_updated_at
