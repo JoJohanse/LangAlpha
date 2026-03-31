@@ -160,7 +160,7 @@ export default function ProviderStep() {
               provider={p.provider}
               displayName={p.display_name}
               selected={selected === p.provider}
-              configured={configuredSet.has(p.provider) || configuredSet.has(p.brand_key)}
+              configured={configuredSet.has(p.provider) || (method === 'api_key' && configuredSet.has(p.brand_key))}
               onSelect={setSelected}
             />
           ))}
