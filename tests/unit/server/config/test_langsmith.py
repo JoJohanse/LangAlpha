@@ -195,31 +195,21 @@ class TestGetFilteredLangsmithTracer:
         yield
         lf._cached_client = None
 
-    @patch("src.config.settings.is_langsmith_tracing_enabled", return_value=False)
-    def test_returns_none_when_tracing_disabled(self, _mock):
+    def test_returns_none_when_tracing_disabled(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("LANGSMITH_TRACING", None)
             assert get_filtered_langsmith_tracer() is None
 
-    @patch("src.config.settings.is_langsmith_tracing_enabled", return_value=False)
-    def test_tracer_from_env_var(self, _mock):
+    def test_tracer_from_env_var(self):
         with patch.dict(os.environ, {"LANGSMITH_TRACING": "true", "LANGSMITH_TRACE_FILTER": "true"}):
             assert get_filtered_langsmith_tracer() is not None
 
-    @patch("src.config.settings.is_langsmith_tracing_enabled", return_value=True)
-    def test_tracer_from_config(self, _mock):
-        with patch.dict(os.environ, {"LANGSMITH_TRACE_FILTER": "true"}, clear=False):
-            os.environ.pop("LANGSMITH_TRACING", None)
-            assert get_filtered_langsmith_tracer() is not None
-
-    @patch("src.config.settings.is_langsmith_tracing_enabled", return_value=True)
-    def test_returns_none_when_filter_disabled(self, _mock):
-        with patch.dict(os.environ, {"LANGSMITH_TRACE_FILTER": "false"}):
+    def test_returns_none_when_filter_disabled(self):
+        with patch.dict(os.environ, {"LANGSMITH_TRACING": "true", "LANGSMITH_TRACE_FILTER": "false"}):
             assert get_filtered_langsmith_tracer() is None
 
-    @patch("src.config.settings.is_langsmith_tracing_enabled", return_value=True)
-    def test_reuses_client(self, _mock):
-        with patch.dict(os.environ, {"LANGSMITH_TRACE_FILTER": "true"}):
+    def test_reuses_client(self):
+        with patch.dict(os.environ, {"LANGSMITH_TRACING": "true", "LANGSMITH_TRACE_FILTER": "true"}):
             t1 = get_filtered_langsmith_tracer()
             t2 = get_filtered_langsmith_tracer()
             assert t1.client is t2.client

@@ -137,15 +137,13 @@ def _get_or_create_client() -> Any:
 def get_filtered_langsmith_tracer() -> Optional[Any]:
     """Return a ``LangChainTracer`` that strips base64 from traces.
 
-    Returns ``None`` when tracing or filtering is disabled.
+    Returns ``None`` when ``LANGSMITH_TRACING`` env var is not ``true``
+    or when filtering is disabled via ``LANGSMITH_TRACE_FILTER=false``.
+    When filtering is off but tracing is on, the SDK auto-tracer still
+    runs (unfiltered), so returning ``None`` is correct.
     """
-    # Active when the SDK env var is set OR the app config flag is on.
-    tracing_env = os.environ.get("LANGSMITH_TRACING", "").lower()
-    if tracing_env != "true":
-        from src.config.settings import is_langsmith_tracing_enabled
-
-        if not is_langsmith_tracing_enabled():
-            return None
+    if os.environ.get("LANGSMITH_TRACING", "").lower() != "true":
+        return None
 
     if not _is_trace_filter_enabled():
         return None
