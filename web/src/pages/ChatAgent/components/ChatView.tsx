@@ -17,7 +17,7 @@ import { useCardState } from '../hooks/useCardState';
 import { useWorkspaceFiles } from '../hooks/useWorkspaceFiles';
 import './FilePanel.css';
 import ChatInput, { type ChatInputHandle } from '../../../components/ui/chat-input';
-import { attachmentsToImageContexts, type Attachment } from '../utils/fileUpload';
+import { attachmentsToContexts, type Attachment } from '../utils/fileUpload';
 import MessageList, { normalizeSubagentText } from './MessageList';
 import Markdown from './Markdown';
 import NavigationPanel from './NavigationPanel';
@@ -637,7 +637,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
 
     // Image/PDF contexts from attachments
     if (attachments && attachments.length > 0) {
-      contexts.push(...(attachmentsToImageContexts(attachments) as unknown as Record<string, unknown>[]));
+      contexts.push(...(attachmentsToContexts(attachments) as unknown as Record<string, unknown>[]));
       attachmentMeta = attachments.map((a) => ({
         name: a.file.name,
         type: a.type,

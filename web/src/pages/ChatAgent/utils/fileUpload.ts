@@ -37,25 +37,32 @@ export function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 /**
- * Convert attachments array to ImageContext format for additional_context
+ * Convert attachments to additional_context format with accurate type tags.
+ * Images → "image", PDFs → "pdf", everything else → "file".
  */
-export function attachmentsToImageContexts(attachments: Attachment[]): ImageContext[] {
+export function attachmentsToContexts(attachments: Attachment[]): ImageContext[] {
   return attachments
     .filter((a) => a.dataUrl != null)
     .map((a) => ({
-      type: 'image',
+      type: a.file.type.startsWith('image/') ? 'image'
+          : a.file.type === 'application/pdf' ? 'pdf'
+          : 'file',
       data: a.dataUrl!,
       description: a.file.name,
     }));
 }
 
 /**
- * Validate a file for upload
+ * Validate a file for upload.
+ * When flashOnly is true, only images and PDFs are accepted (Flash mode).
+ * Otherwise any file type is accepted (PTC/deep mode).
  */
-export function validateFile(file: File): FileValidationResult {
-  const allAccepted = [...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_PDF_TYPES];
-  if (!allAccepted.includes(file.type)) {
-    return { valid: false, error: `Unsupported file type: ${file.type || 'unknown'}` };
+export function validateFile(file: File, flashOnly = false): FileValidationResult {
+  if (flashOnly) {
+    const allAccepted = [...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_PDF_TYPES];
+    if (!allAccepted.includes(file.type)) {
+      return { valid: false, error: `Unsupported file type: ${file.type || 'unknown'}` };
+    }
   }
   if (file.size > MAX_FILE_SIZE) {
     return { valid: false, error: `File too large: ${file.name} (max 10MB)` };

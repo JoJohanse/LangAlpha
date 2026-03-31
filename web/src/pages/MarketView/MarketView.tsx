@@ -12,6 +12,7 @@ import MarketSidebarPanel from './components/MarketSidebarPanel';
 import { supports1sInterval } from './utils/chartConstants';
 import { useMarketChat } from './hooks/useMarketChat';
 import { getWorkspaces } from '../ChatAgent/utils/api';
+import { attachmentsToContexts } from '../ChatAgent/utils/fileUpload';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import CompanyOverviewPanel from './components/CompanyOverviewPanel';
@@ -304,9 +305,7 @@ function MarketViewInner() {
       contexts.push({ type: 'image', data: chartImage, description: chartImageDesc || undefined });
     }
     if (attachments && attachments.length > 0) {
-      attachments.forEach((a) => {
-        contexts.push({ type: 'image', data: a.dataUrl, description: a.file.name });
-      });
+      contexts.push(...attachmentsToContexts(attachments as any));
     }
     const imageContext = contexts.length > 0 ? contexts : null;
 

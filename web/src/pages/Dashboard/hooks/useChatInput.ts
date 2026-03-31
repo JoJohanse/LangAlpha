@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../../components/ui/use-toast';
 import { getFlashWorkspace } from '../../ChatAgent/utils/api';
+import { attachmentsToContexts } from '../../ChatAgent/utils/fileUpload';
 import { useWorkspaces } from '../../../hooks/useWorkspaces';
 import type { Workspace } from '@/types/api';
 
@@ -76,11 +77,7 @@ export function useChatInput() {
       let additionalContext: Array<{ type: string; data: string | null; description: string }> | null = null;
       let attachmentMeta: Array<{ name: string; type: string; size: number; preview: string | null; dataUrl: string | null }> | null = null;
       if (attachments && attachments.length > 0) {
-        additionalContext = attachments.map((a) => ({
-          type: 'image',
-          data: a.dataUrl,
-          description: a.file.name,
-        }));
+        additionalContext = attachmentsToContexts(attachments as any);
         attachmentMeta = attachments.map((a) => ({
           name: a.file.name,
           type: a.type,

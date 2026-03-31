@@ -11,7 +11,7 @@ import DeleteConfirmModal from './DeleteConfirmModal';
 import RenameThreadModal from './RenameThreadModal';
 import ChatInput from '../../../components/ui/chat-input';
 import type { ChatInputHandle } from '../../../components/ui/chat-input';
-import { attachmentsToImageContexts } from '../utils/fileUpload';
+import { attachmentsToContexts } from '../utils/fileUpload';
 import FilePanel, { SYSTEM_DIR_PREFIXES } from './FilePanel';
 import { clampPanelWidth as clampPanelWidthUtil } from '@/lib/panelUtils';
 import SandboxSettingsPanel from './SandboxSettingsPanel';
@@ -436,7 +436,7 @@ function ThreadGallery({ workspaceId, onBack, onThreadSelect }: ThreadGalleryPro
       const contexts: Array<Record<string, unknown>> = [];
       let attachmentMeta: Array<Record<string, unknown>> | null = null;
       if (attachments && attachments.length > 0) {
-        contexts.push(...attachmentsToImageContexts(attachments as any) as unknown as Array<Record<string, unknown>>); // TODO: type properly — attachment shapes differ
+        contexts.push(...attachmentsToContexts(attachments as any) as unknown as Array<Record<string, unknown>>); // TODO: type properly — attachment shapes differ
         attachmentMeta = attachments.map((a) => ({
           name: a.file.name,
           type: a.type,

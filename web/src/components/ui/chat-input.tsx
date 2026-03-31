@@ -582,13 +582,18 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const handleFiles = useCallback((newFilesList: FileList | File[]) => {
     const currentCount = attachedFiles.length;
     const fileArray = Array.from(newFilesList);
+    const isFlashMode = mode === 'fast';
 
     const validFiles = [];
     for (const file of fileArray) {
       if (currentCount + validFiles.length >= MAX_FILES) break;
-      const isImage = file.type.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
-      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
-      if (!isImage && !isPdf) continue;
+      if (isFlashMode) {
+        // Flash: only images and PDFs
+        const isImage = file.type.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
+        const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+        if (!isImage && !isPdf) continue;
+      }
+      // PTC/deep: accept any file
       if (file.size > MAX_FILE_SIZE) continue;
       validFiles.push(file);
     }
@@ -598,7 +603,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       return {
         id: Math.random().toString(36).substr(2, 9),
         file,
-        type: isImage ? (file.type || 'image/png') : (file.type || 'application/pdf'),
+        type: file.type || (isImage ? 'image/png' : 'application/octet-stream'),
         preview: isImage ? URL.createObjectURL(file) : null,
         uploadStatus: 'pending' as const,
         dataUrl: null,
@@ -623,7 +628,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       };
       reader.readAsDataURL(f.file);
     });
-  }, [attachedFiles.length]);
+  }, [attachedFiles.length, mode]);
 
   const removeFile = useCallback((id: string) => {
     setAttachedFiles((prev) => {
@@ -1587,7 +1592,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         ref={fileInputRef}
         type="file"
         multiple
-        accept="image/png,image/jpeg,image/gif,image/webp,application/pdf"
+        accept={mode === 'fast' ? "image/png,image/jpeg,image/gif,image/webp,application/pdf" : undefined}
         className="hidden"
         onChange={(e) => {
           if (e.target.files) handleFiles(e.target.files);
