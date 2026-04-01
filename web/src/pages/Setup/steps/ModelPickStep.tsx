@@ -1,12 +1,13 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Loader2, Check, Plus, X, KeyRound } from 'lucide-react';
+import { Loader2, Check, Plus, X, KeyRound, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAllModels } from '@/hooks/useAllModels';
 import { useConfiguredProviders } from '@/hooks/useConfiguredProviders';
 import { usePreferences } from '@/hooks/usePreferences';
 import { useUpdatePreferences } from '@/hooks/useUpdatePreferences';
+import { useTranslation } from 'react-i18next';
 
 // ---------------------------------------------------------------------------
 // ModelPickStep — Step 4: Star models for quick access
@@ -31,6 +32,7 @@ export default function ModelPickStep() {
   const location = useLocation();
   const updatePreferences = useUpdatePreferences();
   const { preferences } = usePreferences();
+  const { t } = useTranslation();
 
   const state = (location.state as LocationState | null) ?? {};
 
@@ -222,11 +224,11 @@ export default function ModelPickStep() {
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string };
       const detail = err?.response?.data?.detail;
-      setError(typeof detail === 'string' ? detail : err?.message ?? 'Failed to save model selection.');
+      setError(typeof detail === 'string' ? detail : err?.message ?? t('setup.errorSaveModels'));
     } finally {
       setSaving(false);
     }
-  }, [starred, existingStarred, allModels, builtInSet, preferences, provider, brandKey, updatePreferences, navigate]);
+  }, [starred, existingStarred, allModels, builtInSet, preferences, provider, brandKey, updatePreferences, navigate, t]);
 
   // "Add another provider" loops back to method selection
   const handleAddAnother = useCallback(() => {
@@ -256,7 +258,7 @@ export default function ModelPickStep() {
             className="font-semibold"
             style={{ fontSize: '1.125rem', color: 'var(--color-text-primary)' }}
           >
-            {provider ? `Manage ${displayName} models` : 'Select models for quick access'}
+            {provider ? t('setup.manageModels', { provider: displayName }) : t('setup.modelsTitle')}
           </h2>
           {provider && isConfigured && (
             <button
@@ -266,7 +268,7 @@ export default function ModelPickStep() {
               style={{ color: 'var(--color-text-tertiary)' }}
             >
               <KeyRound className="h-3 w-3" />
-              Update API key
+              {t('setup.updateApiKey')}
             </button>
           )}
         </div>
@@ -275,8 +277,28 @@ export default function ModelPickStep() {
           style={{ color: 'var(--color-text-secondary)' }}
         >
           {provider
-            ? `Choose which ${displayName} models to show in your quick-access menu.`
-            : 'Choose which models to show in your quick-access menu.'}
+            ? t('setup.chooseModels', { provider: displayName })
+            : t('setup.chooseModelsGeneric')}
+        </p>
+      </div>
+
+      {/* Model access reminder */}
+      <div
+        className="flex items-start gap-2.5 rounded-lg px-3.5 py-3"
+        style={{
+          background: 'var(--color-accent-soft)',
+          border: '1px solid var(--color-accent-primary)',
+        }}
+      >
+        <Info
+          className="h-4 w-4 shrink-0 mt-0.5"
+          style={{ color: 'var(--color-accent-primary)' }}
+        />
+        <p
+          className="text-xs leading-relaxed"
+          style={{ color: 'var(--color-text-secondary)' }}
+        >
+          {t('setup.modelAccessReminder')}
         </p>
       </div>
 
@@ -289,7 +311,7 @@ export default function ModelPickStep() {
             className="text-xs font-medium"
             style={{ color: 'var(--color-accent-primary)' }}
           >
-            {starred.size === displayModels.length ? 'Deselect all' : 'Select all'}
+            {starred.size === displayModels.length ? t('setup.deselectAll') : t('setup.selectAll')}
           </button>
           {!showCustomInput && (
             <button
@@ -299,7 +321,7 @@ export default function ModelPickStep() {
               style={{ color: 'var(--color-accent-primary)' }}
             >
               <Plus className="h-3 w-3" />
-              Add model
+              {t('setup.addModel')}
             </button>
           )}
         </div>
@@ -311,7 +333,7 @@ export default function ModelPickStep() {
           <Input
             value={customModelId}
             onChange={(e) => setCustomModelId(e.target.value)}
-            placeholder="Enter model ID (e.g. GPT-5.4)"
+            placeholder={t('setup.modelIdInputPlaceholder')}
             className="flex-1"
             autoComplete="off"
             spellCheck={false}
@@ -326,14 +348,14 @@ export default function ModelPickStep() {
             disabled={!customModelId.trim()}
             onClick={handleAddCustomModel}
           >
-            Add
+            {t('setup.add')}
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={() => { setShowCustomInput(false); setCustomModelId(''); }}
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
         </div>
       )}
@@ -345,7 +367,7 @@ export default function ModelPickStep() {
             className="text-sm text-center"
             style={{ color: 'var(--color-text-tertiary)' }}
           >
-            {provider ? `No models available for ${displayName}.` : 'No models available.'}
+            {provider ? t('setup.noModelsFor', { provider: displayName }) : t('setup.noModels')}
           </p>
           {!showCustomInput && (
             <Button
@@ -354,7 +376,7 @@ export default function ModelPickStep() {
               onClick={() => setShowCustomInput(true)}
             >
               <Plus className="h-3.5 w-3.5 mr-1" />
-              Add a custom model
+              {t('setup.addCustomModel')}
             </Button>
           )}
         </div>
@@ -406,7 +428,7 @@ export default function ModelPickStep() {
                         border: '1px solid var(--color-border-default)',
                       }}
                     >
-                      custom
+                      {t('setup.customBadge')}
                     </span>
                   )}
                 </button>
@@ -416,7 +438,7 @@ export default function ModelPickStep() {
                     onClick={() => handleRemoveCustomModel(model)}
                     className="p-1.5 rounded transition-colors hover:opacity-80 shrink-0"
                     style={{ color: 'var(--color-text-tertiary)' }}
-                    aria-label={`Remove ${model}`}
+                    aria-label={t('setup.removeModel', { model })}
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -446,24 +468,24 @@ export default function ModelPickStep() {
             className="text-sm font-medium"
             style={{ color: 'var(--color-text-primary)' }}
           >
-            Add another provider?
+            {t('setup.addAnotherProvider')}
           </span>
           <span
             className="text-xs"
             style={{ color: 'var(--color-text-tertiary)' }}
           >
-            You can connect multiple providers for more model options.
+            {t('setup.addAnotherDescription')}
           </span>
         </div>
         <Button variant="outline" size="sm" className="shrink-0" onClick={handleAddAnother}>
-          + Add
+          {t('setup.addAnother')}
         </Button>
       </div>
 
       {/* Navigation buttons */}
       <div className="flex items-center justify-between pt-2">
         <Button variant="outline" onClick={handleBack}>
-          Back
+          {t('setup.back')}
         </Button>
         <Button
           variant="default"
@@ -474,10 +496,10 @@ export default function ModelPickStep() {
           {saving ? (
             <>
               <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-              Saving...
+              {t('setup.saving')}
             </>
           ) : (
-            'Next step'
+            t('setup.nextStep')
           )}
         </Button>
       </div>

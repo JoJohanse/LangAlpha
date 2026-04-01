@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Ticket, Link2, Code2, Key, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,26 +21,26 @@ import type { AccessType } from '@/components/model/types';
 const METHODS: Array<{
   id: AccessType;
   icon: typeof Link2;
-  title: string;
-  description: string;
+  titleKey: string;
+  descKey: string;
 }> = [
   {
     id: 'oauth',
     icon: Link2,
-    title: 'Use your Claude / GPT subscription',
-    description: 'Connect via OAuth. No API key needed.',
+    titleKey: 'setup.methodOAuth',
+    descKey: 'setup.methodOAuthDesc',
   },
   {
     id: 'coding_plan',
     icon: Code2,
-    title: 'I have a coding plan',
-    description: 'ZhipuAI, MiniMax, DashScope, Moonshot, etc.',
+    titleKey: 'setup.methodCodingPlan',
+    descKey: 'setup.methodCodingPlanDesc',
   },
   {
     id: 'api_key',
     icon: Key,
-    title: 'I have an API key',
-    description: 'Pay-per-token from any provider.',
+    titleKey: 'setup.methodApiKey',
+    descKey: 'setup.methodApiKeyDesc',
   },
 ];
 
@@ -56,6 +57,7 @@ function ConfiguredBanner({
   onSkip: () => void;
   onRemove: (provider: ConfiguredProvider) => void;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   if (providers.length === 0) return null;
@@ -77,7 +79,7 @@ function ConfiguredBanner({
         >
           <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-success)' }} />
           <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            {providers.length} provider{providers.length !== 1 ? 's' : ''} connected
+            {t('setup.providersConnected', { count: providers.length })}
           </span>
           {expanded
             ? <ChevronUp className="h-3.5 w-3.5" style={{ color: 'var(--color-text-tertiary)' }} />
@@ -85,7 +87,7 @@ function ConfiguredBanner({
           }
         </button>
         <Button variant="outline" size="sm" onClick={onSkip} className="shrink-0 ml-3">
-          Next step
+          {t('setup.nextStep')}
         </Button>
       </div>
 
@@ -113,7 +115,7 @@ function ConfiguredBanner({
                     border: p.type === 'oauth' ? 'none' : '1px solid var(--color-border-default)',
                   }}
                 >
-                  {p.type === 'oauth' ? 'OAuth' : 'API key'}
+                  {p.type === 'oauth' ? t('setup.oauthBadge') : t('setup.apiKeyBadge')}
                 </span>
               </div>
               <button
@@ -122,7 +124,7 @@ function ConfiguredBanner({
                 className="text-xs shrink-0 px-2 py-1 rounded transition-colors hover:opacity-80"
                 style={{ color: 'var(--color-loss)' }}
               >
-                {p.type === 'oauth' ? 'Disconnect' : 'Remove'}
+                {p.type === 'oauth' ? t('setup.disconnectProvider') : t('setup.removeProvider')}
               </button>
             </div>
           ))}
@@ -138,6 +140,7 @@ function ConfiguredBanner({
 
 export default function MethodStep() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { providers: configuredProviders, hasAny: hasConfigured } = useConfiguredProviders();
   const { user, isLoading: userLoading } = useUser();
@@ -204,7 +207,7 @@ export default function MethodStep() {
 
   const handleRedeemInvitation = useCallback(async () => {
     if (!invitationCode.trim()) {
-      setInvitationError('Please enter an invitation code.');
+      setInvitationError(t('setup.invitationErrorEmpty'));
       return;
     }
 
@@ -225,23 +228,23 @@ export default function MethodStep() {
       const detail = err?.response?.data?.detail;
 
       if (status === 404) {
-        setInvitationError('Invalid invitation code.');
+        setInvitationError(t('setup.invitationErrorInvalid'));
       } else if (status === 410) {
-        setInvitationError('This code has expired or been fully used.');
+        setInvitationError(t('setup.invitationErrorExpired'));
       } else if (status === 409) {
-        setInvitationError("You've already redeemed this code.");
+        setInvitationError(t('setup.invitationErrorRedeemed'));
         queryClient.invalidateQueries({ queryKey: queryKeys.user.me() });
       } else if (typeof detail === 'string') {
         setInvitationError(detail);
       } else if (detail && typeof detail === 'object' && 'message' in detail) {
-        setInvitationError(detail.message || 'Something went wrong. Please try again.');
+        setInvitationError(detail.message || t('setup.invitationErrorGeneric'));
       } else {
-        setInvitationError('Something went wrong. Please try again.');
+        setInvitationError(t('setup.invitationErrorGeneric'));
       }
     } finally {
       setRedeemingInvitation(false);
     }
-  }, [invitationCode, queryClient, navigate]);
+  }, [invitationCode, queryClient, navigate, t]);
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
@@ -266,11 +269,11 @@ export default function MethodStep() {
           <div className="flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-gain)' }} />
             <span className="text-sm" style={{ color: 'var(--color-text-primary)' }}>
-              Invitation redeemed. You can configure models now or add a provider.
+              {t('setup.invitationRedeemed')}
             </span>
           </div>
           <Button variant="outline" size="sm" onClick={handleSkipToDefaults} className="shrink-0 ml-3">
-            Next step
+            {t('setup.nextStep')}
           </Button>
         </div>
       )}
@@ -281,15 +284,15 @@ export default function MethodStep() {
           className="font-semibold"
           style={{ fontSize: '1.125rem', color: 'var(--color-text-primary)' }}
         >
-          {canSkip ? 'Add another provider' : 'How would you like to connect?'}
+          {canSkip ? t('setup.addAnotherProviderHeading') : t('setup.methodTitle')}
         </h2>
         <p
           className="text-sm"
           style={{ color: 'var(--color-text-secondary)' }}
         >
           {canSkip
-            ? 'Connect an additional provider for more model options.'
-            : 'Choose how you\u2019ll access AI models. You can add more providers later.'}
+            ? t('setup.addMoreProviders')
+            : t('setup.methodSubtitle')}
         </p>
       </div>
 
@@ -330,13 +333,13 @@ export default function MethodStep() {
                   className="text-sm font-medium"
                   style={{ color: 'var(--color-text-primary)' }}
                 >
-                  {method.title}
+                  {t(method.titleKey)}
                 </span>
                 <span
                   className="text-xs"
                   style={{ color: 'var(--color-text-secondary)' }}
                 >
-                  {method.description}
+                  {t(method.descKey)}
                 </span>
               </div>
             </button>
@@ -355,7 +358,7 @@ export default function MethodStep() {
               style={{ color: 'var(--color-accent-primary)' }}
             >
               <Ticket className="h-4 w-4" />
-              Have an invitation code?
+              {t('setup.invitationCodeLink')}
             </button>
           ) : (
             <div
@@ -369,7 +372,7 @@ export default function MethodStep() {
                 className="text-sm font-medium"
                 style={{ color: 'var(--color-text-primary)' }}
               >
-                Invitation code
+                {t('setup.invitationCodeLabel')}
               </label>
               <div className="flex gap-2">
                 <Input
@@ -378,7 +381,7 @@ export default function MethodStep() {
                     setInvitationCode(e.target.value);
                     setInvitationError(null);
                   }}
-                  placeholder="Enter your invitation code"
+                  placeholder={t('setup.invitationCodePlaceholder')}
                   className="flex-1"
                   autoComplete="off"
                   spellCheck={false}
@@ -392,10 +395,10 @@ export default function MethodStep() {
                   {redeemingInvitation ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                      Redeeming...
+                      {t('setup.redeeming')}
                     </>
                   ) : (
-                    'Redeem'
+                    t('setup.redeem')
                   )}
                 </Button>
               </div>
@@ -413,7 +416,7 @@ export default function MethodStep() {
                 className="text-xs self-start"
                 style={{ color: 'var(--color-text-tertiary)' }}
               >
-                Choose a connection method instead
+                {t('setup.chooseMethodInstead')}
               </button>
             </div>
           )}
@@ -428,7 +431,7 @@ export default function MethodStep() {
           onClick={handleNext}
           className="min-w-[120px]"
         >
-          Next
+          {t('setup.next')}
         </Button>
       </div>
     </div>
