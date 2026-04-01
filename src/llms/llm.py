@@ -59,7 +59,10 @@ class ModelConfig:
                 flat[group_key] = shared
 
         # Post-flatten validation: every entry must have an sdk field
+        # (platform variants are exempt — they inherit sdk at runtime from parent)
         for key, entry in flat.items():
+            if entry.get("platform"):
+                continue
             if "sdk" not in entry:
                 raise ValueError(
                     f"Provider '{key}' missing 'sdk' after flatten. "
@@ -120,11 +123,12 @@ class ModelConfig:
 
         Includes all access types (api_key, oauth, coding_plan) since all
         represent user-provided model access for credit tracking purposes.
+        Excludes platform variants (system-only proxy routes).
         """
         return [
             name
             for name, cfg in self._flat_providers.items()
-            if cfg.get("byok_eligible", False)
+            if cfg.get("byok_eligible", True) and not cfg.get("platform", False)
         ]
 
     def get_parent_provider(self, provider: str) -> str:
@@ -143,7 +147,7 @@ class ModelConfig:
             return parent_info.get("display_name", parent.title())
         return provider.title()
 
-    def get_model_metadata(self) -> dict[str, dict[str, str]]:
+    def get_model_metadata(self) -> dict[str, dict[str, str | int]]:
         """Return {model_key: {sdk, provider, access_type, ...}} for all visible models."""
         result = {}
         for model_name, model_info in self.llm_config.items():
@@ -153,7 +157,10 @@ class ModelConfig:
             provider_info = self.get_provider_info(provider)
             sdk = provider_info.get("sdk", "unknown")
             access_type = provider_info.get("access_type", "api_key")
-            entry: dict[str, str] = {"sdk": sdk, "provider": provider, "access_type": access_type}
+            entry: dict[str, str | int] = {"sdk": sdk, "provider": provider, "access_type": access_type}
+            # Only include tier when explicitly set — absence means "not platform-managed"
+            if "tier" in model_info:
+                entry["tier"] = model_info["tier"]
             # Mark variants that require their own API key (different env_key from parent).
             # e.g. z-ai-cn needs ZAI_CN_API_KEY, not ZAI_API_KEY.
             parent_provider = provider_info.get("parent_provider")
@@ -225,6 +232,11 @@ class LLM:
         self.custom_model_name = model  # Store the custom name
         self.model = model_info["model_id"]  # Use model_id for API calls
         self.provider = model_info["provider"]
+
+        # System serving: route through platform proxy when no BYOK key
+        if not api_key and model_info.get("system_provider"):
+            self.provider = model_info["system_provider"]
+
         self.parameters = model_info.get("parameters", {}).copy()
         self.extra_body = model_info.get("extra_body", {}).copy()
 
@@ -332,31 +344,53 @@ class LLM:
         instance._merge_additional_betas(config.get("additional_betas"))
         return instance.get_llm()
 
+    def _resolve_billing_type(self) -> str:
+        """Determine billing type based on how this LLM was constructed.
+
+        Returns one of:
+        - "byok"     — user-provided API key
+        - "oauth"    — user-provided OAuth token
+        - "platform" — system key (platform pays, credits deducted)
+        """
+        if self.api_key_override:
+            if self.provider_info.get("access_type") == "oauth":
+                return "oauth"
+            return "byok"
+        return "platform"
+
     def get_llm(self):
         """
         Initializes and returns a LangChain LLM client for the configured provider.
 
         Returns:
-            A LangChain chat model instance.
+            A LangChain chat model instance with billing_type metadata attached.
 
         Raises:
             ValueError: If required API keys are not set or provider is unsupported.
         """
         # Use the resolved SDK (already determined in __init__)
         if self.sdk == "openai":
-            return self._get_openai_llm()
+            client = self._get_openai_llm()
         elif self.sdk == "codex":
-            return self._get_codex_llm()
+            client = self._get_codex_llm()
         elif self.sdk == "deepseek":
-            return self._get_deepseek_llm()
+            client = self._get_deepseek_llm()
         elif self.sdk == "qwq":
-            return self._get_qwq_llm()
+            client = self._get_qwq_llm()
         elif self.sdk == "anthropic":
-            return self._get_anthropic_llm()
+            client = self._get_anthropic_llm()
         elif self.sdk == "gemini":
-            return self._get_gemini_llm()
+            client = self._get_gemini_llm()
         else:
             raise ValueError(f"Unsupported SDK: {self.sdk} for provider {self.provider}")
+
+        # Tag the client with billing metadata so PerCallTokenTracker can
+        # attribute each LLM call to the correct billing source.
+        billing_type = self._resolve_billing_type()
+        existing = client.metadata or {}
+        client.metadata = {**existing, "billing_type": billing_type}
+
+        return client
 
     def _resolve_api_key(self) -> str:
         """Resolve API key: BYOK override > env var > local fallback."""
@@ -630,7 +664,7 @@ def get_configured_llm_models() -> dict[str, list[str]]:
     Get visible LLM models grouped by parent provider.
 
     Only returns models with "visible": true in models.json.
-    Models are grouped by their parent provider (e.g., anthropic-aws → anthropic).
+    Models are grouped by their parent provider (e.g., platform variants → parent).
 
     Returns:
         Dictionary mapping parent provider to list of visible model names.

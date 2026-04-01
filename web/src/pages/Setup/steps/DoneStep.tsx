@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { usePreferences } from '@/hooks/usePreferences';
 import { useApiKeys } from '@/hooks/useApiKeys';
 import type { ByokProvider } from '@/components/model/types';
+import { useTranslation } from 'react-i18next';
 
 // ---------------------------------------------------------------------------
 // DoneStep — confirmation screen
@@ -14,6 +15,7 @@ export default function DoneStep() {
   const navigate = useNavigate();
   const { preferences } = usePreferences();
   const { apiKeys } = useApiKeys();
+  const { t } = useTranslation();
 
   // ---------------------------------------------------------------------------
   // Derive summary data
@@ -34,11 +36,11 @@ export default function DoneStep() {
 
   const prefs = preferences as Record<string, unknown> | null;
   const otherPref = prefs?.other_preference as Record<string, unknown> | undefined;
-  const primaryModel = (otherPref?.preferred_model as string) ?? 'Not set';
-  const flashModel = (otherPref?.preferred_flash_model as string) ?? 'Not set';
+  const primaryModel = (otherPref?.preferred_model as string) ?? t('setup.notSet');
+  const flashModel = (otherPref?.preferred_flash_model as string) ?? t('setup.notSet');
   const providerLabel = configuredProviderNames.length > 0
     ? configuredProviderNames.join(', ')
-    : 'Not configured';
+    : t('setup.notConfigured');
 
   // ---------------------------------------------------------------------------
   // Render
@@ -56,13 +58,13 @@ export default function DoneStep() {
           className="font-semibold text-center"
           style={{ fontSize: '1.25rem', color: 'var(--color-text-primary)' }}
         >
-          You&apos;re all set!
+          {t('setup.doneTitle')}
         </h2>
         <p
           className="text-sm text-center max-w-md"
           style={{ color: 'var(--color-text-secondary)' }}
         >
-          Your AI research assistant is configured and ready to go.
+          {t('setup.doneSummary')}
         </p>
       </div>
 
@@ -75,9 +77,9 @@ export default function DoneStep() {
         }}
       >
         <div className="flex flex-col divide-y" style={{ borderColor: 'var(--color-border-default)' }}>
-          <SummaryRow label="Provider" value={providerLabel} />
-          <SummaryRow label="Primary model" value={primaryModel} />
-          <SummaryRow label="Flash model" value={flashModel} />
+          <SummaryRow label={t('setup.providerLabel')} value={providerLabel} />
+          <SummaryRow label={t('setup.primaryModelLabel')} value={primaryModel} />
+          <SummaryRow label={t('setup.flashModelLabel')} value={flashModel} />
         </div>
       </div>
 
@@ -88,7 +90,7 @@ export default function DoneStep() {
           className="w-full"
           onClick={() => navigate('/dashboard', { replace: true })}
         >
-          Go to Dashboard
+          {t('setup.goToDashboard')}
         </Button>
         <button
           type="button"
@@ -101,7 +103,7 @@ export default function DoneStep() {
             })
           }
         >
-          Set up investment profile
+          {t('setup.personalizeLink')}
         </button>
       </div>
     </div>

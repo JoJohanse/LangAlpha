@@ -22,6 +22,7 @@ from fastapi import File, UploadFile
 from pydantic import BaseModel
 from src.utils.storage import get_public_url, upload_bytes
 
+from src.config.settings import AUTH_SERVICE_URL
 from src.server.auth.jwt_bearer import get_current_auth_info, AuthInfo
 from src.server.database.user import (
     create_user as db_create_user,
@@ -204,6 +205,11 @@ async def get_current_user(user_id: CurrentUserId):
         raise_not_found("User")
 
     user_response = UserResponse.model_validate(result["user"])
+
+    # Populate platform access tier (cached, SaaS mode only)
+    from src.server.dependencies.usage_limits import _fetch_platform_tier
+    user_response.access_tier = await _fetch_platform_tier(user_id)
+
     preferences_response = None
     if result["preferences"]:
         preferences_response = UserPreferencesResponse.model_validate(result["preferences"])
@@ -312,7 +318,10 @@ def _validate_custom_models(custom_models: list, custom_providers: list | None =
     seen_names: set[str] = set()
 
     # Build valid provider set: all known flat providers + custom providers
-    valid_providers = set(mc.flat_providers.keys())
+    valid_providers = {
+        k for k, v in mc.flat_providers.items()
+        if not v.get("platform")
+    }
     if custom_providers:
         valid_providers.update(
             cp["name"] for cp in custom_providers if isinstance(cp, dict) and cp.get("name")

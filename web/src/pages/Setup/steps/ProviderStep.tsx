@@ -7,6 +7,7 @@ import { useModels } from '@/hooks/useModels';
 import { usePreferences } from '@/hooks/usePreferences';
 import { useConfiguredProviders } from '@/hooks/useConfiguredProviders';
 import type { AccessType, ProviderCatalogEntry } from '@/components/model/types';
+import { useTranslation } from 'react-i18next';
 
 const CUSTOM_PROVIDER_KEY = '__custom__';
 
@@ -24,6 +25,7 @@ export default function ProviderStep() {
   const { models: modelsData, isLoading } = useModels();
   const { preferences } = usePreferences();
   const { configuredSet } = useConfiguredProviders();
+  const { t } = useTranslation();
   const [selected, setSelected] = useState<string | null>(null);
 
   // Extract provider_catalog from models response
@@ -128,15 +130,15 @@ export default function ProviderStep() {
           className="font-semibold"
           style={{ fontSize: '1.125rem', color: 'var(--color-text-primary)' }}
         >
-          Choose your provider
+          {t('setup.providerTitle')}
         </h2>
         <p
           className="text-sm"
           style={{ color: 'var(--color-text-secondary)' }}
         >
-          {method === 'oauth' && 'Select the subscription you want to connect.'}
-          {method === 'coding_plan' && 'Select your coding plan provider.'}
-          {method === 'api_key' && 'Select the provider you have an API key for.'}
+          {method === 'oauth' && t('setup.providerSubtitleOAuth')}
+          {method === 'coding_plan' && t('setup.providerSubtitleCodingPlan')}
+          {method === 'api_key' && t('setup.providerSubtitleApiKey')}
         </p>
       </div>
 
@@ -146,7 +148,7 @@ export default function ProviderStep() {
           className="text-sm py-8 text-center"
           style={{ color: 'var(--color-text-tertiary)' }}
         >
-          No providers available for this method.
+          {t('setup.noProviders')}
         </p>
       ) : (
         <div
@@ -185,7 +187,7 @@ export default function ProviderStep() {
           <div className="flex items-center gap-2">
             <div className="h-px flex-1" style={{ background: 'var(--color-border-default)' }} />
             <span className="text-xs font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
-              Local models
+              {t('setup.localModels')}
             </span>
             <div className="h-px flex-1" style={{ background: 'var(--color-border-default)' }} />
           </div>
@@ -237,10 +239,10 @@ export default function ProviderStep() {
           </div>
           <div className="flex flex-col">
             <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-              Custom provider
+              {t('setup.customProvider')}
             </span>
             <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-              Any OpenAI, Anthropic, or Gemini compatible endpoint
+              {t('setup.customProviderDesc')}
             </span>
           </div>
         </button>
@@ -249,7 +251,7 @@ export default function ProviderStep() {
       {/* Navigation buttons */}
       <div className="flex items-center justify-between pt-2">
         <Button variant="outline" onClick={handleBack}>
-          Back
+          {t('setup.back')}
         </Button>
         <Button
           variant="default"
@@ -257,7 +259,7 @@ export default function ProviderStep() {
           onClick={handleNext}
           className="min-w-[120px]"
         >
-          Next
+          {t('setup.next')}
         </Button>
       </div>
     </div>

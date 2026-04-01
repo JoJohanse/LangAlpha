@@ -54,6 +54,41 @@ class PerCallTokenTracker(BaseCallbackHandler):
         self._lock = threading.Lock()
         self.per_call_records: List[Dict[str, Any]] = []
         self.usage_metadata: Dict[str, UsageMetadata] = {}
+        # Maps run_id → billing_type captured from LLM metadata in on_llm_start.
+        # Enables per-call billing attribution (byok / oauth / platform).
+        self._run_billing_type: Dict[UUID, str] = {}
+
+    def on_llm_start(
+        self,
+        serialized: Dict[str, Any],
+        prompts: List[str],
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Capture billing_type from LLM metadata before the call runs."""
+        if metadata and "billing_type" in metadata:
+            with self._lock:
+                self._run_billing_type[run_id] = metadata["billing_type"]
+
+    def on_chat_model_start(
+        self,
+        serialized: Dict[str, Any],
+        messages: List[Any],
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Capture billing_type from chat model metadata (preferred over on_llm_start)."""
+        if metadata and "billing_type" in metadata:
+            with self._lock:
+                self._run_billing_type[run_id] = metadata["billing_type"]
 
     def on_llm_end(
         self,
@@ -108,10 +143,14 @@ class PerCallTokenTracker(BaseCallbackHandler):
             return
 
         with self._lock:
+            # Retrieve and consume billing_type captured in on_llm_start / on_chat_model_start
+            billing_type = self._run_billing_type.pop(run_id, "platform")
+
             # Store per-call record
             self.per_call_records.append({
                 "model_name": model_name,
                 "usage": usage_metadata,
+                "billing_type": billing_type,
                 "timestamp": datetime.now().isoformat(),
                 "run_id": str(run_id),
                 "parent_run_id": str(parent_run_id) if parent_run_id else None,
@@ -124,6 +163,18 @@ class PerCallTokenTracker(BaseCallbackHandler):
                 self.usage_metadata[model_name] = add_usage(
                     self.usage_metadata[model_name], usage_metadata
                 )
+
+    def on_llm_error(
+        self,
+        error: BaseException,
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Clean up billing_type entry when an LLM call errors out."""
+        with self._lock:
+            self._run_billing_type.pop(run_id, None)
 
     def get_aggregated_usage(self) -> Dict[str, UsageMetadata]:
         """
@@ -163,6 +214,7 @@ class PerCallTokenTracker(BaseCallbackHandler):
         with self._lock:
             self.per_call_records.clear()
             self.usage_metadata.clear()
+            self._run_billing_type.clear()
 
     def __repr__(self) -> str:
         """String representation showing number of calls and models tracked."""

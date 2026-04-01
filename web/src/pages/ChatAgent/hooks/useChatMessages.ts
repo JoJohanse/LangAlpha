@@ -18,6 +18,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '@/hooks/useUser';
 import { sendChatMessageStream, replayThreadHistory, getWorkflowStatus, reconnectToWorkflowStream, sendHitlResponse, streamSubagentTaskEvents, fetchThreadTurns, submitFeedback, removeFeedback, getThreadFeedback } from '../utils/api';
+import { buildRateLimitError, type StructuredError } from '@/utils/rateLimitError';
 import { getStoredThreadId, setStoredThreadId } from './utils/threadStorage';
 export { removeStoredThreadId } from './utils/threadStorage';
 import { createUserMessage, createAssistantMessage, createNotificationMessage, appendMessage, updateMessage, type AttachmentMeta } from './utils/messageHelpers';
@@ -491,7 +492,7 @@ export function useChatMessages(
   const [hasActiveSubagents, setHasActiveSubagents] = useState(false);  // Subagent streams open after main agent finished
   const [workspaceStarting, setWorkspaceStarting] = useState(false);  // Workspace is starting up (stopped/archived sandbox)
   const [isCompacting, setIsCompacting] = useState<string | false>(false);  // Context compaction in progress (summarization/offload)
-  const [messageError, setMessageError] = useState<string | null>(null);
+  const [messageError, setMessageError] = useState<string | StructuredError | null>(null);
   // Steering returned by the server (agent finished before consuming it)
   const [returnedSteering, setReturnedSteering] = useState<string | null>(null);
   // HITL (Human-in-the-Loop) plan mode interrupt state
@@ -3307,16 +3308,27 @@ export function useChatMessages(
           const errObj = err as Record<string, unknown>;
           if (errObj.status === 429) {
             const info = (errObj.rateLimitInfo || {}) as Record<string, unknown>;
-            const limitMsg = info.type === 'credit_limit'
-              ? `Daily credit limit reached (${info.used_credits}/${info.credit_limit} credits). Resets at midnight UTC.`
-              : info.type === 'workspace_limit'
-                ? `Active workspace limit reached (${info.current}/${info.limit}).`
-                : (info.message as string) || 'Rate limit exceeded. Please try again later.';
-            setMessageError(limitMsg);
+            const accountUrl = (import.meta.env.VITE_ACCOUNT_URL as string | undefined) || '/account';
+            const structured = buildRateLimitError(info, accountUrl);
+            setMessageError(structured);
             setMessages((prev) => prev.filter((m) => m.id !== assistantMessageId));
           } else {
             console.error('Error sending message:', err);
-            setMessageError((err as Error).message || 'Failed to send message');
+            // Build structured error with link when backend provides one
+            const errorInfo = errObj.errorInfo as Record<string, unknown> | undefined;
+            if (errorInfo?.link) {
+              setMessageError({
+                message: (errorInfo.message as string) || (err as Error).message || 'An error occurred.',
+                link: errorInfo.link as { url: string; label: string },
+              });
+            } else if (errObj.status === 403) {
+              setMessageError({
+                message: (err as Error).message || 'Access denied.',
+                link: { url: '/setup/method', label: 'Configure providers' },
+              });
+            } else {
+              setMessageError((err as Error).message || 'Failed to send message');
+            }
             setMessages((prev) =>
               updateMessage(prev,assistantMessageId, (msg) => ({
                 ...msg,

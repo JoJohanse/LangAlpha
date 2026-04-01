@@ -1,6 +1,8 @@
 import React, { useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import MessageList from '../../ChatAgent/components/MessageList';
 import LogoLoading from '../../../components/ui/logo-loading';
+import type { StructuredError } from '@/utils/rateLimitError';
 import './MarketPanel.css';
 
 // TODO: type properly once ChatAgent message types are exported
@@ -15,10 +17,46 @@ interface ChatMessage {
 interface MarketPanelProps {
   messages?: ChatMessage[];
   isLoading?: boolean;
-  error?: string | null;
+  error?: string | StructuredError | null;
+}
+
+/** Render error link — uses client-side navigation for internal paths. */
+function ErrorLink({ url, label, navigate }: { url: string; label: string; navigate: (to: string) => void }) {
+  return (
+    <>
+      {' '}
+      <a
+        href={url}
+        {...(!url.startsWith('/') && { target: '_blank', rel: 'noopener noreferrer' })}
+        onClick={(e) => {
+          if (url.startsWith('/')) {
+            e.preventDefault();
+            navigate(url);
+          }
+        }}
+        style={{ textDecoration: 'underline', fontWeight: 500 }}
+      >
+        {label}
+      </a>
+    </>
+  );
+}
+
+/** Render error text, supporting both plain strings and StructuredError objects. */
+function renderErrorContent(error: string | StructuredError, navigate: (to: string) => void): React.ReactNode {
+  if (typeof error === 'object' && 'message' in error) {
+    return (
+      <>
+        {error.message}
+        {error.link && <ErrorLink url={error.link.url} label={error.link.label} navigate={navigate} />}
+      </>
+    );
+  }
+  return error;
 }
 
 const MarketPanel = ({ messages = [], isLoading: _isLoading = false, error = null }: MarketPanelProps) => {
+  const navigate = useNavigate();
   const _messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -76,7 +114,7 @@ const MarketPanel = ({ messages = [], isLoading: _isLoading = false, error = nul
             </p>
             {error && (
               <div style={{ color: 'var(--color-loss)', padding: '12px', fontSize: '14px' }}>
-                Error: {error}
+                {renderErrorContent(error, navigate)}
               </div>
             )}
           </div>
@@ -100,7 +138,7 @@ const MarketPanel = ({ messages = [], isLoading: _isLoading = false, error = nul
                 fontSize: '13px',
                 lineHeight: '1.5',
               }}>
-                {error}
+                {renderErrorContent(error, navigate)}
               </div>
             )}
           </div>

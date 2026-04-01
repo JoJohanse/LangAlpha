@@ -10,6 +10,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { buildRateLimitError, type StructuredError } from '@/utils/rateLimitError';
 import { sendFlashChatMessage } from '../utils/api';
 
 // --- Local message types (simplified subset of ChatAgent types) ---
@@ -69,7 +70,7 @@ export interface MarketChatMessage {
 export interface UseMarketChatReturn {
   messages: MarketChatMessage[];
   isLoading: boolean;
-  error: string | null;
+  error: string | StructuredError | null;
   handleSendMessage: (message: string, additionalContext?: unknown, attachmentMeta?: AttachmentMeta[] | null) => Promise<void>;
 }
 
@@ -121,7 +122,7 @@ const BATCH_FLUSH_INTERVAL_MS = 150;
 export function useMarketChat(): UseMarketChatReturn {
   const [messages, setMessages] = useState<MarketChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | StructuredError | null>(null);
   const threadIdRef = useRef('__default__');
   const contentOrderCounterRef = useRef(0);
   const currentReasoningIdRef = useRef<string | null>(null);
@@ -429,17 +430,14 @@ export function useMarketChat(): UseMarketChatReturn {
       // Flush any remaining batched updates
       flushUpdates();
 
-      const streamErr = err as { status?: number; rateLimitInfo?: Record<string, unknown>; message?: string };
+      const streamErr = err as { status?: number; rateLimitInfo?: Record<string, unknown>; errorInfo?: Record<string, unknown>; message?: string };
 
       // Handle rate limit (429) — show friendly message and remove empty assistant placeholder
       if (streamErr.status === 429) {
         const info = streamErr.rateLimitInfo || {};
-        const limitMsg = info.type === 'credit_limit'
-          ? `Daily credit limit reached (${info.used_credits}/${info.credit_limit} credits). Resets at midnight UTC.`
-          : info.type === 'burst_limit'
-            ? 'Too many concurrent requests. Please wait a moment.'
-            : (info.message as string) || 'Rate limit exceeded. Please try again later.';
-        setError(limitMsg);
+        const accountUrl = (import.meta.env.VITE_ACCOUNT_URL as string | undefined) || '/account';
+        const structured = buildRateLimitError(info as Record<string, unknown>, accountUrl);
+        setError(structured);
         // Remove the empty assistant placeholder — no content to show
         setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId));
       } else {
@@ -456,7 +454,21 @@ export function useMarketChat(): UseMarketChatReturn {
 
         // Only set error if we haven't received any events
         if (!hasReceivedEvents) {
-          setError(streamErr.message || 'Failed to send message');
+          // Build structured error with link when backend provides one
+          const errorInfo = streamErr.errorInfo;
+          if (errorInfo?.link) {
+            setError({
+              message: (errorInfo.message as string) || streamErr.message || 'An error occurred.',
+              link: errorInfo.link as { url: string; label: string },
+            });
+          } else if (streamErr.status === 403) {
+            setError({
+              message: streamErr.message || 'Access denied.',
+              link: { url: '/setup/method', label: 'Configure providers' },
+            });
+          } else {
+            setError(streamErr.message || 'Failed to send message');
+          }
           setMessages((prev) =>
             prev.map((msg) => {
               if (msg.id !== assistantMessageId) return msg;

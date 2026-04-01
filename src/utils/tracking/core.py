@@ -1029,6 +1029,7 @@ def calculate_cost_from_per_call_records(
             "cached_tokens": cached_tokens,
             "cost": call_cost,
             "breakdown": call_breakdown,
+            "billing_type": record.get("billing_type", "platform"),
             "timestamp": record.get("timestamp"),
             "run_id": record.get("run_id"),
             "parent_run_id": record.get("parent_run_id"),
@@ -1072,9 +1073,16 @@ def calculate_cost_from_per_call_records(
     # Clean up zero-value breakdown entries
     cost_breakdown = {k: v for k, v in aggregated_breakdown.items() if v > 0}
 
+    # Sum cost for platform-served calls only (used for credit deduction).
+    # BYOK/OAuth calls are paid by the user's own key — no credits consumed.
+    platform_cost = sum(
+        c["cost"] for c in per_call_costs if c.get("billing_type") == "platform"
+    )
+
     return {
         "by_model": by_model,
         "total_cost": total_cost,
+        "platform_cost": platform_cost,
         "cost_breakdown": cost_breakdown,
         "per_call_costs": per_call_costs,
     }

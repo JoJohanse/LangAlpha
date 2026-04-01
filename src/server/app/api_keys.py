@@ -53,6 +53,8 @@ def _get_provider_info_map() -> dict[str, dict]:
     info_map = {}
     for p in _get_supported_providers():
         info = config.get_provider_info(p)
+        if info.get("platform"):
+            continue
         info_map[p] = {
             "display_name": info.get("display_name", p.title()),
             "access_type": info.get("access_type", "api_key"),
@@ -182,12 +184,13 @@ def _get_allowed_providers(custom_providers: list) -> set[str]:
 
     Excludes OAuth-only providers (codex-oauth, claude-oauth) since those
     are authenticated via OAuth flow, not user-supplied API keys.
+    Excludes platform variants (system-only proxy routes).
     """
     from src.llms.llm import ModelConfig
     config = ModelConfig()
     allowed = {
         name for name, info in config.flat_providers.items()
-        if info.get("access_type") != "oauth"
+        if info.get("access_type") != "oauth" and not info.get("platform")
     }
     for cp in custom_providers:
         allowed.add(cp["name"])
@@ -582,6 +585,8 @@ def _build_provider_catalog() -> list[dict]:
     # region_variant_key -> {provider, region, base_url, sdk, ...}
     region_variants_by_parent: dict[str, list[dict]] = {}
     for key, info in flat.items():
+        if info.get("platform"):
+            continue
         parent_key = info.get("parent_provider")
         if not parent_key:
             continue
@@ -601,6 +606,8 @@ def _build_provider_catalog() -> list[dict]:
 
     catalog = []
     for key, info in flat.items():
+        if info.get("platform"):
+            continue
         parent_key = info.get("parent_provider")
         access_type = info.get("access_type", "api_key")
 

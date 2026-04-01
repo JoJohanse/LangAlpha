@@ -386,8 +386,25 @@ async function streamFetch(
       err.rateLimitInfo = (detail?.detail as Record<string, unknown>) || {};
       throw err;
     }
-    const errorText = await res.text().catch(() => 'Unknown error');
-    throw new Error(`HTTP error! status: ${res.status}, message: ${errorText}`);
+    let detail = '';
+    let errorInfo: Record<string, unknown> | null = null;
+    const text = await res.text().catch(() => '');
+    try {
+      const body = JSON.parse(text);
+      if (body?.detail && typeof body.detail === 'object' && 'message' in body.detail) {
+        errorInfo = body.detail as Record<string, unknown>;
+        detail = (errorInfo.message as string) || '';
+      } else {
+        detail = typeof body?.detail === 'string' ? body.detail : JSON.stringify(body?.detail || body);
+      }
+    } catch {
+      detail = text || 'Unknown error';
+    }
+    const err: Error & { status?: number; errorInfo?: Record<string, unknown> } =
+      new Error(detail || `HTTP error! status: ${res.status}`);
+    err.status = res.status;
+    if (errorInfo) err.errorInfo = errorInfo;
+    throw err;
   }
 
   if (!res.body) {

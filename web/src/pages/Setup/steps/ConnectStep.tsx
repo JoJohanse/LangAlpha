@@ -17,6 +17,7 @@ import {
   initiateClaudeOAuth,
   submitClaudeCallback,
 } from '@/pages/Dashboard/utils/api';
+import { useTranslation } from 'react-i18next';
 
 // ---------------------------------------------------------------------------
 // ConnectStep — Step 3: OAuth redirect or API key input
@@ -39,28 +40,28 @@ interface LocationState {
 
 /** API format options for custom provider setup */
 const API_FORMATS = [
-  { value: 'openai-responses', label: 'OpenAI Responses API', parent: 'openai', useResponseApi: true },
-  { value: 'openai-completions', label: 'OpenAI Chat Completions API', parent: 'openai', useResponseApi: false },
-  { value: 'anthropic', label: 'Anthropic Messages API', parent: 'anthropic', useResponseApi: false },
-  { value: 'gemini', label: 'Google Gemini API', parent: 'gemini', useResponseApi: false },
+  { value: 'openai-responses', labelKey: 'setup.apiFormatOpenaiResponses', parent: 'openai', useResponseApi: true },
+  { value: 'openai-completions', labelKey: 'setup.apiFormatOpenaiCompletions', parent: 'openai', useResponseApi: false },
+  { value: 'anthropic', labelKey: 'setup.apiFormatAnthropic', parent: 'anthropic', useResponseApi: false },
+  { value: 'gemini', labelKey: 'setup.apiFormatGemini', parent: 'gemini', useResponseApi: false },
 ] as const;
 
-/** Human-readable API format label from sdk + use_response_api. */
-function getApiFormatLabel(sdk?: string | null, useResponseApi?: boolean): string {
+/** Translation key for API format from sdk + use_response_api. */
+function getApiFormatKey(sdk?: string | null, useResponseApi?: boolean): string {
   switch (sdk) {
     case 'anthropic':
-      return 'Anthropic Messages API';
+      return 'setup.apiFormatAnthropic';
     case 'gemini':
-      return 'Google Gemini API';
+      return 'setup.apiFormatGemini';
     case 'openai':
-      return useResponseApi ? 'OpenAI Responses API' : 'OpenAI Chat Completions API';
+      return useResponseApi ? 'setup.apiFormatOpenaiResponses' : 'setup.apiFormatOpenaiCompletions';
     case 'codex':
-      return 'OpenAI Codex API';
+      return 'setup.apiFormatCodex';
     case 'deepseek':
     case 'qwq':
-      return 'OpenAI-compatible API';
+      return 'setup.apiFormatCompatible';
     default:
-      return sdk ? `${sdk} API` : 'API';
+      return sdk ? 'setup.apiFormatGeneric' : 'setup.apiFormatDefault';
   }
 }
 
@@ -103,6 +104,7 @@ function ProcessStep({ number, title, description }: { number: number; title: st
 }
 
 function DisclaimerBox({ provider }: { provider: string }) {
+  const { t } = useTranslation();
   const isClaude = provider === 'claude-oauth';
   return (
     <div
@@ -116,15 +118,15 @@ function DisclaimerBox({ provider }: { provider: string }) {
         <Shield className="h-4 w-4 flex-shrink-0 mt-0.5" style={{ color: 'var(--color-text-tertiary)' }} />
         <div>
           <p className="text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-            Security &amp; Privacy
+            {t('setup.securityPrivacy')}
           </p>
           <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-tertiary)' }}>
-            Your tokens are encrypted at rest. We use them only to make API calls on your behalf.
+            {t('setup.tokensEncrypted')}
           </p>
           <p className="text-[11px] leading-relaxed mt-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
             {isClaude
-              ? 'Usage will count against your Anthropic subscription. You can disconnect at any time.'
-              : 'Usage will count against your OpenAI subscription. You can disconnect at any time.'}
+              ? t('setup.usageCountsClaude')
+              : t('setup.usageCountsOpenai')}
           </p>
         </div>
       </div>
@@ -137,6 +139,7 @@ function DisclaimerBox({ provider }: { provider: string }) {
 // ---------------------------------------------------------------------------
 
 function CopyButton({ text }: { text: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
@@ -163,12 +166,12 @@ function CopyButton({ text }: { text: string }) {
       {copied ? (
         <>
           <Check className="h-3 w-3" />
-          Copied
+          {t('setup.copied')}
         </>
       ) : (
         <>
           <Copy className="h-3 w-3" />
-          Copy
+          {t('setup.copy')}
         </>
       )}
     </button>
@@ -186,6 +189,7 @@ export default function ConnectStep() {
   const updateApiKeys = useUpdateApiKeys();
   const { preferences } = usePreferences();
   const updatePreferences = useUpdatePreferences();
+  const { t } = useTranslation();
 
   const state = (location.state as LocationState | null) ?? {};
 
@@ -209,7 +213,7 @@ export default function ConnectStep() {
   const regionVariants = state.regionVariants ?? null;
   const defaultRegion = state.defaultRegion ?? null;
   const dynamicModels = state.dynamicModels ?? false;
-  const apiFormatLabel = getApiFormatLabel(sdk, useResponseApi);
+  const apiFormatKey = getApiFormatKey(sdk, useResponseApi);
 
   // Region selection state — when variants exist, user can switch
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
@@ -222,9 +226,9 @@ export default function ConnectStep() {
   const effectiveBaseUrl = activeVariant?.base_url ?? defaultBaseUrl ?? '';
   const effectiveSdk = activeVariant?.sdk ?? sdk;
   const effectiveUseResponseApi = activeVariant?.use_response_api ?? useResponseApi;
-  const effectiveApiFormatLabel = activeVariant
-    ? getApiFormatLabel(effectiveSdk, effectiveUseResponseApi)
-    : apiFormatLabel;
+  const effectiveApiFormatKey = activeVariant
+    ? getApiFormatKey(effectiveSdk, effectiveUseResponseApi)
+    : apiFormatKey;
 
   const handleRegionChange = useCallback((region: string | null) => {
     setSelectedRegion(region);
@@ -315,13 +319,13 @@ export default function ConnectStep() {
           // Continue polling
         }
       }
-      setOauthError('Authorization timed out. Please try again.');
+      setOauthError(t('setup.errorAuthTimeout'));
       setCodexPolling(false);
     } catch {
-      setOauthError('Failed to start device authorization. Please try again.');
+      setOauthError(t('setup.errorDeviceAuth'));
       setOauthPhase('disclaimer');
     }
-  }, [queryClient, navigate, method, provider, displayName, brandKey]);
+  }, [queryClient, navigate, method, provider, displayName, brandKey, t]);
 
   // ---------------------------------------------------------------------------
   // Claude OAuth handlers
@@ -338,10 +342,10 @@ export default function ConnectStep() {
       // Open in new tab so user can paste code back here
       window.open(authorizeUrl, '_blank', 'noopener');
     } catch {
-      setOauthError('Failed to initiate Claude OAuth. Please try again.');
+      setOauthError(t('setup.errorClaudeOAuth'));
       setOauthPhase('disclaimer');
     }
-  }, []);
+  }, [t]);
 
   const handleClaudeSubmit = useCallback(async () => {
     if (!claudeCallbackInput.trim()) return;
@@ -359,11 +363,11 @@ export default function ConnectStep() {
         setOauthError((result as Record<string, unknown>).error as string ?? 'Authorization failed. Please try again.');
       }
     } catch {
-      setOauthError('Invalid authorization code. Please try again.');
+      setOauthError(t('setup.errorInvalidCode'));
     } finally {
       setClaudeSubmitting(false);
     }
-  }, [claudeCallbackInput, queryClient, navigate, method, provider, displayName, brandKey]);
+  }, [claudeCallbackInput, queryClient, navigate, method, provider, displayName, brandKey, t]);
 
   // ---------------------------------------------------------------------------
   // API key / coding plan handlers
@@ -378,11 +382,11 @@ export default function ConnectStep() {
 
   const handleSaveAndNext = useCallback(async () => {
     if (!dynamicModels && !apiKey.trim()) {
-      setError('Please enter an API key.');
+      setError(t('setup.errorNoApiKey'));
       return;
     }
     if (dynamicModels && !baseUrl.trim()) {
-      setError('Please enter the base URL for your local server.');
+      setError(t('setup.errorNoBaseUrl'));
       return;
     }
 
@@ -424,11 +428,11 @@ export default function ConnectStep() {
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string };
       const detail = err?.response?.data?.detail;
-      setError(typeof detail === 'string' ? detail : err?.message ?? 'Failed to save API key.');
+      setError(typeof detail === 'string' ? detail : err?.message ?? t('setup.errorSaveKey'));
     } finally {
       setSaving(false);
     }
-  }, [apiKey, baseUrl, dynamicModels, effectiveProvider, provider, updateApiKeys, queryClient, navigate, method, displayName, brandKey]);
+  }, [apiKey, baseUrl, dynamicModels, effectiveProvider, provider, updateApiKeys, queryClient, navigate, method, displayName, brandKey, t]);
 
   const handleBack = useCallback(() => {
     navigate('/setup/provider', { state: { method } });
@@ -441,7 +445,7 @@ export default function ConnectStep() {
   const handleCustomSave = useCallback(async () => {
     const slug = customName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
     if (!slug || !customBaseUrl.trim() || !customApiKey.trim() || !customModelName.trim()) {
-      setError('Please fill in all fields.');
+      setError(t('setup.errorFillFields'));
       return;
     }
 
@@ -503,11 +507,11 @@ export default function ConnectStep() {
       const msg = typeof detail === 'string'
         ? detail
         : Array.isArray(detail) ? detail.map((d) => d.msg).filter(Boolean).join('; ') : null;
-      setError(msg || err?.message || 'Failed to save custom provider.');
+      setError(msg || err?.message || t('setup.errorSaveProvider'));
     } finally {
       setSaving(false);
     }
-  }, [customName, customFormat, customBaseUrl, customApiKey, customModelName, customModelId, preferences, updatePreferences, updateApiKeys, queryClient, navigate, method]);
+  }, [customName, customFormat, customBaseUrl, customApiKey, customModelName, customModelId, preferences, updatePreferences, updateApiKeys, queryClient, navigate, method, t]);
 
   // ---------------------------------------------------------------------------
   // ---------------------------------------------------------------------------
@@ -516,7 +520,7 @@ export default function ConnectStep() {
 
   const handleAddModelToExisting = useCallback(async () => {
     if (!customModelName.trim()) {
-      setError('Please enter a model name.');
+      setError(t('setup.errorNoModelName'));
       return;
     }
 
@@ -548,11 +552,11 @@ export default function ConnectStep() {
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string };
       const detail = err?.response?.data?.detail;
-      setError(typeof detail === 'string' ? detail : err?.message ?? 'Failed to add model.');
+      setError(typeof detail === 'string' ? detail : err?.message ?? t('setup.errorAddModel'));
     } finally {
       setSaving(false);
     }
-  }, [customModelName, customModelId, provider, preferences, updatePreferences, queryClient, navigate, method, displayName, brandKey]);
+  }, [customModelName, customModelId, provider, preferences, updatePreferences, queryClient, navigate, method, displayName, brandKey, t]);
 
   // ---------------------------------------------------------------------------
   // Render — Add model to existing custom provider
@@ -566,13 +570,13 @@ export default function ConnectStep() {
             className="font-semibold"
             style={{ fontSize: '1.125rem', color: 'var(--color-text-primary)' }}
           >
-            Add model to {displayName}
+            {t('setup.addModelTo', { provider: displayName })}
           </h2>
           <p
             className="text-sm"
             style={{ color: 'var(--color-text-secondary)' }}
           >
-            Add another model to your existing custom provider.
+            {t('setup.addModelToDesc')}
           </p>
         </div>
 
@@ -584,7 +588,7 @@ export default function ConnectStep() {
           }}
         >
           <label className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            Model
+            {t('setup.modelLabel')}
           </label>
           <Input
             value={customModelName}
@@ -592,18 +596,18 @@ export default function ConnectStep() {
               setCustomModelName(e.target.value);
               if (!customModelId) setCustomModelId(e.target.value);
             }}
-            placeholder="Display name (e.g. Llama 3.3 70B)"
+            placeholder={t('setup.modelDisplayNamePlaceholder')}
             autoComplete="off"
           />
           <Input
             value={customModelId}
             onChange={(e) => setCustomModelId(e.target.value)}
-            placeholder="Model ID (e.g. meta-llama/Llama-3.3-70B)"
+            placeholder={t('setup.modelIdPlaceholder')}
             className="font-mono text-xs"
             autoComplete="off"
           />
           <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-            Model ID is sent to the API. Leave same as name if unsure.
+            {t('setup.modelIdHint')}
           </p>
         </div>
 
@@ -615,7 +619,7 @@ export default function ConnectStep() {
 
         <div className="flex items-center justify-between pt-2">
           <Button variant="outline" onClick={handleBack}>
-            Back
+            {t('setup.back')}
           </Button>
           <Button
             variant="default"
@@ -626,10 +630,10 @@ export default function ConnectStep() {
             {saving ? (
               <>
                 <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                Saving...
+                {t('setup.saving')}
               </>
             ) : (
-              'Continue'
+              t('setup.continue')
             )}
           </Button>
         </div>
@@ -649,25 +653,25 @@ export default function ConnectStep() {
             className="font-semibold"
             style={{ fontSize: '1.125rem', color: 'var(--color-text-primary)' }}
           >
-            Add custom provider
+            {t('setup.addCustomProvider')}
           </h2>
           <p
             className="text-sm"
             style={{ color: 'var(--color-text-secondary)' }}
           >
-            Connect any OpenAI, Anthropic, or Gemini compatible endpoint.
+            {t('setup.addCustomProviderDesc')}
           </p>
         </div>
 
         {/* Provider name */}
         <div className="flex flex-col gap-1.5">
           <label className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            Provider name
+            {t('setup.providerNameLabel')}
           </label>
           <Input
             value={customName}
             onChange={(e) => setCustomName(e.target.value)}
-            placeholder="e.g. My vLLM Server"
+            placeholder={t('setup.providerNamePlaceholder')}
             autoComplete="off"
           />
         </div>
@@ -675,7 +679,7 @@ export default function ConnectStep() {
         {/* API format */}
         <div className="flex flex-col gap-1.5">
           <label className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            API format
+            {t('setup.apiFormatLabel')}
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {API_FORMATS.map((fmt) => (
@@ -693,7 +697,7 @@ export default function ConnectStep() {
                   padding: customFormat === fmt.value ? '9px 11px' : '10px 12px',
                 }}
               >
-                {fmt.label}
+                {t(fmt.labelKey)}
               </button>
             ))}
           </div>
@@ -702,13 +706,13 @@ export default function ConnectStep() {
         {/* Base URL */}
         <div className="flex flex-col gap-1.5">
           <label className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            Base URL
+            {t('setup.baseUrlLabel')}
           </label>
           <Input
             type="url"
             value={customBaseUrl}
             onChange={(e) => setCustomBaseUrl(e.target.value)}
-            placeholder="https://your-endpoint.com/v1"
+            placeholder={t('setup.customBaseUrlPlaceholder')}
             className="font-mono text-xs"
           />
         </div>
@@ -716,7 +720,7 @@ export default function ConnectStep() {
         {/* API key */}
         <div className="flex flex-col gap-1.5">
           <label className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            API key
+            {t('setup.apiKeyLabel')}
           </label>
           <ApiKeyInput
             provider="custom"
@@ -734,7 +738,7 @@ export default function ConnectStep() {
           }}
         >
           <label className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            Model
+            {t('setup.modelLabel')}
           </label>
           <div className="flex flex-col gap-2">
             <Input
@@ -743,19 +747,19 @@ export default function ConnectStep() {
                 setCustomModelName(e.target.value);
                 if (!customModelId) setCustomModelId(e.target.value);
               }}
-              placeholder="Display name (e.g. Llama 3.3 70B)"
+              placeholder={t('setup.modelDisplayNamePlaceholder')}
               autoComplete="off"
             />
             <Input
               value={customModelId}
               onChange={(e) => setCustomModelId(e.target.value)}
-              placeholder="Model ID (e.g. meta-llama/Llama-3.3-70B)"
+              placeholder={t('setup.modelIdPlaceholder')}
               className="font-mono text-xs"
               autoComplete="off"
             />
           </div>
           <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-            Model ID is sent to the API. Leave same as name if unsure.
+            {t('setup.modelIdHint')}
           </p>
         </div>
 
@@ -767,7 +771,7 @@ export default function ConnectStep() {
 
         <div className="flex items-center justify-between pt-2">
           <Button variant="outline" onClick={handleBack}>
-            Back
+            {t('setup.back')}
           </Button>
           <Button
             variant="default"
@@ -778,10 +782,10 @@ export default function ConnectStep() {
             {saving ? (
               <>
                 <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                Saving...
+                {t('setup.saving')}
               </>
             ) : (
-              'Continue'
+              t('setup.continue')
             )}
           </Button>
         </div>
@@ -801,15 +805,15 @@ export default function ConnectStep() {
             className="font-semibold"
             style={{ fontSize: '1.125rem', color: 'var(--color-text-primary)' }}
           >
-            Connect {displayName}
+            {t('setup.connectTitle', { provider: displayName })}
           </h2>
           <p
             className="text-sm"
             style={{ color: 'var(--color-text-secondary)' }}
           >
             {isCodex
-              ? 'Authorize with your ChatGPT account using a device code.'
-              : 'Connect your Claude subscription via OAuth.'}
+              ? t('setup.oauthCodexDesc')
+              : t('setup.oauthClaudeDesc')}
           </p>
         </div>
 
@@ -828,43 +832,43 @@ export default function ConnectStep() {
                 className="text-xs font-medium uppercase tracking-wide mb-3"
                 style={{ color: 'var(--color-text-tertiary)' }}
               >
-                How it works
+                {t('setup.howItWorks')}
               </p>
               <div className="space-y-3">
                 {isCodex ? (
                   <>
                     <ProcessStep
                       number={1}
-                      title="Open OpenAI verification page"
-                      description="A new tab will open to OpenAI's device authorization page."
+                      title={t('setup.codexStep1Title')}
+                      description={t('setup.codexStep1Desc')}
                     />
                     <ProcessStep
                       number={2}
-                      title="Enter the device code"
-                      description="We'll generate a code for you. Copy it and paste it on OpenAI's page, then approve access."
+                      title={t('setup.codexStep2Title')}
+                      description={t('setup.codexStep2Desc')}
                     />
                     <ProcessStep
                       number={3}
-                      title="Return here"
-                      description="Once approved, we'll detect it automatically and complete the connection."
+                      title={t('setup.codexStep3Title')}
+                      description={t('setup.codexStep3Desc')}
                     />
                   </>
                 ) : (
                   <>
                     <ProcessStep
                       number={1}
-                      title="Authorize on claude.ai"
-                      description="A new tab will open to claude.ai where you sign in and authorize access."
+                      title={t('setup.claudeStep1Title')}
+                      description={t('setup.claudeStep1Desc')}
                     />
                     <ProcessStep
                       number={2}
-                      title="Copy the authorization code"
-                      description="After approval, you'll see a code on the page. Copy the entire value."
+                      title={t('setup.claudeStep2Title')}
+                      description={t('setup.claudeStep2Desc')}
                     />
                     <ProcessStep
                       number={3}
-                      title="Paste it back here"
-                      description="Return to this tab and paste the code into the input field to complete the connection."
+                      title={t('setup.claudeStep3Title')}
+                      description={t('setup.claudeStep3Desc')}
                     />
                   </>
                 )}
@@ -883,8 +887,7 @@ export default function ConnectStep() {
                 className="mt-0.5 h-4 w-4 rounded border accent-[var(--color-accent-primary)]"
               />
               <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                I understand that usage will count against my {isClaude ? 'Anthropic' : 'OpenAI'} subscription
-                and that my tokens will be stored encrypted on this platform.
+                {t(isClaude ? 'setup.oauthAgreeAnthropic' : 'setup.oauthAgreeOpenai')}
               </span>
             </label>
 
@@ -896,7 +899,7 @@ export default function ConnectStep() {
               className="w-full h-11"
             >
               <ExternalLink className="h-4 w-4 mr-1.5" />
-              {isCodex ? 'Open OpenAI verification page' : 'Open claude.ai'}
+              {isCodex ? t('setup.openVerification') : t('setup.openClaude')}
             </Button>
           </>
         )}
@@ -906,7 +909,7 @@ export default function ConnectStep() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--color-accent-primary)' }} />
             <span className="ml-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-              Connecting...
+              {t('setup.connecting')}
             </span>
           </div>
         )}
@@ -923,7 +926,7 @@ export default function ConnectStep() {
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4" style={{ color: 'var(--color-warning, #f59e0b)' }} />
               <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-                Enter this code on the OpenAI page
+                {t('setup.enterCodeOnOpenai')}
               </p>
             </div>
 
@@ -947,7 +950,7 @@ export default function ConnectStep() {
                 style={{ color: 'var(--color-text-tertiary)' }}
               >
                 <Loader2 className="h-3 w-3 animate-spin" />
-                Waiting for approval on OpenAI...
+                {t('setup.waitingApproval')}
               </p>
             )}
 
@@ -958,7 +961,7 @@ export default function ConnectStep() {
               className="inline-flex items-center gap-1.5 text-sm font-medium"
               style={{ color: 'var(--color-accent-primary)' }}
             >
-              Open verification page again
+              {t('setup.openVerificationAgain')}
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
           </div>
@@ -975,10 +978,10 @@ export default function ConnectStep() {
           >
             <div className="flex flex-col gap-1">
               <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-                Paste the authorization code from claude.ai
+                {t('setup.pasteAuthCode')}
               </p>
               <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                After authorizing, you&apos;ll see a code on the Claude page. Copy and paste it below.
+                {t('setup.pasteAuthCodeHint')}
               </p>
             </div>
 
@@ -989,7 +992,7 @@ export default function ConnectStep() {
                   setClaudeCallbackInput(e.target.value);
                   setOauthError(null);
                 }}
-                placeholder="Paste code here (e.g. abc123#state456)"
+                placeholder={t('setup.pasteCodePlaceholder')}
                 className="flex-1 font-mono text-sm"
                 autoComplete="off"
                 spellCheck={false}
@@ -1003,10 +1006,10 @@ export default function ConnectStep() {
                 {claudeSubmitting ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                    Submitting...
+                    {t('setup.submitting')}
                   </>
                 ) : (
-                  'Submit'
+                  t('setup.submit')
                 )}
               </Button>
             </div>
@@ -1018,7 +1021,7 @@ export default function ConnectStep() {
               className="inline-flex items-center gap-1.5 text-xs self-start"
               style={{ color: 'var(--color-accent-primary)' }}
             >
-              Open claude.ai again
+              {t('setup.openClaudeAgain')}
               <ExternalLink className="h-3 w-3" />
             </a>
           </div>
@@ -1034,7 +1037,7 @@ export default function ConnectStep() {
         {/* Back button */}
         <div className="flex items-center justify-between pt-2">
           <Button variant="outline" onClick={handleBack}>
-            Back
+            {t('setup.back')}
           </Button>
         </div>
       </div>
@@ -1052,17 +1055,17 @@ export default function ConnectStep() {
           className="font-semibold"
           style={{ fontSize: '1.125rem', color: 'var(--color-text-primary)' }}
         >
-          Connect {displayName}
+          {t('setup.connectTitle', { provider: displayName })}
         </h2>
         <p
           className="text-sm"
           style={{ color: 'var(--color-text-secondary)' }}
         >
           {dynamicModels
-            ? 'Configure your local server URL. API key is optional.'
+            ? t('setup.localServerDesc')
             : method === 'coding_plan'
-              ? 'Enter the API key from your coding plan subscription.'
-              : 'Enter your API key. You can find this in your provider dashboard.'}
+              ? t('setup.codingPlanDesc')
+              : t('setup.apiKeyInputDesc')}
         </p>
       </div>
 
@@ -1073,7 +1076,7 @@ export default function ConnectStep() {
             className="text-xs font-medium"
             style={{ color: 'var(--color-text-tertiary)' }}
           >
-            Region
+            {t('setup.regionLabel')}
           </span>
           <div
             className="inline-flex rounded-md overflow-hidden"
@@ -1089,7 +1092,7 @@ export default function ConnectStep() {
                 color: !selectedRegion ? '#fff' : 'var(--color-text-secondary)',
               }}
             >
-              {(defaultRegion === 'cn' ? 'China' : defaultRegion === 'sg' ? 'Singapore' : 'International')}
+              {(defaultRegion === 'cn' ? t('setup.regionChina') : defaultRegion === 'sg' ? t('setup.regionSingapore') : t('setup.regionInternational'))}
             </button>
             {regionVariants.map((rv) => (
               <button
@@ -1103,7 +1106,7 @@ export default function ConnectStep() {
                   borderLeft: '1px solid var(--color-border-default)',
                 }}
               >
-                {rv.region === 'cn' ? 'China' : rv.region === 'sg' ? 'Singapore' : rv.region === 'intl' ? 'International' : rv.region}
+                {rv.region === 'cn' ? t('setup.regionChina') : rv.region === 'sg' ? t('setup.regionSingapore') : rv.region === 'intl' ? t('setup.regionInternational') : rv.region}
               </button>
             ))}
           </div>
@@ -1124,7 +1127,7 @@ export default function ConnectStep() {
             className="text-xs font-medium"
             style={{ color: 'var(--color-text-tertiary)' }}
           >
-            API format
+            {t('setup.apiFormatLabel')}
           </span>
           <span
             className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
@@ -1133,7 +1136,7 @@ export default function ConnectStep() {
               color: 'var(--color-accent-primary)',
             }}
           >
-            {effectiveApiFormatLabel}
+            {t(effectiveApiFormatKey, { sdk: effectiveSdk })}
           </span>
         </div>
 
@@ -1144,7 +1147,7 @@ export default function ConnectStep() {
               className="text-xs font-medium"
               style={{ color: 'var(--color-text-tertiary)' }}
             >
-              Base URL
+              {t('setup.baseUrlLabel')}
             </label>
             {baseUrl !== effectiveBaseUrl && effectiveBaseUrl && (
               <button
@@ -1153,7 +1156,7 @@ export default function ConnectStep() {
                 className="text-[11px]"
                 style={{ color: 'var(--color-accent-primary)' }}
               >
-                Reset to default
+                {t('setup.resetToDefault')}
               </button>
             )}
           </div>
@@ -1166,7 +1169,7 @@ export default function ConnectStep() {
           />
           {effectiveBaseUrl && baseUrl !== effectiveBaseUrl && baseUrl.trim() !== '' && (
             <p className="text-[11px]" style={{ color: 'var(--color-warning, #f59e0b)' }}>
-              Custom URL. Default: {effectiveBaseUrl}
+              {t('setup.customUrlWarning', { url: effectiveBaseUrl })}
             </p>
           )}
         </div>
@@ -1178,10 +1181,10 @@ export default function ConnectStep() {
           className="block text-sm font-medium"
           style={{ color: 'var(--color-text-primary)' }}
         >
-          {displayName} API Key
+          {t('setup.providerApiKey', { provider: displayName })}
           {dynamicModels && (
             <span className="text-xs font-normal ml-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
-              (optional)
+              {t('setup.optional')}
             </span>
           )}
         </label>
@@ -1201,7 +1204,7 @@ export default function ConnectStep() {
 
       <div className="flex items-center justify-between pt-2">
         <Button variant="outline" onClick={handleBack}>
-          Back
+          {t('setup.back')}
         </Button>
         <Button
           variant="default"
@@ -1212,10 +1215,10 @@ export default function ConnectStep() {
           {saving ? (
             <>
               <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-              Saving...
+              {t('setup.saving')}
             </>
           ) : (
-            'Continue'
+            t('setup.continue')
           )}
         </Button>
       </div>

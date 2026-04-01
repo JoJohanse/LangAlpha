@@ -28,6 +28,7 @@ import { WorkspaceProvider } from '../contexts/WorkspaceContext';
 import SubagentStatusBar from './SubagentStatusBar';
 import TodoDrawer from './TodoDrawer';
 import { parseErrorMessage } from '../utils/parseErrorMessage';
+import type { StructuredError } from '@/utils/rateLimitError';
 import { motion, AnimatePresence, type PanInfo } from 'framer-motion';
 import { MobileBottomSheet } from '@/components/ui/mobile-bottom-sheet';
 
@@ -1928,7 +1929,42 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
                       </div>
                     )}
                     {messageError && !isLoading && (() => {
-                      const parsed = parseErrorMessage(messageError);
+                      // Structured error (from buildRateLimitError) — render message + optional link
+                      if (typeof messageError === 'object' && 'message' in messageError) {
+                        const err = messageError as StructuredError;
+                        return (
+                          <div
+                            className="flex items-center gap-2 px-3 py-2 rounded-md text-sm"
+                            style={{ backgroundColor: 'var(--color-loss-soft)', color: 'var(--color-loss)' }}
+                          >
+                            <AlertTriangle className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--color-loss)' }} />
+                            <span>
+                              {err.message}
+                              {err.link && (
+                                <>
+                                  {' '}
+                                  <a
+                                    href={err.link.url}
+                                    {...(!err.link.url.startsWith('/') && { target: '_blank', rel: 'noopener noreferrer' })}
+                                    onClick={(e) => {
+                                      // Use client-side navigation for internal paths
+                                      if (err.link!.url.startsWith('/')) {
+                                        e.preventDefault();
+                                        navigate(err.link!.url);
+                                      }
+                                    }}
+                                    style={{ textDecoration: 'underline', fontWeight: 500 }}
+                                  >
+                                    {err.link.label}
+                                  </a>
+                                </>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      }
+                      // Plain string error — pass through parseErrorMessage
+                      const parsed = parseErrorMessage(messageError as string);
                       return (
                         <div
                           className="flex items-center gap-2 px-3 py-2 rounded-md text-sm"

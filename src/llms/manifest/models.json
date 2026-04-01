@@ -4,7 +4,11 @@
     "provider": "openai",
     "display_name": "GPT-5.4",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "reasoning": {
         "effort": "medium",
@@ -17,7 +21,11 @@
     "provider": "openai",
     "display_name": "GPT-5.4 Mini",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "reasoning": {
         "effort": "medium",
@@ -30,7 +38,11 @@
     "provider": "openai",
     "display_name": "GPT-5.4 Nano",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "reasoning": {
         "effort": "medium",
@@ -42,7 +54,11 @@
     "model_id": "claude-opus-4-6",
     "provider": "anthropic",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "thinking": {
         "type": "adaptive"
@@ -56,7 +72,11 @@
     "model_id": "claude-sonnet-4-6",
     "provider": "anthropic",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "thinking": {
         "type": "adaptive"
@@ -67,7 +87,11 @@
     "model_id": "claude-haiku-4-5-20251001",
     "provider": "anthropic",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "thinking": {
         "type": "enabled"
@@ -78,7 +102,12 @@
     "model_id": "gemini-3.1-pro-preview",
     "provider": "gemini",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf", "video"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf",
+      "video"
+    ],
     "parameters": {
       "include_thoughts": true,
       "thinking_level": "high"
@@ -88,7 +117,12 @@
     "model_id": "gemini-3-flash-preview",
     "provider": "gemini",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf", "video"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf",
+      "video"
+    ],
     "parameters": {
       "include_thoughts": true,
       "thinking_level": "medium"
@@ -98,7 +132,12 @@
     "model_id": "gemini-3.1-flash-lite-preview",
     "provider": "gemini",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf", "video"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf",
+      "video"
+    ],
     "parameters": {
       "include_thoughts": true,
       "thinking_level": "medium"
@@ -108,21 +147,30 @@
     "model_id": "gemini-3.1-flash-image-preview",
     "provider": "gemini",
     "visible": true,
-    "input_modalities": ["text", "image"]
+    "input_modalities": [
+      "text",
+      "image"
+    ]
   },
   "gpt-oss-120b": {
     "model_id": "gpt-oss-120b",
     "provider": "vllm",
     "parameters": {
       "reasoning_effort": "low"
-    }
+    },
+    "input_modalities": [
+      "text"
+    ]
   },
   "gpt-oss-20b": {
     "model_id": "gpt-oss-20b",
     "provider": "vllm",
     "parameters": {
       "reasoning_effort": "low"
-    }
+    },
+    "input_modalities": [
+      "text"
+    ]
   },
   "gpt-oss-20b-safe-groq": {
     "model_id": "openai/gpt-oss-safeguard-20b",
@@ -138,7 +186,10 @@
           "allow_fallbacks": true
         }
       }
-    }
+    },
+    "input_modalities": [
+      "text"
+    ]
   },
   "gpt-oss-20b-deepinfra": {
     "model_id": "openai/gpt-oss-20b",
@@ -154,7 +205,10 @@
           "allow_fallbacks": false
         }
       }
-    }
+    },
+    "input_modalities": [
+      "text"
+    ]
   },
   "gpt-oss-safeguard-20b-deepinfra": {
     "model_id": "openai/gpt-oss-safeguard-20b",
@@ -170,7 +224,10 @@
           "allow_fallbacks": false
         }
       }
-    }
+    },
+    "input_modalities": [
+      "text"
+    ]
   },
   "gpt-oss-120b-groq": {
     "model_id": "openai/gpt-oss-120b",
@@ -186,13 +243,20 @@
           "allow_fallbacks": true
         }
       }
-    }
+    },
+    "input_modalities": [
+      "text"
+    ]
   },
   "doubao-seed-2.0-pro": {
     "model_id": "doubao-seed-2-0-pro-260215",
     "provider": "volcengine",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "use_previous_response_id": false
     },
@@ -206,7 +270,11 @@
     "model_id": "doubao-seed-2-0-lite-260215",
     "provider": "volcengine",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "use_previous_response_id": false
     },
@@ -220,7 +288,11 @@
     "model_id": "doubao-seed-2-0-mini-260215",
     "provider": "volcengine",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "use_previous_response_id": false
     },
@@ -234,7 +306,11 @@
     "model_id": "doubao-seed-2-0-code-preview-260215",
     "provider": "volcengine",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "use_previous_response_id": false
     },
@@ -248,7 +324,11 @@
     "model_id": "doubao-seed-2-0-pro-260215",
     "provider": "doubao-anthropic",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "thinking": {
         "type": "enabled"
@@ -259,7 +339,11 @@
     "model_id": "doubao-seed-2-0-lite-260215",
     "provider": "doubao-anthropic",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "thinking": {
         "type": "enabled"
@@ -270,7 +354,11 @@
     "model_id": "doubao-seed-2-0-mini-260215",
     "provider": "doubao-anthropic",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "thinking": {
         "type": "enabled"
@@ -281,7 +369,11 @@
     "model_id": "doubao-seed-2-0-code-preview-260215",
     "provider": "doubao-anthropic",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "thinking": {
         "type": "enabled"
@@ -290,7 +382,10 @@
   },
   "deepseek-reasoner": {
     "model_id": "deepseek-reasoner",
-    "provider": "deepseek"
+    "provider": "deepseek",
+    "input_modalities": [
+      "text"
+    ]
   },
   "glm-5": {
     "model_id": "glm-5",
@@ -301,7 +396,11 @@
       "thinking": {
         "type": "enabled"
       }
-    }
+    },
+    "input_modalities": [
+      "text",
+      "image"
+    ]
   },
   "glm-5-turbo": {
     "model_id": "glm-5-turbo",
@@ -312,7 +411,10 @@
       "thinking": {
         "type": "enabled"
       }
-    }
+    },
+    "input_modalities": [
+      "text"
+    ]
   },
   "glm-5-turbo-cn": {
     "model_id": "glm-5-turbo",
@@ -323,7 +425,10 @@
       "thinking": {
         "type": "enabled"
       }
-    }
+    },
+    "input_modalities": [
+      "text"
+    ]
   },
   "glm-5-cn": {
     "model_id": "glm-5",
@@ -334,7 +439,11 @@
       "thinking": {
         "type": "enabled"
       }
-    }
+    },
+    "input_modalities": [
+      "text",
+      "image"
+    ]
   },
   "minimax-m2.7": {
     "model_id": "MiniMax-M2.7-highspeed",
@@ -345,13 +454,20 @@
       "thinking": {
         "type": "enabled"
       }
-    }
+    },
+    "input_modalities": [
+      "text"
+    ]
   },
   "qwen3.5-plus": {
     "model_id": "qwen3.5-plus",
     "provider": "dashscope",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "extra_body": {
       "enable_thinking": true
     }
@@ -360,13 +476,21 @@
     "model_id": "qwen3.5-plus",
     "provider": "dashscope-coding",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"]
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ]
   },
   "qwen3.5-flash": {
     "model_id": "qwen3.5-flash",
     "provider": "dashscope",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "extra_body": {
       "enable_thinking": true
     }
@@ -375,7 +499,11 @@
     "model_id": "qwen3.5-plus",
     "provider": "dashscope-intl",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "extra_body": {
       "enable_thinking": true
     }
@@ -384,7 +512,11 @@
     "model_id": "qwen3.5-flash",
     "provider": "dashscope-intl",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "extra_body": {
       "enable_thinking": true
     }
@@ -392,7 +524,11 @@
   "qwen3.5-397b-a17b": {
     "model_id": "qwen3.5-397b-a17b",
     "provider": "dashscope",
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "extra_body": {
       "enable_thinking": true
     }
@@ -400,7 +536,11 @@
   "qwen3.5-122b-a10b": {
     "model_id": "qwen3.5-122b-a10b",
     "provider": "dashscope",
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "extra_body": {
       "enable_thinking": true
     }
@@ -408,7 +548,11 @@
   "qwen3.5-27b": {
     "model_id": "qwen3.5-27b",
     "provider": "dashscope",
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "extra_body": {
       "enable_thinking": true
     }
@@ -416,7 +560,11 @@
   "qwen3.5-35b-a3b": {
     "model_id": "qwen3.5-35b-a3b",
     "provider": "dashscope",
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "extra_body": {
       "enable_thinking": true
     }
@@ -425,7 +573,10 @@
     "model_id": "kimi-k2.5",
     "provider": "moonshot",
     "visible": true,
-    "input_modalities": ["text", "image"],
+    "input_modalities": [
+      "text",
+      "image"
+    ],
     "parameters": {
       "thinking": {
         "type": "enabled"
@@ -436,7 +587,10 @@
     "model_id": "kimi-for-coding",
     "provider": "moonshot-coding",
     "visible": true,
-    "input_modalities": ["text", "image"],
+    "input_modalities": [
+      "text",
+      "image"
+    ],
     "parameters": {
       "thinking": {
         "type": "enabled"
@@ -447,7 +601,11 @@
     "model_id": "gpt-5.3-codex",
     "provider": "codex-oauth",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "reasoning": {
         "effort": "medium",
@@ -463,7 +621,11 @@
     "model_id": "gpt-5.3-codex-spark",
     "provider": "codex-oauth",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "reasoning": {
         "effort": "medium",
@@ -479,7 +641,11 @@
     "model_id": "gpt-5.4",
     "provider": "codex-oauth",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "reasoning": {
         "effort": "medium",
@@ -495,7 +661,11 @@
     "model_id": "gpt-5.4-mini",
     "provider": "codex-oauth",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "reasoning": {
         "effort": "medium",
@@ -511,7 +681,11 @@
     "model_id": "claude-sonnet-4-6",
     "provider": "claude-oauth",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "thinking": {
         "type": "adaptive"
@@ -522,7 +696,11 @@
     "model_id": "claude-opus-4-6",
     "provider": "claude-oauth",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "thinking": {
         "type": "adaptive"
@@ -536,7 +714,11 @@
     "model_id": "claude-haiku-4-5-20251001",
     "provider": "claude-oauth",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "thinking": {
         "type": "enabled",
@@ -569,7 +751,11 @@
     "model_id": "claude-opus-4-6",
     "provider": "claude-oauth",
     "visible": true,
-    "input_modalities": ["text", "image", "pdf"],
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
     "parameters": {
       "thinking": {
         "type": "adaptive"

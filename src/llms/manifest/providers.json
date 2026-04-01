@@ -652,7 +652,7 @@
         "id": "qwen3.5-flash",
         "name": "Qwen3.5 Flash",
         "is_reasoning": true,
-        "description": "Alibaba's Qwen3.5 Flash \u2014 fastest and most cost-efficient in the series, 1M context",
+        "description": "Alibaba's Qwen3.5 Flash — fastest and most cost-efficient in the series, 1M context",
         "context_window": 1000000,
         "max_output": 65536,
         "pricing": {
@@ -825,7 +825,7 @@
         "id": "qwen3.5-plus",
         "name": "Qwen3.5 Plus (SG)",
         "is_reasoning": true,
-        "description": "Alibaba's Qwen3.5 Plus model \u2014 Singapore international region",
+        "description": "Alibaba's Qwen3.5 Plus model — Singapore international region",
         "context_window": 1000000,
         "max_output": 65536,
         "pricing": {
@@ -857,7 +857,7 @@
         "id": "qwen3.5-flash",
         "name": "Qwen3.5 Flash (SG)",
         "is_reasoning": true,
-        "description": "Alibaba's Qwen3.5 Flash \u2014 Singapore international region",
+        "description": "Alibaba's Qwen3.5 Flash — Singapore international region",
         "context_window": 1000000,
         "max_output": 65536,
         "pricing": {

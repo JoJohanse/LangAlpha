@@ -59,8 +59,12 @@ export function parseErrorMessage(raw: string): ParsedError {
     return { title, detail: detail || null, model, statusCode };
   }
 
-  // Rate limit pattern
+  // Rate limit pattern — but skip the generic "Rate limit exceeded" prefix
+  // when the message is already descriptive (e.g. from the platform 429 response).
   if (/rate.?limit|too many requests|quota/i.test(raw)) {
+    if (/^(Daily credit limit|Active workspace limit)/i.test(raw)) {
+      return { title: raw, detail: null, model, statusCode: statusCode || 429 };
+    }
     return { title: 'Rate limit exceeded', detail: raw, model, statusCode: statusCode || 429 };
   }
 

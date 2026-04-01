@@ -27,6 +27,9 @@ GINLIX_DATA_ENABLED: bool = bool(GINLIX_DATA_URL)
 # Public base URL of this server (used in agent-generated URLs like preview links)
 SERVER_BASE_URL: str = os.getenv("SERVER_BASE_URL", "http://localhost:8000")
 
+# Credit conversion rate (USD → credits).  Override with USD_TO_CREDITS_RATE env var.
+USD_TO_CREDITS_RATE: int = int(os.getenv("USD_TO_CREDITS_RATE", "1000"))
+
 # Automation webhook delivery (ginlix-integration)
 AUTOMATION_WEBHOOK_URL: str = os.getenv("AUTOMATION_WEBHOOK_URL", "")
 AUTOMATION_WEBHOOK_SECRET: str = os.getenv("AUTOMATION_WEBHOOK_SECRET", "")

@@ -125,14 +125,14 @@ class TestResolveBYOKSystemModel:
 
     @pytest.mark.asyncio
     async def test_sub_provider_resolves_parent(self):
-        """Sub-provider (e.g., anthropic-aws) should resolve to parent's BYOK key."""
+        """Platform sub-provider should resolve to parent's BYOK key."""
         from src.server.handlers.chat.llm_config import resolve_byok_llm_client
 
         mc = _mock_model_config(
-            system_models={"claude-sonnet": {"provider": "anthropic-aws"}},
+            system_models={"test-model": {"provider": "acme-platform"}},
             providers={
-                "anthropic-aws": {"parent": "anthropic", "base_url": "https://aws.anthropic.com"},
-                "anthropic": {"base_url": None},
+                "acme-platform": {"parent": "acme", "base_url": "https://proxy.example.com"},
+                "acme": {"base_url": None},
             },
         )
         mock_llm = MagicMock()
@@ -141,13 +141,13 @@ class TestResolveBYOKSystemModel:
             patch(
                 f"{DB_KEYS}.get_byok_config_for_provider",
                 new_callable=AsyncMock,
-                return_value={"api_key": "anthropic-key", "base_url": None},
+                return_value={"api_key": "acme-key", "base_url": None},
             ),
             patch("src.llms.llm.create_llm", return_value=mock_llm) as mock_create,
         ):
-            result = await resolve_byok_llm_client("user-1", "claude-sonnet", True)
+            result = await resolve_byok_llm_client("user-1", "test-model", True)
 
-        # Should look up "anthropic" (parent), not "anthropic-aws"
+        # Should look up parent provider, not platform variant
         assert result is mock_llm
 
 

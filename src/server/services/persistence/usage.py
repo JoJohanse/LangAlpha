@@ -38,11 +38,9 @@ from src.utils.tracking.infrastructure_costs import (
     calculate_infrastructure_credits,
     format_infrastructure_usage
 )
+from src.config.env import USD_TO_CREDITS_RATE
 
 logger = logging.getLogger(__name__)
-
-# Credit conversion rate (USD to credits)
-USD_TO_CREDITS_RATE = 1000  # 1 USD = 1000 credits
 
 
 class UsagePersistenceService:
@@ -84,6 +82,7 @@ class UsagePersistenceService:
         self._tool_usage: Dict[str, int] = {}
         self._infrastructure_credits: Decimal = Decimal("0.0")
         self._token_credits: Decimal = Decimal("0.0")
+        self._has_platform_calls: bool = False
 
         logger.debug(
             f"[UsagePersistence] Initialized service for thread_id={thread_id}, "
@@ -139,13 +138,19 @@ class UsagePersistenceService:
             # Store for persistence
             self._token_usage = token_usage_with_cost
 
-            # Convert USD to credits
+            # Convert USD to credits — only platform-served calls consume credits.
+            # BYOK/OAuth calls are paid by the user's own key.
+            platform_cost_usd = token_usage_with_cost.get("platform_cost", 0.0)
             total_cost_usd = token_usage_with_cost.get("total_cost", 0.0)
-            self._token_credits = Decimal(str(total_cost_usd)) * Decimal(str(self.credit_conversion_rate))
+            self._token_credits = Decimal(str(platform_cost_usd)) * Decimal(str(self.credit_conversion_rate))
+
+            # Determine if any platform calls occurred (for is_byok flag)
+            self._has_platform_calls = platform_cost_usd > 0
 
             logger.debug(
                 f"[UsagePersistence] Tracked LLM usage: "
                 f"total_cost=${total_cost_usd:.4f}, "
+                f"platform_cost=${platform_cost_usd:.4f}, "
                 f"credits={float(self._token_credits):.2f}"
             )
 
@@ -156,14 +161,15 @@ class UsagePersistenceService:
                 f"[UsagePersistence] Failed to track LLM usage: {e}",
                 exc_info=True
             )
-            # Return empty structure on error
-            self._token_usage = {
+            # Leave _token_usage as None so persist_usage falls back to caller's
+            # is_byok hint instead of deriving from _has_platform_calls (which
+            # was never updated).
+            self._token_credits = Decimal("0.0")
+            return {
                 "by_model": {},
                 "total_cost": 0.0,
                 "cost_breakdown": {"input_cost": 0.0, "output_cost": 0.0, "cached_cost": 0.0}
             }
-            self._token_credits = Decimal("0.0")
-            return self._token_usage
 
     # ========== Infrastructure Usage Tracking ==========
 
@@ -242,6 +248,12 @@ class UsagePersistenceService:
         2. Formats data for database storage
         3. Inserts into conversation_usage table
 
+        The ``is_byok`` parameter is a caller hint. If per-call billing data
+        is available (from PerCallTokenTracker billing_type metadata), the
+        actual value is computed from the call records — ``True`` only when
+        zero platform calls occurred. This prevents stale ``is_byok`` from
+        the request-start closure overriding the real billing picture.
+
         Args:
             response_id: Response identifier
             timestamp: Optional timestamp (defaults to now)
@@ -249,6 +261,7 @@ class UsagePersistenceService:
             deepthinking: Whether deepthinking was enabled
             status: Workflow completion status (completed, error, cancelled, interrupted)
             conn: Optional database connection for transaction support
+            is_byok: Caller hint for billing type (overridden by per-call data when available)
 
         Returns:
             True if successful, False otherwise
@@ -272,6 +285,15 @@ class UsagePersistenceService:
 
             final_msg_type = msg_type or 'ptc'
 
+            # Compute is_byok from actual per-call billing data.
+            # If we tracked any LLM calls, use real billing data: BYOK only
+            # when no call used the platform key.  Otherwise fall back to the
+            # flag from the auth layer.
+            if self._token_usage:
+                effective_is_byok = not self._has_platform_calls
+            else:
+                effective_is_byok = is_byok
+
             # Build usage record (write-once data, no updates)
             usage_data = {
                 "conversation_usage_id": str(uuid4()),
@@ -286,7 +308,7 @@ class UsagePersistenceService:
                 "token_credits": float(self._token_credits),
                 "infrastructure_credits": float(self._infrastructure_credits),
                 "total_credits": float(total_credits),
-                "is_byok": is_byok,
+                "is_byok": effective_is_byok,
                 "created_at": timestamp
             }
 
@@ -383,6 +405,7 @@ class UsagePersistenceService:
         self._tool_usage.clear()
         self._infrastructure_credits = Decimal("0.0")
         self._token_credits = Decimal("0.0")
+        self._has_platform_calls = False
 
         logger.debug(f"[UsagePersistence] Reset usage tracking for thread_id={self.thread_id}")
 

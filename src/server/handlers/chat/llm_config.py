@@ -89,7 +89,7 @@ async def resolve_byok_llm_client(
     If BYOK is active, look up the user's key for the model's **parent** provider
     and return a fresh LLM client.  Returns None if BYOK isn't applicable.
 
-    Auto-reroutes from sub-providers (e.g., anthropic-aws) to the parent provider's
+    Auto-reroutes from sub-providers (e.g., platform variants) to the parent provider's
     official endpoint (or user's custom base_url if set).
     """
     if not is_byok:
@@ -141,7 +141,7 @@ async def resolve_byok_llm_client(
     provider = model_info["provider"]
     parent = mc.get_parent_provider(provider)
 
-    # Look up BYOK key for parent provider (e.g., "anthropic" not "anthropic-aws")
+    # Look up BYOK key for parent provider (resolves platform variants to parent)
     byok_config = await get_byok_config_for_provider(user_id, parent)
     if not byok_config:
         return None
@@ -195,10 +195,11 @@ async def resolve_oauth_llm_client(
 
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"Model '{model_name}' requires a connected {provider} account. "
-                f"Please connect your account at ginlix.ai first."
-            ),
+            detail={
+                "message": f"Model '{model_name}' requires a connected {provider} account.",
+                "type": "oauth_required",
+                "link": {"url": "/setup/method", "label": "Connect account"},
+            },
         )
 
     access_token = token_data["access_token"]
@@ -307,7 +308,7 @@ async def resolve_llm_config(
             setattr(config.llm, config_field, user_val)
 
     user_fallback = model_pref.get("fallback_models")
-    if user_fallback:
+    if user_fallback is not None:
         if config is base_config:
             config = config.model_copy(deep=True)
         config.llm.fallback = user_fallback
@@ -406,13 +407,31 @@ async def resolve_llm_config(
                     config = config.model_copy(deep=True)
                 config.subsidiary_llm_clients[role] = results[i]
 
-        resolved_fallbacks = [r for r in results[sub_count:] if r]
-        if resolved_fallbacks:
+        # Merge resolved OAuth/BYOK clients with platform fallbacks.
+        # For each fallback model: use the pre-resolved client if available,
+        # otherwise create a platform-keyed client so no model is silently dropped.
+        from src.llms.llm import create_llm as _create_llm
+
+        fallback_results = results[sub_count:]
+        merged_fallbacks = []
+        byok_count = 0
+        for i, model_name in enumerate(fallback_models):
+            if fallback_results[i]:
+                merged_fallbacks.append(fallback_results[i])
+                byok_count += 1
+            else:
+                try:
+                    merged_fallbacks.append(_create_llm(model_name))
+                except Exception:
+                    logger.warning("[CHAT] Failed to create platform fallback for %s, skipping", model_name)
+
+        if merged_fallbacks:
             if config is base_config:
                 config = config.model_copy(deep=True)
-            config.fallback_llm_clients = resolved_fallbacks
-            logger.info(
-                f"[CHAT] Resolved {len(resolved_fallbacks)}/{len(fallback_models)} fallback models via OAuth/BYOK"
-            )
+            config.fallback_llm_clients = merged_fallbacks
+            if byok_count:
+                logger.info(
+                    f"[CHAT] Resolved {byok_count}/{len(fallback_models)} fallback models via OAuth/BYOK"
+                )
 
     return config

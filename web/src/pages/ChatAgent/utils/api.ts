@@ -140,12 +140,24 @@ async function streamFetch(
     }
     // Read response body for error detail
     let detail = '';
+    let errorInfo: Record<string, unknown> | null = null;
+    const text = await res.text().catch(() => '');
     try {
-      const body = await res.json();
-      detail = typeof body?.detail === 'string' ? body.detail : JSON.stringify(body?.detail || body);
+      const body = JSON.parse(text);
+      if (body?.detail && typeof body.detail === 'object' && 'message' in body.detail) {
+        // Structured error detail (e.g., { message, type, link })
+        errorInfo = body.detail as Record<string, unknown>;
+        detail = (errorInfo.message as string) || '';
+      } else {
+        detail = typeof body?.detail === 'string' ? body.detail : JSON.stringify(body?.detail || body);
+      }
     } catch { /* ignore parse errors */ }
     console.error(`[api] ${opts.method || 'GET'} ${url} failed:`, res.status, detail);
-    throw new Error(detail || `HTTP error! status: ${res.status}`);
+    const err: Error & { status?: number; errorInfo?: Record<string, unknown> } =
+      new Error(detail || `HTTP error! status: ${res.status}`);
+    err.status = res.status;
+    if (errorInfo) err.errorInfo = errorInfo;
+    throw err;
   }
 
   const reader = res.body!.getReader();
