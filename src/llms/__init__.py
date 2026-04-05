@@ -1,3 +1,6 @@
+from src.llms.patches import _patch_langchain_anthropic_usage_metadata
+_patch_langchain_anthropic_usage_metadata()
+
 from .llm import LLM, ModelConfig, create_llm, get_llm_by_type, get_configured_llm_models, get_input_modalities, should_enable_caching
 from .api_call import (
     make_api_call,
