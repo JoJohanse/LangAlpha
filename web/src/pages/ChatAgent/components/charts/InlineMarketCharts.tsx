@@ -839,6 +839,46 @@ function Inline8KCard({ artifact, onClick }: InlineFilingCardProps): React.React
   );
 }
 
+// ─── Shared favicon helper ──────────────────────────────────────────
+
+/** Favicon <img> with onError fallback to a monogram span. */
+export function FaviconImg({ src, domain, size = 14 }: { src: string; domain: string; size?: number }): React.ReactElement {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <span
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 2,
+          backgroundColor: 'var(--color-bg-surface)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: Math.round(size * 0.64),
+          fontWeight: 600,
+          color: TEXT_COLOR,
+          flexShrink: 0,
+        }}
+      >
+        {(domain || '?')[0].toUpperCase()}
+      </span>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt=""
+      width={size}
+      height={size}
+      style={{ borderRadius: 2, flexShrink: 0 }}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 // ─── InlineWebSearchCard ──────────────────────────────────────────
 
 interface WebSearchResult {
@@ -1000,40 +1040,3 @@ export function InlineWebSearchCard({ artifact, onClick }: InlineCardProps): Rea
   );
 }
 
-/** Favicon <img> with onError fallback to a monogram span. */
-function FaviconImg({ src, domain, size }: { src: string; domain: string; size: number }): React.ReactElement {
-  const [failed, setFailed] = useState(false);
-
-  if (failed) {
-    return (
-      <span
-        style={{
-          width: size,
-          height: size,
-          borderRadius: 2,
-          backgroundColor: 'var(--color-bg-surface)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: Math.round(size * 0.64),
-          fontWeight: 600,
-          color: TEXT_COLOR,
-          flexShrink: 0,
-        }}
-      >
-        {(domain || '?')[0].toUpperCase()}
-      </span>
-    );
-  }
-
-  return (
-    <img
-      src={src}
-      alt=""
-      width={size}
-      height={size}
-      style={{ borderRadius: 2, flexShrink: 0 }}
-      onError={() => setFailed(true)}
-    />
-  );
-}
