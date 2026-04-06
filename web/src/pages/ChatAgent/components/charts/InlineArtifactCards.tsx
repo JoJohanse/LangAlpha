@@ -850,7 +850,7 @@ export function googleFaviconUrl(domain: string): string {
 export function FaviconImg({ src, domain, size = 14 }: { src: string; domain: string; size?: number }): React.ReactElement {
   const [failed, setFailed] = useState(false);
 
-  if (failed) {
+  if (failed || !src) {
     return (
       <span
         style={{
@@ -986,27 +986,7 @@ export function InlineWebSearchCard({ artifact, onClick }: InlineCardProps): Rea
                 padding: sz.rowPad,
               }}
             >
-              {faviconSrc ? (
-                <FaviconImg src={faviconSrc} domain={domain} size={14} />
-              ) : (
-                <span
-                  style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: 2,
-                    backgroundColor: 'var(--color-bg-surface)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 9,
-                    fontWeight: 600,
-                    color: TEXT_COLOR,
-                    flexShrink: 0,
-                  }}
-                >
-                  {(domain || '?')[0].toUpperCase()}
-                </span>
-              )}
+              <FaviconImg src={faviconSrc} domain={domain} />
               <span
                 style={{
                   color: 'var(--color-text-primary)',
