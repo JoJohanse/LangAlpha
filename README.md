@@ -26,6 +26,11 @@
   <a href="mcp_servers/">MCP</a>
 </p>
 
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/c3935d9a-73fd-4f34-bad8-af4c6233f355" autoplay loop muted playsinline width="900"></video>
+</p>
+<p align="center"><em>Activated with a skill, the agent dispatches parallel subagents to gather market data, news, and macro context, then presents a morning note with inline interactive visualizations.</em></p>
+
 ## Why LangAlpha
 
 Every AI finance tool today treats investing as one-shot: ask a question, get an answer, move on. But real investing is Bayesian — you start with a thesis, new data arrives daily, and you update your conviction accordingly. It's an iterative process that unfolds over weeks and months: refining theses, revisiting positions, layering new analysis on top of old. No single prompt captures that.
@@ -135,6 +140,16 @@ flowchart LR
 
 In addition, the workspace environment enables persistence beyond a single session. Each sandbox has a structured directory layout — `work/<task>/` for per-task working areas (data, charts, code), `results/` for finalized reports, and `data/` for shared datasets — so intermediate results survive across sessions. At the root sits `agent.md`, a persistent memory file that the agent maintains across threads: workspace goals, key findings, a thread index, and a file index of important artifacts. A middleware layer injects `agent.md` into every model call, so the agent always has full context of prior work without re-reading files. Each workspace supports multiple conversation threads tied to a single research goal.
 
+<p align="center">
+  <img src="docs/images/workspaces-list-page.png" alt="Workspaces page with research workspace cards" width="800" />
+</p>
+<p align="center"><em>Each workspace maps to a persistent sandbox — organize research by theme, portfolio, or thesis.</em></p>
+
+<p align="center">
+  <img src="docs/images/chat-data-center-research-with-value-chain-dashboard.png" alt="PTC agent generating an AI compute value chain dashboard with supply chain analysis" width="800" />
+</p>
+<p align="center"><em>The agent writes code to build interactive dashboards — here analyzing the AI compute supply chain via PTC.</em></p>
+
 ### Financial Data Ecosystem
 
 While PTC excels at complex work like multi-step data processing, financial modeling, and chart creation, spinning up code execution for every data lookup is overkill. So we also built a native financial data toolset that transforms frequently used data into an LLM-digestible format. These tools also come with artifacts that render directly in the frontend, giving the human layer immediate visual context alongside the agent's analysis.
@@ -172,6 +187,11 @@ All tiers are enabled by default. To run with **free data only** (Yahoo Finance)
 > [!NOTE]
 > Yahoo Finance data is community-sourced and has limitations: no intraday data below 1-hour intervals, delayed quotes, limited macro coverage, and occasional rate limiting. An `FMP_API_KEY` is strongly recommended ([free tier available](https://site.financialmodelingprep.com/)).
 
+<p align="center">
+  <img src="docs/images/chat-nvda-amd-googl-comps-analysis-with-stock-cards.png" alt="Comparable company analysis with live NVDA, AMD, and GOOGL stock cards" width="800" />
+</p>
+<p align="center"><em>Native financial data tools render live stock cards inline while the agent runs a comps analysis.</em></p>
+
 ### Financial Research Skills
 
 The agent ships with 23 pre-built financial research skills, each activatable by slash command or automatic detection. Skills follow the [Agent Skills Spec](https://agentskills.io/specification) and can be extended by dropping a `SKILL.md` file into the workspace.
@@ -188,9 +208,19 @@ The agent ships with 23 pre-built financial research skills, each activatable by
 
 Acknowledgement: some of skills are adapted from [anthropics/financial-services-plugins](https://github.com/anthropics/financial-services-plugins).
 
+<p align="center">
+  <img src="docs/images/chat-comparable-company-valuation-pdf-report.png" alt="Comps Analysis skill generating an Excel workbook and PDF report for NVDA, AMD, and GOOGL" width="800" />
+</p>
+<p align="center"><em>The Comps Analysis skill builds a multi-sheet Excel workbook with operating metrics and valuation multiples.</em></p>
+
 ### Multimodal Intelligence
 
 The agent natively reads images (PNG, JPG, GIF, WebP) and PDFs — the multimodal middleware intercepts file reads, downloads content from the sandbox or URLs, and injects it as base64 into the conversation for direct visual interpretation. In MarketView, the user's live candlestick chart can be captured and sent to the agent as multimodal context — the capture includes both the chart image and structured metadata (symbol, interval, OHLCV, moving averages, RSI, 52-week range) so the agent can reason about both the visual pattern and the underlying data.
+
+<p align="center">
+  <img src="docs/images/marketview-googl-intraday-chart-with-ai-analysis.png" alt="MarketView showing GOOGL intraday candlestick chart with AI technical analysis" width="800" />
+</p>
+<p align="center"><em>MarketView captures the live chart and sends it to the agent for real-time technical analysis.</em></p>
 
 ### Automations
 
@@ -211,6 +241,11 @@ Conditions can be combined (AND logic), and each price automation supports **one
 
 > [!NOTE]
 > Price-triggered automations require the real-time WebSocket feed from ginlix-data. During the beta, this feature is available exclusively on the [hosted platform](https://ginlix.ai). Broader WebSocket data source support is planned for future releases.
+
+<p align="center">
+  <img src="docs/images/automations-page-earnings-pre-analysis-schedules.png" alt="Automations page with scheduled earnings pre-analysis tasks" width="800" />
+</p>
+<p align="center"><em>Schedule recurring research — here, pre-earnings analysis for major tech stocks runs automatically before each report.</em></p>
 
 **Agent Architecture**
 
@@ -275,6 +310,11 @@ The core agent runs on [LangGraph](https://github.com/langchain-ai/langgraph) an
 
 Beyond simple dispatch, the main agent can send follow-up instructions to a still-running subagent via `Task(action="update")`, or resume a completed subagent with full checkpoint context via `Task(action="resume")` for iterative refinement. If the server restarts, subagent state is automatically reconstructed from LangGraph checkpoints.
 
+<p align="center">
+  <img src="docs/images/chat-ai-compute-timeline-dashboard.png" alt="Parallel subagents building an AI compute timeline dashboard" width="800" />
+</p>
+<p align="center"><em>Three research subagents run in parallel, each covering a different chip family — results merge into an interactive timeline.</em></p>
+
 ### Middleware Stack
 
 The agent ships with a middleware stack, including:
@@ -334,6 +374,11 @@ The web UI is more than a chat interface — it's a full research workbench:
 - **Shareable conversations** — one-click sharing with granular permissions (toggle file browsing and download access), replay via public URL
 - **Real-time subagent monitoring** — watch each background task's streaming output and tool calls live, with the ability to send mid-execution instructions
 - **Automations** — CRUD management with cron builder, execution history, manual trigger, and price-triggered automations that fire when a stock or index hits a real-time price condition
+
+<p align="center">
+  <img src="docs/images/dashboard-market-overview-with-news-and-portfolio.png" alt="Dashboard with market indices, news, portfolio, and earnings calendar" width="800" />
+</p>
+<p align="center"><em>The dashboard surfaces market indices, personalized news, portfolio tracking, and upcoming earnings at a glance.</em></p>
 
 ## Channel Integrations
 
