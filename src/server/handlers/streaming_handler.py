@@ -321,6 +321,12 @@ class WorkflowStreamHandler:
         # Shared event sequence counter (set by BackgroundTaskManager for concurrent tail)
         self.event_counter: Optional[Any] = None
 
+        # Track message IDs that have already emitted content via AIMessageChunk streaming.
+        # When a streaming model produces chunks, LangGraph also emits a final AIMessage
+        # with the full content at node completion. This set prevents re-emitting that
+        # duplicate content while still allowing non-streaming AIMessage content through.
+        self._streamed_content_ids: Set[str] = set()
+
         # When True, skip all subagent-related emission (drain, status) — tail handles it
         self.skip_subagent_events: bool = False
 
@@ -1223,9 +1229,22 @@ class WorkflowStreamHandler:
 
             yield self._format_sse_event("tool_call_result", event_stream_message)
 
-        elif isinstance(message_chunk, AIMessageChunk):
-            # AI Message - Raw message tokens
-            if message_chunk.tool_calls:
+        elif isinstance(message_chunk, (AIMessageChunk, AIMessage)):
+            # AI Message - Raw message tokens (AIMessageChunk during streaming)
+            # or complete message (AIMessage when model doesn't stream).
+            #
+            # During streaming, LangGraph emits AIMessageChunk tokens followed by a
+            # final AIMessage with the full content at node completion. We track
+            # streamed message IDs to avoid re-emitting the full content as a duplicate.
+            is_chunk = isinstance(message_chunk, AIMessageChunk)
+            is_complete_msg = not is_chunk
+
+            if is_complete_msg and message_id in self._streamed_content_ids:
+                # Content was already streamed via chunks — skip duplicate emission.
+                # Still let finish_reason through (handled by earlier code above this block).
+                pass
+
+            elif message_chunk.tool_calls:
                 # Filter tool calls: remove empty names and duplicates
                 filtered_tool_calls = self._filter_tool_calls(message_chunk.tool_calls)
 
@@ -1238,7 +1257,7 @@ class WorkflowStreamHandler:
                     # Note: file_operation events are now emitted via custom events from middleware
 
             # Emit tool_call_chunks event for client consumption (if present)
-            elif message_chunk.tool_call_chunks:
+            elif is_chunk and message_chunk.tool_call_chunks:
                 event_stream_message["tool_call_chunks"] = message_chunk.tool_call_chunks
                 yield self._format_sse_event("tool_call_chunks", event_stream_message)
 
@@ -1251,6 +1270,8 @@ class WorkflowStreamHandler:
                 )
 
                 if has_content:
+                    if is_chunk and event_stream_message.get("content"):
+                        self._streamed_content_ids.add(message_id)
                     yield self._format_sse_event("message_chunk", event_stream_message)
 
     def _filter_tool_calls(self, tool_calls: list) -> list:

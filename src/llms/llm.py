@@ -525,6 +525,7 @@ class LLM:
         params = {
             "model": self.model,
             "api_key": self._resolve_api_key(),
+            "streaming": True,
             "max_tokens": 32000,  # Default for Anthropic SDK models
             "max_retries": 5,
             "timeout": 600.0,  # 10 minutes - sufficient for long reasoning
