@@ -199,6 +199,7 @@ export interface PTCAgentProposalState {
   status: string;
   workspace_id?: string;
   workspace_name?: string;
+  thread_id?: string;
   question?: string;
   interruptId?: string;
 }

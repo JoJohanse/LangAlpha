@@ -67,6 +67,8 @@ interface LocationState {
   isModifyingPreferences?: boolean;
   workspaceId?: string;
   workspaceName?: string;
+  fromThreadId?: string;
+  fromWorkspaceId?: string;
   [key: string]: unknown;
 }
 
@@ -1601,6 +1603,16 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
               onClick={() => {
                 if (activeAgentId !== 'main') {
                   switchAgent('main');
+                } else if (state?.fromThreadId) {
+                  // Navigate back to the flash thread that dispatched this PTC thread
+                  intentionalExitRef.current = true;
+                  navigate(`/chat/t/${state.fromThreadId}`, {
+                    state: {
+                      workspaceId: state.fromWorkspaceId,
+                      agentMode: 'flash',
+                      workspaceStatus: 'flash',
+                    },
+                  });
                 } else {
                   intentionalExitRef.current = true;
                   onBack();
@@ -1608,7 +1620,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
               }}
               className="p-2 rounded-md transition-colors flex-shrink-0"
               style={{ color: 'var(--color-text-primary)' }}
-              title={activeAgentId !== 'main' ? t('chat.backToMain', 'Back to main') : t('workspace.backToThreads')}
+              title={activeAgentId !== 'main' ? t('chat.backToMain', 'Back to main') : state?.fromThreadId ? t('chat.backToFlash', 'Back to Flash') : t('workspace.backToThreads')}
               onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-border-muted)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = ''; }}
             >
@@ -1831,6 +1843,7 @@ function ChatView({ workspaceId, threadId, initialTaskId, onBack, workspaceName:
                         onRejectPTCAgent={handleRejectPTCAgent}
                         onApproveSecretaryAction={handleApproveSecretaryAction}
                         onRejectSecretaryAction={handleRejectSecretaryAction}
+                        flashContext={isFlashMode && currentThreadId ? { threadId: currentThreadId, workspaceId } : null}
                         onEditMessage={(id, content) => handleEditMessage(id, content, chatInputRef.current?.getModelOptions?.())}
                         onRegenerate={(id) => handleRegenerate(id, chatInputRef.current?.getModelOptions?.())}
                         onRetry={() => handleRetry(chatInputRef.current?.getModelOptions?.())}

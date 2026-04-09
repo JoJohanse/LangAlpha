@@ -1251,16 +1251,24 @@ export function useChatMessages(
               const dataKey = dataKeyMap[matched.type] || 'questionProposals';
 
               let resolvedStatus = 'approved';
+              let resultPayload: Record<string, unknown> | null = null;
               if (content === 'User declined workspace creation.' || content === 'User declined starting the question.' || content === 'User declined the action.' || content === 'User declined.') {
                 resolvedStatus = 'rejected';
               } else {
                 try {
                   const parsed = JSON.parse(content);
                   if (parsed?.success === false) resolvedStatus = 'rejected';
+                  resultPayload = parsed;
                 } catch { /* non-JSON → treat as approved */ }
               }
 
               const pKey = matched.proposalId!;
+              // Extract thread_id/workspace_id from ptc_agent result for navigation
+              const extraFields: Record<string, unknown> = {};
+              if (matched.type === 'ptc_agent' && resultPayload) {
+                if (resultPayload.thread_id) extraFields.thread_id = resultPayload.thread_id;
+                if (resultPayload.workspace_id) extraFields.workspace_id = resultPayload.workspace_id;
+              }
               setMessages((prev) =>
                 updateMessage(prev,matched.assistantMessageId, (msg) => {
                   if (msg.role !== 'assistant') return msg;
@@ -1273,6 +1281,7 @@ export function useChatMessages(
                       [pKey]: {
                         ...(existing[pKey] || {}),
                         status: resolvedStatus,
+                        ...extraFields,
                       },
                     },
                   };
@@ -2981,12 +2990,18 @@ export function useChatMessages(
             };
             const dataKey = dataKeyMap[matched.type] || 'questionProposals';
             let resolvedStatus = 'approved';
+            let resultPayload: Record<string, unknown> | null = null;
             if (content === 'User declined workspace creation.' || content === 'User declined starting the question.' || content === 'User declined the action.' || content === 'User declined.') {
               resolvedStatus = 'rejected';
             } else {
-              try { if (JSON.parse(content)?.success === false) resolvedStatus = 'rejected'; } catch { /* not JSON */ }
+              try { const p = JSON.parse(content); if (p?.success === false) resolvedStatus = 'rejected'; resultPayload = p; } catch { /* not JSON */ }
             }
             const proposalId = matched.proposalId!;
+            const extraFields: Record<string, unknown> = {};
+            if (matched.type === 'ptc_agent' && resultPayload) {
+              if (resultPayload.thread_id) extraFields.thread_id = resultPayload.thread_id;
+              if (resultPayload.workspace_id) extraFields.workspace_id = resultPayload.workspace_id;
+            }
             setMessages((prev) =>
               updateMessage(prev,matched.assistantMessageId, (m) => { if (m.role !== 'assistant') return m; const msg = m as AssistantMessage; return {
                 ...msg,
@@ -2995,6 +3010,7 @@ export function useChatMessages(
                   [proposalId]: {
                     ...((msg as unknown as Record<string, Record<string, Record<string, unknown>>>)[dataKey]?.[proposalId] || {}),
                     status: resolvedStatus,
+                    ...extraFields,
                   },
                 },
               }; })
@@ -3042,6 +3058,41 @@ export function useChatMessages(
             const parsed = JSON.parse(event.content);
             if (parsed?.success && parsed?.action === 'navigate_to_workspace') {
               onWorkspaceCreated({ workspaceId: parsed.workspace_id, question: parsed.question });
+            }
+          } catch { /* not JSON, ignore */ }
+        }
+
+        // Update ptcAgentProposals with thread_id/workspace_id from tool result
+        // (during live streaming, the proposal was set to 'approved' optimistically
+        // before the tool ran — now backfill the navigation fields)
+        if (typeof event.content === 'string') {
+          try {
+            const parsed = JSON.parse(event.content);
+            if (parsed?.success && parsed?.thread_id && parsed?.workspace_id) {
+              setMessages((prev) =>
+                updateMessage(prev, assistantMessageId, (m) => {
+                  if (m.role !== 'assistant') return m;
+                  const msg = m as AssistantMessage;
+                  const proposals = msg.ptcAgentProposals;
+                  if (!proposals) return m;
+                  // Find the approved proposal missing thread_id
+                  const pid = Object.keys(proposals).find(
+                    (k) => proposals[k].status === 'approved' && !proposals[k].thread_id
+                  );
+                  if (!pid) return m;
+                  return {
+                    ...msg,
+                    ptcAgentProposals: {
+                      ...proposals,
+                      [pid]: {
+                        ...proposals[pid],
+                        thread_id: parsed.thread_id,
+                        workspace_id: parsed.workspace_id,
+                      },
+                    },
+                  };
+                })
+              );
             }
           } catch { /* not JSON, ignore */ }
         }

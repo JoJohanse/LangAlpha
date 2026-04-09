@@ -684,6 +684,15 @@ async def astream_ptc_workflow(
         ):
             yield event
 
+    except (asyncio.CancelledError, GeneratorExit):
+        # Client disconnected before start_workflow() shielded the task.
+        # Log so the silent failure is diagnosable.
+        logger.warning(
+            f"[PTC_CHAT] Generator cancelled (client disconnect?) before "
+            f"workflow started: thread_id={thread_id} workspace_id={workspace_id}"
+        )
+        raise
+
     except Exception as e:
         # =====================================================================
         # Phase 4: Error Recovery with Retry Logic

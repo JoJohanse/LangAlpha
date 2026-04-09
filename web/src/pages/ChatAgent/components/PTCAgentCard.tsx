@@ -1,17 +1,26 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FlaskConical, Loader2, Check, X, ChevronRight } from 'lucide-react';
+import { FlaskConical, Loader2, Check, X, ChevronRight, ExternalLink } from 'lucide-react';
 
 interface ProposalData {
   workspace_name?: string;
   question: string;
   status: 'pending' | 'approved' | 'rejected';
+  thread_id?: string;
+  workspace_id?: string;
+}
+
+interface FlashContext {
+  threadId: string;
+  workspaceId: string;
 }
 
 interface PTCAgentCardProps {
   proposalData: ProposalData | null;
   onApprove?: () => void;
   onReject?: () => void;
+  flashContext?: FlashContext | null;
 }
 
 /**
@@ -19,19 +28,58 @@ interface PTCAgentCardProps {
  *
  * Three states:
  *   pending  - workspace name + question preview, Approve/Reject buttons
- *   approved - collapsed "Research dispatched", expandable
+ *   approved - clickable artifact linking to the dispatched thread
  *   rejected - collapsed "Research declined"
  */
-function PTCAgentCard({ proposalData, onApprove, onReject }: PTCAgentCardProps) {
+function PTCAgentCard({ proposalData, onApprove, onReject, flashContext }: PTCAgentCardProps) {
   const [collapsed, setCollapsed] = useState(true);
+  const navigate = useNavigate();
 
   if (!proposalData) return null;
 
-  const { workspace_name, question, status } = proposalData;
+  const { workspace_name, question, status, thread_id, workspace_id } = proposalData;
   const isApproved = status === 'approved';
   const isRejected = status === 'rejected';
 
-  // --- Resolved (approved / rejected) ---
+  // --- Approved: clickable artifact to navigate to thread ---
+  if (isApproved && thread_id && workspace_id) {
+    return (
+      <motion.button
+        onClick={() => navigate(`/chat/t/${thread_id}`, { state: {
+          workspaceId: workspace_id,
+          ...(flashContext ? { fromThreadId: flashContext.threadId, fromWorkspaceId: flashContext.workspaceId } : {}),
+        } })}
+        className="flex items-center gap-3 w-full text-left rounded-lg px-4 py-3 cursor-pointer group transition-colors"
+        style={{
+          border: '1px solid var(--color-border-muted)',
+          backgroundColor: 'var(--color-bg-secondary)',
+        }}
+        whileHover={{ scale: 1.005 }}
+        whileTap={{ scale: 0.995 }}
+      >
+        <FlaskConical
+          className="h-4 w-4 flex-shrink-0"
+          style={{ color: 'var(--color-accent-light)' }}
+        />
+        <div className="flex-1 min-w-0">
+          {workspace_name && (
+            <div className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>
+              {workspace_name}
+            </div>
+          )}
+          <div className="text-sm truncate" style={{ color: 'var(--color-text-tertiary)' }}>
+            {question}
+          </div>
+        </div>
+        <ExternalLink
+          className="h-3.5 w-3.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+          style={{ color: 'var(--color-text-tertiary)' }}
+        />
+      </motion.button>
+    );
+  }
+
+  // --- Resolved without thread_id (approved fallback or rejected) ---
   if (isApproved || isRejected) {
     return (
       <div>

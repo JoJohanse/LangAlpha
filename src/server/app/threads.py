@@ -16,8 +16,10 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
+import asyncio
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.server.utils.api import (
     CurrentUserId,
@@ -232,7 +234,9 @@ async def update_thread_endpoint(
 
 
 @router.post("/messages")
-async def send_new_thread_message(request: ChatRequest, auth: ChatRateLimited):
+async def send_new_thread_message(
+    request: ChatRequest, auth: ChatRateLimited, raw_request: Request
+):
     """
     Create a new thread and send the first message. Returns an SSE stream.
 
@@ -251,21 +255,23 @@ async def send_new_thread_message(request: ChatRequest, auth: ChatRateLimited):
             )
     if not thread_id:
         thread_id = str(uuid4())
-    return await _handle_send_message(request, auth, thread_id)
+    return await _handle_send_message(request, auth, thread_id, raw_request)
 
 
 @router.post("/{thread_id}/messages")
 async def send_thread_message(
-    thread_id: str, request: ChatRequest, auth: ChatRateLimited
+    thread_id: str, request: ChatRequest, auth: ChatRateLimited,
+    raw_request: Request,
 ):
     """
     Send a message to an existing thread. Returns an SSE stream.
     """
-    return await _handle_send_message(request, auth, thread_id)
+    return await _handle_send_message(request, auth, thread_id, raw_request)
 
 
 async def _handle_send_message(
-    request: ChatRequest, auth: ChatRateLimited, thread_id: str
+    request: ChatRequest, auth: ChatRateLimited, thread_id: str,
+    raw_request: Request | None = None,
 ):
     """Shared logic for both POST /threads/messages and POST /threads/{id}/messages."""
     from src.server.handlers.chat import (
@@ -400,16 +406,47 @@ async def _handle_send_message(
             headers=SSE_HEADERS,
         )
 
+    ptc_gen = astream_ptc_workflow(
+        request=request,
+        thread_id=thread_id,
+        user_input=user_input,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        is_byok=is_byok,
+        config=config,
+    )
+
+    # Internal dispatch mode: run the PTC workflow in a background task
+    # instead of streaming SSE.  The ptc_agent tool (secretary) uses this
+    # to avoid the generator being cancelled when the HTTP connection closes.
+    if raw_request and raw_request.headers.get("X-Dispatch") == "background":
+        async def _consume_ptc_gen(gen):
+            try:
+                async for _ in gen:
+                    pass
+            except Exception:
+                logger.error(
+                    f"[PTC_DISPATCH] Background PTC workflow failed: "
+                    f"thread_id={thread_id}",
+                    exc_info=True,
+                )
+
+        asyncio.create_task(
+            _consume_ptc_gen(ptc_gen),
+            name=f"ptc-dispatch-{thread_id}",
+        )
+        logger.info(
+            f"[PTC_DISPATCH] Started background workflow: "
+            f"thread_id={thread_id} workspace_id={workspace_id}"
+        )
+        return JSONResponse({
+            "status": "dispatched",
+            "thread_id": thread_id,
+            "workspace_id": workspace_id,
+        })
+
     return StreamingResponse(
-        astream_ptc_workflow(
-            request=request,
-            thread_id=thread_id,
-            user_input=user_input,
-            user_id=user_id,
-            workspace_id=workspace_id,
-            is_byok=is_byok,
-            config=config,
-        ),
+        ptc_gen,
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )

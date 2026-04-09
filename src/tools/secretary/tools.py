@@ -297,17 +297,21 @@ async def ptc_agent(
     question: str,
     config: RunnableConfig,
     workspace_id: str | None = None,
+    thread_id: str | None = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
 ) -> Command:
-    """Dispatch a research question to a PTC agent in a workspace.
+    """Dispatch a research question to a PTC agent.
 
-    Creates a new workspace if workspace_id is not provided, generates a
-    thread, and dispatches the question via an internal HTTP call. The PTC
-    agent runs asynchronously — use agent_output to retrieve results later.
+    Two modes:
+    - New thread: pass workspace_id (or omit to auto-create a workspace).
+    - Continue thread: pass thread_id to send a follow-up message.
+
+    The PTC agent runs asynchronously — use agent_output to check results.
 
     Args:
-        question: The research question to send to the PTC agent
-        workspace_id: Optional workspace ID to use. If None, a new workspace is created.
+        question: The research question or follow-up message
+        workspace_id: Workspace to create a new thread in. Ignored if thread_id is set.
+        thread_id: Existing thread to continue. Overrides workspace_id.
     """
     import aiohttp
 
@@ -316,14 +320,26 @@ async def ptc_agent(
     if not user_id:
         return _error_command("user_id not found in config", tool_call_id)
 
-    # Generate workspace name from question if no workspace_id
-    workspace_name = question[:50].strip() if not workspace_id else None
+    is_continuation = thread_id is not None
+
+    # Resolve workspace_id from existing thread or create/verify workspace
+    if is_continuation:
+        from src.server.database.conversation import get_thread_by_id
+
+        thread = await get_thread_by_id(thread_id)
+        if not thread or str(thread.get("user_id")) != user_id:
+            return _error_command("thread not found", tool_call_id)
+        workspace_id = str(thread["workspace_id"])
+        workspace_name = None
+    else:
+        workspace_name = question[:50].strip() if not workspace_id else None
 
     approved, _ = _hitl_confirm(
         "ptc_agent",
         {
             "workspace_id": workspace_id,
             "workspace_name": workspace_name,
+            "thread_id": thread_id,
             "question": question,
         },
     )
@@ -333,33 +349,36 @@ async def ptc_agent(
             "User declined PTC agent dispatch.", tool_call_id
         )
 
-    # Create workspace or verify ownership
-    if workspace_id is None:
-        try:
-            from src.server.services.workspace_manager import WorkspaceManager
+    if not is_continuation:
+        # Create workspace or verify ownership
+        if workspace_id is None:
+            try:
+                from src.server.services.workspace_manager import WorkspaceManager
 
-            workspace_manager = WorkspaceManager.get_instance()
-            workspace = await workspace_manager.create_workspace(
-                user_id=user_id,
-                name=workspace_name or "Research",
-                description=f"Auto-created for: {question[:100]}",
-            )
-            workspace_id = str(workspace["workspace_id"])
-        except Exception as e:
-            logger.error(f"Failed to create workspace for PTC dispatch: {e}")
-            return _error_command("workspace_creation_failed", tool_call_id)
-    else:
-        # Verify user owns the target workspace
-        from src.server.database.workspace import get_workspace
+                workspace_manager = WorkspaceManager.get_instance()
+                workspace = await workspace_manager.create_workspace(
+                    user_id=user_id,
+                    name=workspace_name or "Research",
+                    description=f"Auto-created for: {question[:100]}",
+                )
+                workspace_id = str(workspace["workspace_id"])
+            except Exception as e:
+                logger.error(f"Failed to create workspace for PTC dispatch: {e}")
+                return _error_command("workspace_creation_failed", tool_call_id)
+        else:
+            from src.server.database.workspace import get_workspace
 
-        ws = await get_workspace(workspace_id)
-        if not ws or str(ws.get("user_id")) != user_id:
-            return _error_command("workspace not found", tool_call_id)
+            ws = await get_workspace(workspace_id)
+            if not ws or str(ws.get("user_id")) != user_id:
+                return _error_command("workspace not found", tool_call_id)
 
-    # Generate a new thread ID
-    thread_id = str(uuid.uuid4())
+        # New thread
+        thread_id = str(uuid.uuid4())
 
-    # Dispatch via internal HTTP call
+    # Dispatch via internal HTTP call.
+    # X-Dispatch: background tells the endpoint to run the PTC workflow in a
+    # background asyncio task and return JSON immediately, avoiding the
+    # generator-cancelled-on-client-disconnect race.
     self_base_url = os.environ.get("GINLIXFLOW_BASE_URL", "http://localhost:8000")
     service_token = os.environ.get("INTERNAL_SERVICE_TOKEN", "")
 
@@ -375,15 +394,15 @@ async def ptc_agent(
                 headers={
                     "X-Service-Token": service_token,
                     "X-User-Id": user_id,
+                    "X-Dispatch": "background",
                 },
-                timeout=aiohttp.ClientTimeout(connect=10, sock_read=5),
+                timeout=aiohttp.ClientTimeout(connect=10, sock_read=30),
             ) as resp:
-                # Only check status — don't read body (it's an SSE stream)
                 if resp.status >= 400:
-                    return _error_command(
-                        f"dispatch_failed: HTTP {resp.status}",
-                        tool_call_id,
-                    )
+                    return _error_command("dispatch_failed", tool_call_id)
+                body = await resp.json()
+                if not body.get("status") == "dispatched":
+                    return _error_command("dispatch_failed", tool_call_id)
     except aiohttp.ClientError as e:
         logger.error(f"PTC dispatch HTTP error: {e}")
         return _error_command("dispatch_failed", tool_call_id)

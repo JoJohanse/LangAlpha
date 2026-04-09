@@ -284,6 +284,7 @@ interface MessageListProps {
   getFeedbackForMessage?: (messageId: string) => FeedbackResult | null;
   onReportWithAgent?: (instruction: string) => void;
   onWidgetSendPrompt?: (text: string) => void;
+  flashContext?: { threadId: string; workspaceId: string } | null;
 }
 
 /**
@@ -295,7 +296,7 @@ interface MessageListProps {
  * - Streaming indicators
  * - Error state styling
  */
-function MessageList({ messages, isLoading, isLoadingHistory, hideAvatar, compactToolCalls, isSubagentView, readOnly, allowFiles, onOpenSubagentTask, onOpenFile, onOpenDir, onToolCallDetailClick, onApprovePlan, onRejectPlan, onPlanDetailClick, onAnswerQuestion, onSkipQuestion, onApproveCreateWorkspace, onRejectCreateWorkspace, onApproveStartQuestion, onRejectStartQuestion, onApprovePTCAgent, onRejectPTCAgent, onApproveSecretaryAction, onRejectSecretaryAction, onEditMessage, onRegenerate, onRetry, onThumbUp, onThumbDown, getFeedbackForMessage, onReportWithAgent, onWidgetSendPrompt }: MessageListProps): React.ReactElement | null {
+function MessageList({ messages, isLoading, isLoadingHistory, hideAvatar, compactToolCalls, isSubagentView, readOnly, allowFiles, onOpenSubagentTask, onOpenFile, onOpenDir, onToolCallDetailClick, onApprovePlan, onRejectPlan, onPlanDetailClick, onAnswerQuestion, onSkipQuestion, onApproveCreateWorkspace, onRejectCreateWorkspace, onApproveStartQuestion, onRejectStartQuestion, onApprovePTCAgent, onRejectPTCAgent, onApproveSecretaryAction, onRejectSecretaryAction, onEditMessage, onRegenerate, onRetry, onThumbUp, onThumbDown, getFeedbackForMessage, onReportWithAgent, onWidgetSendPrompt, flashContext }: MessageListProps): React.ReactElement | null {
   const isMobile = useIsMobile();
 
   // Empty state - show when no messages exist (hidden in subagent view)
@@ -384,6 +385,7 @@ function MessageList({ messages, isLoading, isLoadingHistory, hideAvatar, compac
             getFeedbackForMessage={getFeedbackForMessage}
             onReportWithAgent={onReportWithAgent}
             onWidgetSendPrompt={onWidgetSendPrompt}
+            flashContext={flashContext}
           />
         )
       )}
@@ -427,6 +429,7 @@ interface MessageBubbleProps {
   onReportWithAgent?: (instruction: string) => void;
   onWidgetSendPrompt?: (text: string) => void;
   isMobile?: boolean;
+  flashContext?: { threadId: string; workspaceId: string } | null;
 }
 
 /**
@@ -438,7 +441,7 @@ interface MessageBubbleProps {
  * Wrapped with React.memo — safe because updateMessage() in messageHelpers.ts
  * returns the same object reference for unchanged messages.
  */
-const MessageBubble = memo(function MessageBubble({ message, isLoading, hideAvatar, compactToolCalls, isSubagentView, readOnly, allowFiles, onOpenSubagentTask, onOpenFile, onOpenDir, onToolCallDetailClick, onApprovePlan, onRejectPlan, onPlanDetailClick, onAnswerQuestion, onSkipQuestion, onApproveCreateWorkspace, onRejectCreateWorkspace, onApproveStartQuestion, onRejectStartQuestion, onApprovePTCAgent, onRejectPTCAgent, onApproveSecretaryAction, onRejectSecretaryAction, onEditMessage, onRegenerate, onRetry, onThumbUp, onThumbDown, getFeedbackForMessage, onReportWithAgent, onWidgetSendPrompt, isMobile }: MessageBubbleProps): React.ReactElement {
+const MessageBubble = memo(function MessageBubble({ message, isLoading, hideAvatar, compactToolCalls, isSubagentView, readOnly, allowFiles, onOpenSubagentTask, onOpenFile, onOpenDir, onToolCallDetailClick, onApprovePlan, onRejectPlan, onPlanDetailClick, onAnswerQuestion, onSkipQuestion, onApproveCreateWorkspace, onRejectCreateWorkspace, onApproveStartQuestion, onRejectStartQuestion, onApprovePTCAgent, onRejectPTCAgent, onApproveSecretaryAction, onRejectSecretaryAction, onEditMessage, onRegenerate, onRetry, onThumbUp, onThumbDown, getFeedbackForMessage, onReportWithAgent, onWidgetSendPrompt, isMobile, flashContext }: MessageBubbleProps): React.ReactElement {
   const { user } = useUser();
   const { theme } = useTheme();
   const logo = theme === 'light' ? logoDark : logoLight;
@@ -695,6 +698,7 @@ const MessageBubble = memo(function MessageBubble({ message, isLoading, hideAvat
               textOnly={true}
               readOnly={readOnly}
               allowFiles={allowFiles}
+              flashContext={flashContext}
             />
             </CitationMetadataProvider>
           ) : (
@@ -883,6 +887,7 @@ interface MessageContentSegmentsProps {
   onWidgetSendPrompt?: (text: string) => void;
   htmlWidgetProcesses?: Record<string, Record<string, unknown>>;
   textOnly?: boolean;
+  flashContext?: { threadId: string; workspaceId: string } | null;
 }
 
 const MIN_LIVE_EXPOSURE_MS = 5000; // minimum time an item stays in the live zone
@@ -969,7 +974,7 @@ type RenderBlock =
   | NotificationRenderBlock
   | HtmlWidgetRenderBlock;
 
-const MessageContentSegments = memo(function MessageContentSegments({ segments, reasoningProcesses, toolCallProcesses, todoListProcesses, subagentTasks, planApprovals = EMPTY_OBJ, userQuestions = EMPTY_OBJ, workspaceProposals = EMPTY_OBJ, questionProposals = EMPTY_OBJ, pendingToolCallChunks = EMPTY_OBJ, isStreaming, hasError, isAssistant = false, compactToolCalls = false, isSubagentView = false, readOnly = false, allowFiles = false, onOpenSubagentTask, onOpenFile, onOpenDir, onToolCallDetailClick, onApprovePlan, onRejectPlan, onPlanDetailClick, onAnswerQuestion, onSkipQuestion, onApproveCreateWorkspace, onRejectCreateWorkspace, onApproveStartQuestion, onRejectStartQuestion, onApprovePTCAgent, onRejectPTCAgent, onApproveSecretaryAction, onRejectSecretaryAction, ptcAgentProposals = EMPTY_OBJ, secretaryActionProposals = EMPTY_OBJ, onWidgetSendPrompt, htmlWidgetProcesses = EMPTY_OBJ, textOnly = false }: MessageContentSegmentsProps): React.ReactElement {
+const MessageContentSegments = memo(function MessageContentSegments({ segments, reasoningProcesses, toolCallProcesses, todoListProcesses, subagentTasks, planApprovals = EMPTY_OBJ, userQuestions = EMPTY_OBJ, workspaceProposals = EMPTY_OBJ, questionProposals = EMPTY_OBJ, pendingToolCallChunks = EMPTY_OBJ, isStreaming, hasError, isAssistant = false, compactToolCalls = false, isSubagentView = false, readOnly = false, allowFiles = false, onOpenSubagentTask, onOpenFile, onOpenDir, onToolCallDetailClick, onApprovePlan, onRejectPlan, onPlanDetailClick, onAnswerQuestion, onSkipQuestion, onApproveCreateWorkspace, onRejectCreateWorkspace, onApproveStartQuestion, onRejectStartQuestion, onApprovePTCAgent, onRejectPTCAgent, onApproveSecretaryAction, onRejectSecretaryAction, ptcAgentProposals = EMPTY_OBJ, secretaryActionProposals = EMPTY_OBJ, onWidgetSendPrompt, htmlWidgetProcesses = EMPTY_OBJ, textOnly = false, flashContext }: MessageContentSegmentsProps): React.ReactElement {
   // Force re-render timer for recently-completed tool calls that need minimum exposure
   const [tick, setTick] = useState(0);
   const expiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1434,6 +1439,7 @@ const MessageContentSegments = memo(function MessageContentSegments({ segments, 
                 proposalData={pad as any}
                 onApprove={onApprovePTCAgent ? () => onApprovePTCAgent(pad) : undefined}
                 onReject={onRejectPTCAgent ? () => onRejectPTCAgent(pad) : undefined}
+                flashContext={flashContext}
               />
             );
           }
@@ -1594,6 +1600,7 @@ const MessageContentSegments = memo(function MessageContentSegments({ segments, 
                 proposalData={pad as any}
                 onApprove={onApprovePTCAgent ? () => onApprovePTCAgent(pad) : undefined}
                 onReject={onRejectPTCAgent ? () => onRejectPTCAgent(pad) : undefined}
+                flashContext={flashContext}
               />
             );
           }

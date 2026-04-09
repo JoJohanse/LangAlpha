@@ -11,7 +11,6 @@ from typing import Any, Literal
 
 from src.tools.automation import AUTOMATION_TOOLS
 from src.tools.onboarding import ONBOARDING_TOOLS
-from src.tools.secretary import SECRETARY_TOOLS
 from src.tools.user_profile import USER_PROFILE_TOOLS
 
 # Type alias for agent modes that can use skills
@@ -94,9 +93,9 @@ SKILL_REGISTRY: dict[str, SkillDefinition] = {
     "secretary": SkillDefinition(
         name="secretary",
         description="Manage workspaces, dispatch research, monitor running analyses",
-        tools=SECRETARY_TOOLS,
+        tools=[],
         skill_md_path="skills/secretary/SKILL.md",
-        exposure="hidden",
+        exposure="flash",
     ),
     "automation": SkillDefinition(
         name="automation",
