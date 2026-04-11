@@ -91,6 +91,11 @@ async def _consume_background_gen(gen, label: str, thread_id: str) -> None:
         )
         # Clean up Redis state so the frontend doesn't show a permanent
         # "pending" indicator for a dispatch that will never complete.
+        # NOTE: When called for the flash-side background task, ptc_origin
+        # is keyed by the PTC thread_id (not the flash thread_id passed here),
+        # so the lookup returns None and cleanup is a no-op. This is expected;
+        # _flash_report_back already handles ptc_origin cleanup before the
+        # flash workflow starts, and TTL covers any remaining edge cases.
         try:
             from src.utils.cache.redis_cache import get_cache_client
 
@@ -112,7 +117,7 @@ async def _consume_background_gen(gen, label: str, thread_id: str) -> None:
                             '{"error": "background_workflow_failed"}',
                         )
         except Exception:
-            logger.debug(f"[{label}] Redis cleanup after failure also failed", exc_info=True)
+            logger.warning(f"[{label}] Redis cleanup after failure also failed", exc_info=True)
 
 
 # Single router for all thread operations
@@ -591,13 +596,7 @@ async def watch_thread(thread_id: str, x_user_id: CurrentUserId):
                     yield 'event: timeout\ndata: {}\n\n'
                     break
 
-                try:
-                    msg = await asyncio.wait_for(
-                        pubsub.get_message(ignore_subscribe_messages=True, timeout=KEEPALIVE_INTERVAL),
-                        timeout=KEEPALIVE_INTERVAL + 1,
-                    )
-                except asyncio.TimeoutError:
-                    msg = None
+                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=KEEPALIVE_INTERVAL)
 
                 if msg and msg["type"] == "message":
                     data = msg["data"]

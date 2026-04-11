@@ -2092,7 +2092,7 @@ export function useChatMessages(
     const tid = threadIdRef.current;
     if (!tid || tid === '__default__') return;
 
-    console.log('[ReportBack] Opening watch connection for thread:', tid);
+    if (process.env.NODE_ENV === 'development') console.log('[ReportBack] Opening watch connection for thread:', tid);
 
     const { abort } = watchThread(tid, async () => {
       reportBackWatchAbortRef.current = null;
@@ -2101,11 +2101,11 @@ export function useChatMessages(
       // If flash is currently streaming, the report-back system message was
       // steered into the active turn — no separate reconnect needed.
       if (isStreamingRef.current) {
-        console.log('[ReportBack] Steered into active stream, skipping reconnect');
+        if (process.env.NODE_ENV === 'development') console.log('[ReportBack] Steered into active stream, skipping reconnect');
         return;
       }
 
-      console.log('[ReportBack] Report-back workflow detected, reconnecting');
+      if (process.env.NODE_ENV === 'development') console.log('[ReportBack] Report-back workflow detected, reconnecting');
 
       // Small delay to let the workflow buffer initial events
       await new Promise((r) => setTimeout(r, 500));
@@ -2116,7 +2116,7 @@ export function useChatMessages(
           await reconnectToStream({ activeTasks: status.active_tasks || [] });
         }
       } catch (err) {
-        console.log('[ReportBack] Reconnect after watch failed:', (err as Error).message);
+        if (process.env.NODE_ENV === 'development') console.log('[ReportBack] Reconnect after watch failed:', (err as Error).message);
       }
     });
     reportBackWatchAbortRef.current = abort;
@@ -2293,7 +2293,7 @@ export function useChatMessages(
 
         // Re-open watch if a PTC report-back is still pending (e.g., user navigated away and back)
         if (status.pending_report_back) {
-          console.log('[ReportBack] Pending report-back detected on load, opening watch');
+          if (process.env.NODE_ENV === 'development') console.log('[ReportBack] Pending report-back detected on load, opening watch');
           awaitingReportBackRef.current = true;
           startReportBackWatch();
         }

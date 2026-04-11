@@ -296,40 +296,47 @@ export function watchThread(
   onWorkflowStarted: () => void,
 ): { abort: AbortController } {
   const abort = new AbortController();
+  const MAX_RETRIES = 2;
 
   (async () => {
-    try {
-      const authHeaders = await getAuthHeaders();
-      const res = await fetch(`${baseURL}/api/v1/threads/${threadId}/watch`, {
-        method: 'GET',
-        headers: { ...authHeaders },
-        signal: abort.signal,
-      });
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (abort.signal.aborted) return;
+      try {
+        const authHeaders = await getAuthHeaders();
+        const res = await fetch(`${baseURL}/api/v1/threads/${threadId}/watch`, {
+          method: 'GET',
+          headers: { ...authHeaders },
+          signal: abort.signal,
+        });
 
-      if (!res.ok || !res.body) return;
+        if (!res.ok || !res.body) return;
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        // Check for workflow_started event
-        if (buffer.includes('event: workflow_started')) {
-          onWorkflowStarted();
-          break;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          // Check for workflow_started event
+          if (buffer.includes('event: workflow_started')) {
+            reader.cancel();
+            onWorkflowStarted();
+            return;
+          }
+          // Discard processed keepalive lines to prevent buffer growth
+          const lastNewline = buffer.lastIndexOf('\n\n');
+          if (lastNewline >= 0) {
+            buffer = buffer.slice(lastNewline + 2);
+          }
         }
-        // Discard processed keepalive lines to prevent buffer growth
-        const lastNewline = buffer.lastIndexOf('\n\n');
-        if (lastNewline >= 0) {
-          buffer = buffer.slice(lastNewline + 2);
+        return; // Stream ended cleanly without event — no retry
+      } catch (err: unknown) {
+        if ((err as Error).name === 'AbortError') return;
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
         }
-      }
-    } catch (err: unknown) {
-      if ((err as Error).name !== 'AbortError') {
-        console.log('[Watch] Connection error:', (err as Error).message);
       }
     }
   })();

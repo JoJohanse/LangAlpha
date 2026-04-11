@@ -462,7 +462,7 @@ async def ptc_agent(
                 body = await resp.json()
                 if not body.get("status") == "dispatched":
                     return _error_command("dispatch_failed", tool_call_id)
-    except aiohttp.ClientError as e:
+    except (aiohttp.ClientError, ValueError) as e:
         logger.error(f"PTC dispatch HTTP error: {e}")
         return _error_command("dispatch_failed", tool_call_id)
     except TimeoutError:

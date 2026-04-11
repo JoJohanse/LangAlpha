@@ -79,7 +79,7 @@ from .llm_config import resolve_llm_config
 from .steering import backfill_steering_queries
 
 
-async def _flash_report_back(ptc_thread_id: str, workspace_id: str) -> None:
+async def _flash_report_back(ptc_thread_id: str, workspace_id: str | None) -> None:
     """Send a message to the originating flash thread when PTC completes.
 
     Checks Redis for origin metadata stored by the ptc_agent secretary tool.
@@ -106,10 +106,11 @@ async def _flash_report_back(ptc_thread_id: str, workspace_id: str) -> None:
     self_base_url = os.environ.get("GINLIXFLOW_BASE_URL", "http://localhost:8000")
     service_token = os.environ.get("INTERNAL_SERVICE_TOKEN", "")
 
+    ws_label = workspace_id or "an auto-created workspace"
     message = (
         "<system>\n"
         f"The analysis you dispatched (thread {ptc_thread_id} in workspace "
-        f"{workspace_id}) has completed. Use agent_output to retrieve and "
+        f"{ws_label}) has completed. Use agent_output to retrieve and "
         f"summarize the results for the user.\n"
         "</system>"
     )
