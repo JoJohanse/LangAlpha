@@ -118,6 +118,43 @@ async def _consume_background_gen(gen, label: str, thread_id: str) -> None:
                         )
         except Exception:
             logger.warning(f"[{label}] Redis cleanup after failure also failed", exc_info=True)
+    finally:
+        # Clean up pre-registered dispatch state if the generator failed before
+        # reaching start_workflow().  The pre-registered TaskInfo is QUEUED with
+        # no asyncio task; once start_workflow() upgrades it, BackgroundTaskManager
+        # owns the lifecycle and this block is a no-op.
+        try:
+            from src.server.services.background_task_manager import (
+                BackgroundTaskManager,
+                TaskStatus,
+            )
+            from src.server.services.workflow_tracker import WorkflowTracker
+
+            manager = BackgroundTaskManager.get_instance()
+            async with manager.task_lock:
+                task_info = manager.tasks.get(thread_id)
+                if task_info and task_info.status == TaskStatus.QUEUED and task_info.task is None:
+                    # Workflow never started — notify any waiting reconnect clients
+                    for q in task_info.live_queues:
+                        try:
+                            q.put_nowait(None)
+                        except asyncio.QueueFull:
+                            pass
+                    del manager.tasks[thread_id]
+                    logger.info(
+                        f"[{label}] Cleaned up pre-registered placeholder "
+                        f"for {thread_id} (workflow never started)"
+                    )
+
+            tracker = WorkflowTracker.get_instance()
+            status = await tracker.get_status(thread_id)
+            if status and status.get("status") == "active":
+                # Only clean up if this was our pre-registration (metadata.dispatched)
+                meta = status.get("metadata", {})
+                if meta.get("dispatched"):
+                    await tracker.mark_completed(thread_id)
+        except Exception:
+            pass
 
 
 # Single router for all thread operations
@@ -506,6 +543,25 @@ async def _handle_send_message(
     # to avoid the generator being cancelled when the HTTP connection closes.
     # Only honoured for internal service-to-service calls (X-Service-Token).
     if is_internal and raw_request and raw_request.headers.get("X-Dispatch") == "background":
+        # Pre-register in WorkflowTracker and BackgroundTaskManager BEFORE the
+        # asyncio task starts.  This closes the timing gap where the frontend
+        # navigates to the new PTC workspace before the generator reaches
+        # tracker.mark_active() / manager.start_workflow() (~20 async ops later).
+        # Without this, /status returns {can_reconnect: false, status: unknown}
+        # and the frontend incorrectly marks the agent as completed.
+        from src.server.services.background_task_manager import BackgroundTaskManager
+        from src.server.services.workflow_tracker import WorkflowTracker
+
+        tracker = WorkflowTracker.get_instance()
+        manager = BackgroundTaskManager.get_instance()
+        await tracker.mark_active(
+            thread_id=thread_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            metadata={"type": "ptc_agent", "dispatched": True},
+        )
+        await manager.pre_register(thread_id)
+
         _track_task(asyncio.create_task(
             _consume_background_gen(ptc_gen, "PTC_DISPATCH", thread_id),
             name=f"ptc-dispatch-{thread_id}",
