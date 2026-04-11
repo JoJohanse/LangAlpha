@@ -23,6 +23,9 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# TTL for ptc_origin and flash_watch Redis keys (24 hours)
+PTC_ORIGIN_TTL = 86400
+
 
 # ---------------------------------------------------------------------------
 # Shared HITL helper
@@ -93,6 +96,62 @@ def _error_command(error: str, tool_call_id: str) -> Command:
 
 
 # ---------------------------------------------------------------------------
+# Shared ownership verification helpers
+# ---------------------------------------------------------------------------
+
+
+async def _verify_workspace_owner(
+    workspace_id: str, user_id: str, tool_call_id: str
+) -> Command | None:
+    """Return error Command if user doesn't own workspace, else None."""
+    from src.server.database.workspace import get_workspace
+
+    ws = await get_workspace(workspace_id)
+    if not ws or str(ws.get("user_id")) != user_id:
+        return _error_command("workspace not found", tool_call_id)
+    return None
+
+
+async def _verify_thread_owner(
+    thread_id: str, user_id: str, tool_call_id: str
+) -> Command | None:
+    """Return error Command if user doesn't own thread, else None."""
+    from src.server.database.conversation import get_thread_owner_id
+
+    try:
+        owner_id = await get_thread_owner_id(thread_id)
+        if owner_id != user_id:
+            return _error_command(
+                "thread not found or not owned by user", tool_call_id
+            )
+    except Exception as e:
+        logger.error(f"Failed to verify thread ownership: {e}")
+        return _error_command("thread not found", tool_call_id)
+    return None
+
+
+async def _get_thread_output(
+    user_id: str, thread_id: str, tool_call_id: str
+) -> Command:
+    """Verify ownership and extract thread output.
+
+    Shared by agent_output tool and manage_threads(action="get_output").
+    """
+    from src.tools.secretary.utils import extract_text_from_thread
+
+    if err := await _verify_thread_owner(thread_id, user_id, tool_call_id):
+        return err
+
+    try:
+        result = await extract_text_from_thread(thread_id)
+    except Exception as e:
+        logger.error(f"Failed to extract text from thread {thread_id}: {e}")
+        return _error_command("failed to retrieve thread output", tool_call_id)
+
+    return _success_command(result, tool_call_id)
+
+
+# ---------------------------------------------------------------------------
 # Tool 1: manage_workspaces
 # ---------------------------------------------------------------------------
 
@@ -150,7 +209,7 @@ async def _workspaces_list(user_id: str, tool_call_id: str) -> Command:
         )
     except Exception as e:
         logger.error(f"Failed to list workspaces: {e}")
-        content = json.dumps({"success": False, "error": str(e)})
+        content = json.dumps({"success": False, "error": "failed to list workspaces"})
 
     return Command(
         update={
@@ -216,12 +275,8 @@ async def _workspaces_delete(
             "workspace_id is required for delete action", tool_call_id
         )
 
-    # Verify ownership
-    from src.server.database.workspace import get_workspace
-
-    ws = await get_workspace(workspace_id)
-    if not ws or str(ws.get("user_id")) != user_id:
-        return _error_command("workspace not found", tool_call_id)
+    if err := await _verify_workspace_owner(workspace_id, user_id, tool_call_id):
+        return err
 
     approved, _ = _hitl_confirm(
         "delete_workspace",
@@ -256,12 +311,8 @@ async def _workspaces_stop(
             "workspace_id is required for stop action", tool_call_id
         )
 
-    # Verify ownership
-    from src.server.database.workspace import get_workspace
-
-    ws = await get_workspace(workspace_id)
-    if not ws or str(ws.get("user_id")) != user_id:
-        return _error_command("workspace not found", tool_call_id)
+    if err := await _verify_workspace_owner(workspace_id, user_id, tool_call_id):
+        return err
 
     approved, _ = _hitl_confirm(
         "stop_workspace",
@@ -298,6 +349,7 @@ async def ptc_agent(
     config: RunnableConfig,
     workspace_id: str | None = None,
     thread_id: str | None = None,
+    report_back: bool = True,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
 ) -> Command:
     """Dispatch a research question to a PTC agent.
@@ -312,6 +364,8 @@ async def ptc_agent(
         question: The research question or follow-up message
         workspace_id: Workspace to create a new thread in. Ignored if thread_id is set.
         thread_id: Existing thread to continue. Overrides workspace_id.
+        report_back: If True, flash will automatically summarize results when PTC completes.
+            Set to False when the user wants to check results themselves.
     """
     import aiohttp
 
@@ -334,13 +388,14 @@ async def ptc_agent(
     else:
         workspace_name = question[:50].strip() if not workspace_id else None
 
-    approved, _ = _hitl_confirm(
+    approved, response = _hitl_confirm(
         "ptc_agent",
         {
             "workspace_id": workspace_id,
             "workspace_name": workspace_name,
             "thread_id": thread_id,
             "question": question,
+            "report_back": report_back,
         },
     )
 
@@ -348,6 +403,13 @@ async def ptc_agent(
         return _decline_command(
             "User declined PTC agent dispatch.", tool_call_id
         )
+
+    # Apply user overrides from HITL decision (e.g. toggling report_back)
+    decisions = response.get("decisions", [])
+    if decisions:
+        overrides = decisions[0].get("overrides", {})
+        if "report_back" in overrides:
+            report_back = overrides["report_back"]
 
     if not is_continuation:
         # Create workspace or verify ownership
@@ -366,11 +428,8 @@ async def ptc_agent(
                 logger.error(f"Failed to create workspace for PTC dispatch: {e}")
                 return _error_command("workspace_creation_failed", tool_call_id)
         else:
-            from src.server.database.workspace import get_workspace
-
-            ws = await get_workspace(workspace_id)
-            if not ws or str(ws.get("user_id")) != user_id:
-                return _error_command("workspace not found", tool_call_id)
+            if err := await _verify_workspace_owner(workspace_id, user_id, tool_call_id):
+                return err
 
         # New thread
         thread_id = str(uuid.uuid4())
@@ -410,12 +469,44 @@ async def ptc_agent(
         logger.error("PTC dispatch timed out")
         return _error_command("dispatch_timeout", tool_call_id)
 
+    # Store origin metadata in Redis so the PTC completion hook can
+    # POST back to the flash thread when report_back is enabled.
+    if report_back:
+        flash_thread_id = configurable.get("thread_id")
+        flash_workspace_id = configurable.get("workspace_id")
+        if flash_thread_id:
+            try:
+                from src.utils.cache.redis_cache import get_cache_client
+
+                cache = get_cache_client()
+                await cache.set(
+                    f"ptc_origin:{thread_id}",
+                    {
+                        "origin": "flash",
+                        "flash_thread_id": flash_thread_id,
+                        "flash_workspace_id": flash_workspace_id,
+                        "ptc_thread_id": thread_id,
+                        "report_back": True,
+                        "user_id": user_id,
+                    },
+                    ttl=PTC_ORIGIN_TTL,
+                )
+                # Reverse index: add this PTC thread to the flash thread's
+                # watch set. Uses a Redis SET so multiple concurrent dispatches
+                # from the same flash thread are all tracked independently.
+                watch_key = f"flash_watch:{flash_thread_id}"
+                await cache.client.sadd(watch_key, thread_id)
+                await cache.client.expire(watch_key, PTC_ORIGIN_TTL)
+            except Exception as e:
+                logger.warning(f"Failed to store PTC origin metadata: {e}")
+
     return _success_command(
         {
             "success": True,
             "workspace_id": workspace_id,
             "thread_id": thread_id,
             "status": "dispatched",
+            "report_back": report_back,
         },
         tool_call_id,
     )
@@ -439,34 +530,12 @@ async def agent_output(
     Args:
         thread_id: The thread ID to retrieve output from
     """
-    from src.server.database.conversation import get_thread_owner_id
-
-    from src.tools.secretary.utils import extract_text_from_thread
-
     configurable = config.get("configurable", {})
     user_id = configurable.get("user_id")
     if not user_id:
         return _error_command("user_id not found in config", tool_call_id)
 
-    # Verify ownership
-    try:
-        owner_id = await get_thread_owner_id(thread_id)
-        if owner_id != user_id:
-            return _error_command(
-                "thread not found or not owned by user", tool_call_id
-            )
-    except Exception as e:
-        logger.error(f"Failed to verify thread ownership: {e}")
-        return _error_command("thread not found", tool_call_id)
-
-    # Extract text
-    try:
-        result = await extract_text_from_thread(thread_id)
-    except Exception as e:
-        logger.error(f"Failed to extract text from thread {thread_id}: {e}")
-        return _error_command("failed to retrieve thread output", tool_call_id)
-
-    return _success_command(result, tool_call_id)
+    return await _get_thread_output(user_id, thread_id, tool_call_id)
 
 
 # ---------------------------------------------------------------------------
@@ -513,12 +582,8 @@ async def _threads_list(
     """List threads, optionally filtered by workspace."""
     try:
         if workspace_id:
-            # Verify user owns the workspace before listing its threads
-            from src.server.database.workspace import get_workspace
-
-            ws = await get_workspace(workspace_id)
-            if not ws or str(ws.get("user_id")) != user_id:
-                return _error_command("workspace not found", tool_call_id)
+            if err := await _verify_workspace_owner(workspace_id, user_id, tool_call_id):
+                return err
 
             from src.server.database.conversation import get_workspace_threads
 
@@ -538,7 +603,7 @@ async def _threads_list(
         )
     except Exception as e:
         logger.error(f"Failed to list threads: {e}")
-        content = json.dumps({"success": False, "error": str(e)})
+        content = json.dumps({"success": False, "error": "failed to list threads"})
 
     return Command(
         update={
@@ -558,28 +623,7 @@ async def _threads_get_output(
             "thread_id is required for get_output action", tool_call_id
         )
 
-    from src.server.database.conversation import get_thread_owner_id
-
-    from src.tools.secretary.utils import extract_text_from_thread
-
-    # Verify ownership
-    try:
-        owner_id = await get_thread_owner_id(thread_id)
-        if owner_id != user_id:
-            return _error_command(
-                "thread not found or not owned by user", tool_call_id
-            )
-    except Exception as e:
-        logger.error(f"Failed to verify thread ownership: {e}")
-        return _error_command("thread not found", tool_call_id)
-
-    try:
-        result = await extract_text_from_thread(thread_id)
-    except Exception as e:
-        logger.error(f"Failed to get thread output: {e}")
-        return _error_command("failed to retrieve thread output", tool_call_id)
-
-    return _success_command(result, tool_call_id)
+    return await _get_thread_output(user_id, thread_id, tool_call_id)
 
 
 async def _threads_delete(
@@ -591,18 +635,8 @@ async def _threads_delete(
             "thread_id is required for delete action", tool_call_id
         )
 
-    from src.server.database.conversation import get_thread_owner_id
-
-    # Verify ownership before even asking for confirmation
-    try:
-        owner_id = await get_thread_owner_id(thread_id)
-        if owner_id != user_id:
-            return _error_command(
-                "thread not found or not owned by user", tool_call_id
-            )
-    except Exception as e:
-        logger.error(f"Failed to verify thread ownership: {e}")
-        return _error_command("thread not found", tool_call_id)
+    if err := await _verify_thread_owner(thread_id, user_id, tool_call_id):
+        return err
 
     approved, _ = _hitl_confirm(
         "delete_thread",

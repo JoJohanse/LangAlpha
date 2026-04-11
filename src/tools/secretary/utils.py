@@ -28,10 +28,17 @@ _WSREF_PREFIX = "__wsref__"
 # and end with a known extension.
 _MD_LINK_RE = re.compile(
     r"(!?\[[^\]]*\]\()"  # prefix: ![...]( or [...](
-    r"((?!https?://|mailto:|#|__wsref__/)"  # not external URL or already qualified
+    r"((?!https?://|mailto:|#|__wsref__/|[a-zA-Z][a-zA-Z0-9+.-]*:)"  # not URL scheme or already qualified
     r"(?:/home/(?:workspace|daytona)/)?[a-zA-Z_][^\s)]*/"  # at least one dir segment
     r"[^\s)]*\.(?:" + _FILE_EXTS + r"))"  # filename.ext
     r"(\))",  # closing paren
+    re.IGNORECASE,
+)
+
+# Strip file:// protocol from sandbox paths in markdown links before qualification.
+_FILE_PROTO_RE = re.compile(
+    r"(!?\[[^\]]*\]\()"  # prefix: ![...]( or [...](
+    r"file:///home/(?:workspace|daytona)/",  # file:///home/workspace/ or /daytona/
     re.IGNORECASE,
 )
 
@@ -51,6 +58,9 @@ def _qualify_file_paths(text: str, workspace_id: str) -> str:
     """
     if not workspace_id or not text:
         return text
+
+    # Normalize file:///home/workspace/... → relative path in markdown links
+    text = _FILE_PROTO_RE.sub(r"\1", text)
 
     def _rewrite(m: re.Match) -> str:
         prefix, path, suffix = m.group(1), m.group(2), m.group(3)

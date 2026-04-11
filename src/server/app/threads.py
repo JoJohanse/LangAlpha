@@ -17,6 +17,8 @@ from typing import Optional
 from uuid import uuid4
 
 import asyncio
+import hmac
+import os
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -60,6 +62,58 @@ from src.server.dependencies.usage_limits import ChatRateLimited
 from src.server.app import setup
 
 logger = logging.getLogger(__name__)
+
+# Strong references to background dispatch tasks to prevent GC.
+# Tasks remove themselves via done callback.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _get_service_token() -> str:
+    """Read INTERNAL_SERVICE_TOKEN at call time (not import time)."""
+    return os.getenv("INTERNAL_SERVICE_TOKEN", "")
+
+
+def _track_task(task: asyncio.Task) -> None:
+    """Hold a strong reference to *task* until it completes."""
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _consume_background_gen(gen, label: str, thread_id: str) -> None:
+    """Drain an async generator in the background, cleaning up Redis on failure."""
+    try:
+        async for _ in gen:
+            pass
+    except Exception:
+        logger.error(
+            f"[{label}] Background workflow failed: thread_id={thread_id}",
+            exc_info=True,
+        )
+        # Clean up Redis state so the frontend doesn't show a permanent
+        # "pending" indicator for a dispatch that will never complete.
+        try:
+            from src.utils.cache.redis_cache import get_cache_client
+
+            cache = get_cache_client()
+            if cache.enabled and cache.client:
+                origin = await cache.get(f"ptc_origin:{thread_id}")
+                if origin:
+                    flash_tid = origin.get("flash_thread_id")
+                    await cache.delete(f"ptc_origin:{thread_id}")
+                    if flash_tid:
+                        watch_key = f"flash_watch:{flash_tid}"
+                        await cache.client.srem(watch_key, thread_id)
+                        remaining = await cache.client.scard(watch_key)
+                        if remaining == 0:
+                            await cache.client.delete(watch_key)
+                        # Notify frontend so the watch connection closes
+                        await cache.client.publish(
+                            f"thread:wake:{flash_tid}",
+                            '{"error": "background_workflow_failed"}',
+                        )
+        except Exception:
+            logger.debug(f"[{label}] Redis cleanup after failure also failed", exc_info=True)
+
 
 # Single router for all thread operations
 router = APIRouter(prefix="/api/v1/threads", tags=["Threads"])
@@ -391,17 +445,39 @@ async def _handle_send_message(
         await release_burst_slot(user_id)
         raise
 
+    # Only honour X-Dispatch: background for internal service-to-service calls.
+    _req_token = (raw_request.headers.get("X-Service-Token", "") if raw_request else "")
+    _svc_token = _get_service_token()
+    is_internal = bool(_svc_token and _req_token and hmac.compare_digest(_req_token, _svc_token))
+
     # Route to appropriate streaming function based on agent mode
     if agent_mode == "flash":
+        flash_gen = astream_flash_workflow(
+            request=request,
+            thread_id=thread_id,
+            user_input=user_input,
+            user_id=user_id,
+            is_byok=is_byok,
+            config=config,
+        )
+
+        # Background dispatch for flash (used by PTC completion report-back).
+        if is_internal and raw_request and raw_request.headers.get("X-Dispatch") == "background":
+            _track_task(asyncio.create_task(
+                _consume_background_gen(flash_gen, "FLASH_DISPATCH", thread_id),
+                name=f"flash-dispatch-{thread_id}",
+            ))
+            logger.info(
+                f"[FLASH_DISPATCH] Started background workflow: "
+                f"thread_id={thread_id}"
+            )
+            return JSONResponse({
+                "status": "dispatched",
+                "thread_id": thread_id,
+            })
+
         return StreamingResponse(
-            astream_flash_workflow(
-                request=request,
-                thread_id=thread_id,
-                user_input=user_input,
-                user_id=user_id,
-                is_byok=is_byok,
-                config=config,
-            ),
+            flash_gen,
             media_type="text/event-stream",
             headers=SSE_HEADERS,
         )
@@ -419,22 +495,12 @@ async def _handle_send_message(
     # Internal dispatch mode: run the PTC workflow in a background task
     # instead of streaming SSE.  The ptc_agent tool (secretary) uses this
     # to avoid the generator being cancelled when the HTTP connection closes.
-    if raw_request and raw_request.headers.get("X-Dispatch") == "background":
-        async def _consume_ptc_gen(gen):
-            try:
-                async for _ in gen:
-                    pass
-            except Exception:
-                logger.error(
-                    f"[PTC_DISPATCH] Background PTC workflow failed: "
-                    f"thread_id={thread_id}",
-                    exc_info=True,
-                )
-
-        asyncio.create_task(
-            _consume_ptc_gen(ptc_gen),
+    # Only honoured for internal service-to-service calls (X-Service-Token).
+    if is_internal and raw_request and raw_request.headers.get("X-Dispatch") == "background":
+        _track_task(asyncio.create_task(
+            _consume_background_gen(ptc_gen, "PTC_DISPATCH", thread_id),
             name=f"ptc-dispatch-{thread_id}",
-        )
+        ))
         logger.info(
             f"[PTC_DISPATCH] Started background workflow: "
             f"thread_id={thread_id} workspace_id={workspace_id}"
@@ -483,6 +549,71 @@ async def reconnect_to_stream(
     )
 
 
+@router.get("/{thread_id}/watch")
+async def watch_thread(thread_id: str, x_user_id: CurrentUserId):
+    """Watch for new workflow activity on a thread via SSE + Redis pub/sub.
+
+    Opens a lightweight SSE connection that emits a single ``workflow_started``
+    event when a new workflow begins on this thread (e.g., flash report-back
+    after PTC completion).  The client should then close the connection and
+    reconnect via ``/messages/stream``.
+
+    Sends keepalive pings every 45 seconds.  Auto-closes after 30 minutes
+    to prevent leaked connections from abandoned browser tabs.
+    """
+    await require_thread_owner(thread_id, x_user_id)
+
+    from src.utils.cache.redis_cache import get_cache_client
+
+    CHANNEL = f"thread:wake:{thread_id}"
+    KEEPALIVE_INTERVAL = 45  # seconds
+    MAX_WATCH_DURATION = 30 * 60  # 30 minutes
+
+    async def watch_generator():
+        import time
+
+        cache = get_cache_client()
+        if not cache.enabled or not cache.client:
+            yield 'event: error\ndata: {"error": "watch unavailable"}\n\n'
+            return
+
+        pubsub = cache.client.pubsub()
+        started_at = time.monotonic()
+        try:
+            await pubsub.subscribe(CHANNEL)
+
+            while True:
+                if time.monotonic() - started_at > MAX_WATCH_DURATION:
+                    yield 'event: timeout\ndata: {}\n\n'
+                    break
+
+                try:
+                    msg = await asyncio.wait_for(
+                        pubsub.get_message(ignore_subscribe_messages=True, timeout=KEEPALIVE_INTERVAL),
+                        timeout=KEEPALIVE_INTERVAL + 1,
+                    )
+                except asyncio.TimeoutError:
+                    msg = None
+
+                if msg and msg["type"] == "message":
+                    data = msg["data"]
+                    if isinstance(data, bytes):
+                        data = data.decode("utf-8")
+                    yield f'event: workflow_started\ndata: {data}\n\n'
+                    break
+                else:
+                    yield ': ping\n\n'
+        finally:
+            await pubsub.unsubscribe(CHANNEL)
+            await pubsub.aclose()
+
+    return StreamingResponse(
+        watch_generator(),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
+
+
 @router.get("/{thread_id}/messages/replay")
 async def replay_thread_messages(thread_id: str, x_user_id: CurrentUserId):
     """Replay a thread as SSE using persisted sse_events.
@@ -525,6 +656,11 @@ async def replay_thread_messages(thread_id: str, x_user_id: CurrentUserId):
                     "timestamp": q.get("created_at"),
                     "metadata": q.get("metadata"),
                 }
+                # Tag system queries so the frontend can hide the user bubble
+                query_type = q.get("type")
+                if query_type == "system":
+                    payload["query_type"] = "system"
+
                 yield (
                     f"id: {seq}\n"
                     f"event: user_message\n"
