@@ -31,10 +31,12 @@ from ptc_agent.core.sandbox.providers._chart_capture import (
 from ptc_agent.core.sandbox.runtime import (
     CodeRunResult,
     ExecResult,
+    PreviewInfo,
     RuntimeState,
     SandboxProvider,
     SandboxRuntime,
     SandboxTransientError,
+    SessionCommandResult,
 )
 
 logger = structlog.get_logger(__name__)
@@ -54,8 +56,26 @@ _DOCKER_STATE_MAP: dict[str, RuntimeState] = {
 
 
 # ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _parse_proxy_port_range(range_str: str) -> list[int]:
+    """Parse a port range string like ``"13000-13009"`` into a list of ints."""
+    parts = range_str.strip().split("-")
+    if len(parts) != 2:
+        raise ValueError(f"Invalid proxy port range: {range_str!r} (expected 'START-END')")
+    start, end = int(parts[0]), int(parts[1])
+    if start > end:
+        raise ValueError(f"Invalid proxy port range: start ({start}) > end ({end})")
+    return list(range(start, end + 1))
 
 
 def _parse_memory(limit_str: str) -> int:
@@ -86,12 +106,21 @@ class DockerRuntime(SandboxRuntime):
         working_dir: str = "/home/sandbox",
         dev_mode: bool = False,
         host_work_dir: str | None = None,
+        proxy_ports: list[int] | None = None,
+        host_port_map: dict[int, int] | None = None,
+        preview_base_url: str | None = None,
     ) -> None:
         self._container = container
         self._id = runtime_id
         self._working_dir = working_dir
         self._dev_mode = dev_mode
         self._host_work_dir = host_work_dir
+        self._preview_base_url = preview_base_url
+        self._proxy_ports: list[int] = proxy_ports or []
+        # container port → host port (for dynamic port publishing)
+        self._host_port_map: dict[int, int] = host_port_map or {}
+        self._port_map: dict[int, int] = {}  # agent port → container proxy port
+        self._forwarder_pids: dict[int, str] = {}  # container proxy port → socat PID
 
     # -- Properties --
 
@@ -299,11 +328,241 @@ class DockerRuntime(SandboxRuntime):
                 entries.append({"name": line.strip(), "is_dir": False})
         return entries
 
+    # -- Preview URLs --
+
+    async def _allocate_proxy_port(self, target_port: int) -> int:
+        """Allocate a proxy port and start socat forwarding to the target port."""
+        if target_port in self._port_map:
+            return self._port_map[target_port]
+
+        used = set(self._port_map.values())
+        free = [p for p in self._proxy_ports if p not in used]
+        if not free:
+            raise RuntimeError(
+                f"No free proxy ports. All {len(self._proxy_ports)} ports in use. "
+                f"Increase preview_proxy_ports range in config."
+            )
+        proxy_port = free[0]
+
+        # Reserve immediately to prevent concurrent coroutines from picking
+        # the same proxy port (multiple awaits follow).
+        self._port_map[target_port] = proxy_port
+        self._forwarder_pids[proxy_port] = ""  # mark in-progress
+
+        try:
+            # Write a minimal Python TCP proxy as fallback when socat is unavailable
+            proxy_script = (
+                f"import socket as S,threading as T\n"
+                f"def f(a,b):\n"
+                f" try:\n"
+                f"  while True:\n"
+                f"   d=a.recv(4096)\n"
+                f"   if not d:break\n"
+                f"   b.sendall(d)\n"
+                f" except:pass\n"
+                f" finally:a.close();b.close()\n"
+                f"s=S.socket();s.setsockopt(S.SOL_SOCKET,S.SO_REUSEADDR,1)\n"
+                f"s.bind(('0.0.0.0',{proxy_port}));s.listen(5)\n"
+                f"while True:\n"
+                f" c,_=s.accept();d=S.socket();d.connect(('127.0.0.1',{target_port}))\n"
+                f" T.Thread(target=f,args=(c,d),daemon=True).start()\n"
+                f" T.Thread(target=f,args=(d,c),daemon=True).start()\n"
+            )
+            encoded_script = base64.b64encode(proxy_script.encode()).decode("ascii")
+            proxy_path = f"/tmp/.proxy_{proxy_port}.py"
+            await self.exec(
+                f"echo {encoded_script} | base64 -d > {proxy_path}", timeout=5
+            )
+
+            # Kill any stale forwarder on this proxy port (survives Python-side
+            # reconnects while the container stays running).
+            await self.exec(
+                f"fuser -k {proxy_port}/tcp 2>/dev/null || true", timeout=5
+            )
+
+            # Start socat forwarder; fall back to Python proxy if socat is not installed
+            result = await self.exec(
+                f"nohup bash -c 'socat TCP-LISTEN:{proxy_port},fork,reuseaddr "
+                f"TCP:localhost:{target_port} 2>/dev/null "
+                f"|| python3 {proxy_path}' > /dev/null 2>&1 & echo $!",
+                timeout=10,
+            )
+            pid = result.stdout.strip()
+
+            # Verify the forwarder is actually listening
+            check = await self.exec(
+                f"sleep 0.2 && fuser {proxy_port}/tcp >/dev/null 2>&1", timeout=5
+            )
+            if check.exit_code != 0:
+                logger.warning(
+                    "Proxy forwarder may not have started",
+                    proxy_port=proxy_port,
+                    target_port=target_port,
+                    pid=pid,
+                )
+
+            self._forwarder_pids[proxy_port] = pid
+        except Exception:
+            # Roll back reservation so the port is available for retry
+            del self._port_map[target_port]
+            del self._forwarder_pids[proxy_port]
+            raise
+
+        logger.info(
+            "Proxy port allocated",
+            target_port=target_port,
+            proxy_port=proxy_port,
+            pid=pid,
+        )
+        return proxy_port
+
+    def _host_port_for(self, container_port: int) -> int:
+        """Return the host-side port for a given container proxy port.
+
+        When Docker publishes with dynamic host ports (``HostPort: ""``),
+        the actual host port differs from the container port.  Falls back
+        to the container port itself (static publishing or tests).
+        """
+        return self._host_port_map.get(container_port, container_port)
+
+    async def get_preview_url(self, port: int, expires_in: int = 3600) -> PreviewInfo:
+        proxy_port = await self._allocate_proxy_port(port)
+        host_port = self._host_port_for(proxy_port)
+        base = (self._preview_base_url or "http://localhost").rstrip("/")
+        return PreviewInfo(url=f"{base}:{host_port}", token="")
+
+    async def get_preview_link(self, port: int) -> PreviewInfo:
+        proxy_port = await self._allocate_proxy_port(port)
+        host_port = self._host_port_for(proxy_port)
+        # Server-side: resolve host for health checks (may differ from browser URL)
+        base = (self._preview_base_url or await self._resolve_server_side_host()).rstrip("/")
+        return PreviewInfo(url=f"{base}:{host_port}", token="")
+
+    _server_side_host: str | None = None  # class-level cache
+
+    @classmethod
+    async def _resolve_server_side_host(cls) -> str:
+        """Resolve host for server-side requests to published proxy ports.
+
+        When the backend itself runs inside Docker, ``localhost`` points to the
+        backend container, not the host where sandbox ports are published.
+        Docker Desktop exposes ``host.docker.internal`` for this purpose.
+
+        Result is cached at the class level — it won't change during process
+        lifetime and avoids repeated DNS lookups.
+        """
+        if cls._server_side_host is not None:
+            return cls._server_side_host
+
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.getaddrinfo("host.docker.internal", None)
+            cls._server_side_host = "http://host.docker.internal"
+        except OSError:
+            cls._server_side_host = "http://localhost"
+        return cls._server_side_host
+
+    # -- Sessions --
+
+    async def create_session(self, session_id: str) -> None:
+        if not _SESSION_ID_RE.match(session_id):
+            raise ValueError(f"Invalid session_id: {session_id!r}")
+        check = await self.exec(f"test -d /tmp/.sessions/{session_id}", timeout=5)
+        if check.exit_code == 0:
+            raise RuntimeError(f"Session already exists: {session_id}")
+        await self.exec(f"mkdir -p /tmp/.sessions/{session_id}", timeout=5)
+
+    async def session_execute(
+        self,
+        session_id: str,
+        command: str,
+        *,
+        run_async: bool = False,
+        timeout: int = 60,
+    ) -> SessionCommandResult:
+        if not _SESSION_ID_RE.match(session_id):
+            raise ValueError(f"Invalid session_id: {session_id!r}")
+        cmd_id = uuid.uuid4().hex[:8]
+        session_dir = f"/tmp/.sessions/{session_id}"
+
+        if run_async:
+            encoded = base64.b64encode(command.encode()).decode("ascii")
+            # Use setsid to create a new process group so delete_session
+            # can kill the entire tree (not just the wrapper).
+            # Note: there is a sub-millisecond window between exec returning
+            # and the .pid file being written. delete_session called in that
+            # window would miss the PID. In practice this is not an issue
+            # because sessions are long-lived (preview servers, etc.).
+            wrapped = (
+                f"nohup setsid bash -c '"
+                f"echo $$ > {session_dir}/{cmd_id}.pid; "
+                f"eval \"$(echo {encoded} | base64 -d)\"; "
+                f"echo $? > {session_dir}/{cmd_id}.exit"
+                f"' > {session_dir}/{cmd_id}.stdout 2> {session_dir}/{cmd_id}.stderr &"
+            )
+            await self.exec(wrapped, timeout=10)
+            return SessionCommandResult(cmd_id=cmd_id, exit_code=None, stdout="", stderr="")
+
+        result = await self.exec(command, timeout=timeout)
+        return SessionCommandResult(
+            cmd_id=cmd_id,
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
+
+    async def session_command_logs(
+        self, session_id: str, command_id: str
+    ) -> SessionCommandResult:
+        if not _SESSION_ID_RE.match(session_id):
+            raise ValueError(f"Invalid session_id: {session_id!r}")
+        if not _SESSION_ID_RE.match(command_id):
+            raise ValueError(f"Invalid command_id: {command_id!r}")
+        session_dir = f"/tmp/.sessions/{session_id}"
+        # Single exec round-trip: emit all three files separated by a null byte
+        _SEP = "\\x00"
+        result = await self.exec(
+            f"cat {session_dir}/{command_id}.stdout 2>/dev/null; "
+            f"printf '{_SEP}'; "
+            f"cat {session_dir}/{command_id}.stderr 2>/dev/null; "
+            f"printf '{_SEP}'; "
+            f"cat {session_dir}/{command_id}.exit 2>/dev/null",
+            timeout=5,
+        )
+        parts = result.stdout.split("\x00", 2)
+        stdout = parts[0] if len(parts) > 0 else ""
+        stderr = parts[1] if len(parts) > 1 else ""
+        exit_str = parts[2].strip() if len(parts) > 2 else ""
+        exit_code = int(exit_str) if exit_str.isdigit() else None
+        return SessionCommandResult(
+            cmd_id=command_id,
+            exit_code=exit_code,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+    async def delete_session(self, session_id: str) -> None:
+        if not _SESSION_ID_RE.match(session_id):
+            raise ValueError(f"Invalid session_id: {session_id!r}")
+        session_dir = f"/tmp/.sessions/{session_id}"
+        # Kill the entire process group (negative PID) so child processes
+        # spawned by the session command are also terminated.
+        await self.exec(
+            f"for f in {session_dir}/*.pid; do "
+            f"  pid=$(cat \"$f\" 2>/dev/null | tr -cd '0-9'); "
+            f"  [ -n \"$pid\" ] && kill -- -\"$pid\" 2>/dev/null; "
+            f"  [ -n \"$pid\" ] && kill \"$pid\" 2>/dev/null; "
+            f"done; rm -rf {session_dir}",
+            timeout=10,
+        )
+
     # -- Capabilities & metadata --
 
     @property
     def capabilities(self) -> set[str]:
-        return {"exec", "code_run", "file_io"}
+        return {"exec", "code_run", "file_io", "preview_url", "sessions"}
 
     async def archive(self) -> None:
         raise NotImplementedError("Docker provider does not support archive")
@@ -415,13 +674,25 @@ class DockerProvider(SandboxProvider):
         runtime_id = f"docker-{uuid.uuid4().hex[:12]}"
         container_name = f"langalpha-sandbox-{runtime_id}"
 
+        # Parse proxy port pool for preview URL support
+        proxy_ports = _parse_proxy_port_range(self._config.preview_proxy_ports)
+
         # Build container config
         host_config: dict[str, Any] = {
             "Memory": _parse_memory(self._config.memory_limit),
             "NanoCpus": int(self._config.cpu_count * 1e9),
             "NetworkMode": self._config.network_mode,
             "AutoRemove": False,  # We manage removal ourselves
+            "Init": True,  # tini as PID 1 for zombie reaping
         }
+
+        # Publish proxy ports so preview URLs are reachable from the host.
+        # Use dynamic host ports (HostPort: "") so multiple containers can
+        # coexist without port conflicts.
+        if proxy_ports:
+            host_config["PortBindings"] = {
+                f"{p}/tcp": [{"HostPort": ""}] for p in proxy_ports
+            }
 
         binds: list[str] = list(self._config.volumes)  # extra user-defined mounts
         host_work_dir: str | None = None
@@ -442,6 +713,9 @@ class DockerProvider(SandboxProvider):
             "HostConfig": host_config,
         }
 
+        if proxy_ports:
+            container_config["ExposedPorts"] = {f"{p}/tcp": {} for p in proxy_ports}
+
         if env_vars:
             container_config["Env"] = [f"{k}={v}" for k, v in env_vars.items()]
 
@@ -451,11 +725,25 @@ class DockerProvider(SandboxProvider):
         )
         await container_obj.start()
 
+        # Read actual host port mappings (dynamic ports picked by Docker)
+        host_port_map: dict[int, int] = {}
+        if proxy_ports:
+            info = await container_obj.show()
+            port_bindings = (
+                info.get("NetworkSettings", {})
+                .get("Ports", {})
+            )
+            for cp in proxy_ports:
+                bindings = port_bindings.get(f"{cp}/tcp", [])
+                if bindings and bindings[0].get("HostPort"):
+                    host_port_map[cp] = int(bindings[0]["HostPort"])
+
         logger.info(
             "Docker container started",
             container_name=container_name,
             runtime_id=runtime_id,
             image=self._config.image,
+            host_port_map=host_port_map or None,
         )
 
         runtime = DockerRuntime(
@@ -464,6 +752,9 @@ class DockerProvider(SandboxProvider):
             working_dir=self._working_dir,
             dev_mode=self._config.dev_mode,
             host_work_dir=host_work_dir,
+            proxy_ports=proxy_ports,
+            host_port_map=host_port_map,
+            preview_base_url=self._config.preview_base_url,
         )
 
         # Install MCP npm packages if needed (mirrors Daytona snapshot behavior)
@@ -503,12 +794,24 @@ class DockerProvider(SandboxProvider):
                 host_work_dir = mount.get("Source")
                 break
 
+        # Read actual host port mappings from running container
+        proxy_ports = _parse_proxy_port_range(self._config.preview_proxy_ports)
+        host_port_map: dict[int, int] = {}
+        port_bindings = info.get("NetworkSettings", {}).get("Ports", {})
+        for cp in proxy_ports:
+            bindings = port_bindings.get(f"{cp}/tcp", [])
+            if bindings and bindings[0].get("HostPort"):
+                host_port_map[cp] = int(bindings[0]["HostPort"])
+
         return DockerRuntime(
             container_obj,
             runtime_id=sandbox_id,
             working_dir=self._working_dir,
             dev_mode=dev_mode,
             host_work_dir=host_work_dir,
+            proxy_ports=proxy_ports,
+            host_port_map=host_port_map,
+            preview_base_url=self._config.preview_base_url,
         )
 
     async def close(self) -> None:
