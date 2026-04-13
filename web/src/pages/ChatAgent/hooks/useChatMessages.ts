@@ -2093,7 +2093,7 @@ export function useChatMessages(
     const tid = threadIdRef.current;
     if (!tid || tid === '__default__') return;
 
-    if (process.env.NODE_ENV === 'development') console.log('[ReportBack] Opening watch connection for thread:', tid);
+    if (import.meta.env.DEV) console.log('[ReportBack] Opening watch connection for thread:', tid);
 
     const { abort } = watchThread(tid, async () => {
       reportBackWatchAbortRef.current = null;
@@ -2102,11 +2102,11 @@ export function useChatMessages(
       // If flash is currently streaming, the report-back system message was
       // steered into the active turn — no separate reconnect needed.
       if (isStreamingRef.current) {
-        if (process.env.NODE_ENV === 'development') console.log('[ReportBack] Steered into active stream, skipping reconnect');
+        if (import.meta.env.DEV) console.log('[ReportBack] Steered into active stream, skipping reconnect');
         return;
       }
 
-      if (process.env.NODE_ENV === 'development') console.log('[ReportBack] Report-back workflow detected, reconnecting');
+      if (import.meta.env.DEV) console.log('[ReportBack] Report-back workflow detected, reconnecting');
 
       // Small delay to let the workflow buffer initial events
       await new Promise((r) => setTimeout(r, 500));
@@ -2117,7 +2117,7 @@ export function useChatMessages(
           await reconnectToStream({ activeTasks: status.active_tasks || [] });
         }
       } catch (err) {
-        if (process.env.NODE_ENV === 'development') console.log('[ReportBack] Reconnect after watch failed:', (err as Error).message);
+        if (import.meta.env.DEV) console.log('[ReportBack] Reconnect after watch failed:', (err as Error).message);
       }
     });
     reportBackWatchAbortRef.current = abort;
@@ -2294,7 +2294,7 @@ export function useChatMessages(
 
         // Re-open watch if a PTC report-back is still pending (e.g., user navigated away and back)
         if (status.pending_report_back) {
-          if (process.env.NODE_ENV === 'development') console.log('[ReportBack] Pending report-back detected on load, opening watch');
+          if (import.meta.env.DEV) console.log('[ReportBack] Pending report-back detected on load, opening watch');
           awaitingReportBackRef.current = true;
           startReportBackWatch();
         }
@@ -2413,7 +2413,7 @@ export function useChatMessages(
     // This is the agent_id used as key throughout the frontend.
     const agent = event?.agent;
     if (!agent || typeof agent !== 'string' || !agent.startsWith('task:')) {
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.warn('[Stream] Subagent event without task: agent field:', event);
       }
       return null;
@@ -2504,7 +2504,7 @@ export function useChatMessages(
       const isSubagent = isSubagentEvent(event);
 
       // Debug: Log subagent event detection
-      if (process.env.NODE_ENV === 'development' && isSubagent) {
+      if (import.meta.env.DEV && isSubagent) {
         console.log('[Stream] Subagent event detected:', {
           eventType,
           agent: event.agent,
@@ -2770,7 +2770,7 @@ export function useChatMessages(
           } else if (eventType === 'tool_call_result') {
             const toolCallId = event.tool_call_id as string;
 
-            if (process.env.NODE_ENV === 'development') {
+            if (import.meta.env.DEV) {
               console.log('[Stream] Subagent tool_call_result event:', {
                 taskId,
                 assistantMessageId: subagentAssistantMessageId,
@@ -2794,7 +2794,7 @@ export function useChatMessages(
               updateSubagentCard,
             });
           } else if (eventType === 'artifact') {
-            if (process.env.NODE_ENV === 'development') {
+            if (import.meta.env.DEV) {
               console.log('[Stream] Filtering out subagent artifact event:', {
                 artifactType: event.artifact_type,
                 taskId,
@@ -3100,7 +3100,7 @@ export function useChatMessages(
         if (event.artifact?.task_id && toolCallId) {
           const agentId = `task:${event.artifact.task_id}`;
           toolCallIdToTaskIdMapRef.current.set(toolCallId, agentId);
-          if (process.env.NODE_ENV === 'development') {
+          if (import.meta.env.DEV) {
             console.log('[Stream] Mapped toolCallId to agentId from artifact:', {
               toolCallId,
               agentId,
@@ -3141,7 +3141,7 @@ export function useChatMessages(
         // After HITL resume, the tool_call_result arrives on a NEW assistant message
         // while the proposals live on the OLD one (from the interrupt turn).
         // Match by tool_call_id for exact correlation (safe under concurrent dispatches).
-        if (process.env.NODE_ENV === 'development') {
+        if (import.meta.env.DEV) {
           console.log('[Stream] tool_call_result received:', {
             pendingBackfill: [...pendingPTCBackfillRef.current.entries()],
             toolCallId,

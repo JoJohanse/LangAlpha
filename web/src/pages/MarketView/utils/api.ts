@@ -366,13 +366,13 @@ async function streamFetch(
   opts: RequestInit,
   onEvent: (event: Record<string, unknown>) => void
 ): Promise<void> {
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     console.log('[MarketView API] Starting stream fetch:', url);
   }
 
   const res = await fetch(`${baseURL}${url}`, opts);
 
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     console.log('[MarketView API] Response status:', res.status, 'Content-Type:', res.headers.get('content-type'));
   }
 
@@ -445,7 +445,7 @@ async function streamFetch(
 
       if (done) {
         // Stream ended normally - decode any remaining buffer
-        if (process.env.NODE_ENV === 'development') {
+        if (import.meta.env.DEV) {
           console.log('[MarketView API] Stream ended normally, hasReceivedData:', hasReceivedData);
         }
         if (buffer) {
@@ -546,7 +546,7 @@ export async function sendFlashChatMessage(
     ? '/api/v1/threads/messages'
     : `/api/v1/threads/${threadId}/messages`;
 
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     console.log('[MarketView API] Sending flash chat message:', {
       threadId,
       agentMode: 'flash',
@@ -624,7 +624,7 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
   }
   try {
     await api.delete(`/api/v1/workspaces/${workspaceId}`);
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log('[MarketView] Deleted workspace:', workspaceId);
     }
   } catch (error: unknown) {
@@ -643,13 +643,13 @@ export async function deleteFlashWorkspaces(): Promise<void> {
     const flashWorkspaces = workspaces.filter((ws: Workspace) => ws.name === '__flash__');
 
     if (flashWorkspaces.length === 0) {
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.log('[MarketView] No flash workspaces to delete');
       }
       return;
     }
 
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log(`[MarketView] Found ${flashWorkspaces.length} flash workspace(s) to delete`);
     }
 
@@ -658,7 +658,7 @@ export async function deleteFlashWorkspaces(): Promise<void> {
       flashWorkspaces.map((ws: Workspace) => deleteWorkspace(ws.workspace_id))
     );
 
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log('[MarketView] Deleted all flash workspaces');
     }
   } catch (error: unknown) {

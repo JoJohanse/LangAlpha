@@ -529,20 +529,20 @@ export function handleTodoUpdate({ assistantMessageId, artifactType, artifactId,
 }): boolean {
   const { contentOrderCounterRef, updateTodoListCard, isNewConversation } = refs;
 
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     console.log('[handleTodoUpdate] Called with:', { assistantMessageId, artifactType, artifactId, payload, isNewConversation });
   }
 
   // Only handle todo_update artifacts
   if (artifactType !== 'todo_update' || !payload) {
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log('[handleTodoUpdate] Skipping - artifactType:', artifactType, 'hasPayload:', !!payload);
     }
     return false;
   }
 
   const { todos, total, completed, in_progress, pending } = payload;
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     console.log('[handleTodoUpdate] Extracted data:', { todos, total, completed, in_progress, pending });
   }
 
@@ -551,7 +551,7 @@ export function handleTodoUpdate({ assistantMessageId, artifactType, artifactId,
   // Always update the card if updateTodoListCard is available, even if todos array is empty
   // This ensures the card persists and shows the latest state
   if (updateTodoListCard) {
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log('[handleTodoUpdate] Updating todo list card, isNewConversation:', isNewConversation, 'todos count:', todos?.length || 0);
     }
     updateTodoListCard(
@@ -571,18 +571,18 @@ export function handleTodoUpdate({ assistantMessageId, artifactType, artifactId,
   const baseTodoListId = artifactId || `todo-list-base-${Date.now()}`;
   // Create a unique segment ID that includes timestamp to ensure chronological ordering
   const segmentId = `${baseTodoListId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     console.log('[handleTodoUpdate] Using baseTodoListId:', baseTodoListId, 'segmentId:', segmentId);
   }
 
   setMessages((prev: MessageRecord[]) => {
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log('[handleTodoUpdate] Current messages:', prev.map((m: MessageRecord) => ({ id: m.id, role: m.role, hasSegments: !!m.contentSegments, hasTodoProcesses: !!m.todoListProcesses })));
     }
     const updated = prev.map((msg: MessageRecord) => {
       if (msg.id !== assistantMessageId) return msg;
 
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.log('[handleTodoUpdate] Found matching message:', msg.id);
       }
       const todoListProcesses = { ...((msg.todoListProcesses as Record<string, unknown>) || {}) };
@@ -590,7 +590,7 @@ export function handleTodoUpdate({ assistantMessageId, artifactType, artifactId,
 
       // Always create a new segment for each todo_update event to preserve chronological order
       const currentOrder = eventId != null ? eventId : ++contentOrderCounterRef.current;
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.log('[handleTodoUpdate] Creating new todo list segment with order:', currentOrder, 'segmentId:', segmentId);
       }
 
@@ -613,7 +613,7 @@ export function handleTodoUpdate({ assistantMessageId, artifactType, artifactId,
         order: currentOrder,
         baseTodoListId: baseTodoListId, // Keep reference to base ID for potential future use
       };
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.log('[handleTodoUpdate] Created new todo list process:', todoListProcesses[segmentId]);
       }
 
@@ -622,7 +622,7 @@ export function handleTodoUpdate({ assistantMessageId, artifactType, artifactId,
         contentSegments,
         todoListProcesses,
       };
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.log('[handleTodoUpdate] Updated message:', {
           id: updatedMsg.id,
           segmentsCount: (updatedMsg.contentSegments as unknown[])?.length,
@@ -631,7 +631,7 @@ export function handleTodoUpdate({ assistantMessageId, artifactType, artifactId,
       }
       return updatedMsg;
     });
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log('[handleTodoUpdate] Final messages after update:', updated.map((m: MessageRecord) => ({ id: m.id, segmentsCount: (m.contentSegments as unknown[])?.length, todoListIds: Object.keys((m.todoListProcesses as Record<string, unknown>) || {}) })));
     }
     return updated;
@@ -940,7 +940,7 @@ export function handleSubagentMessageChunk({
     const existingContent = (reasoningProcesses[reasoningId]?.content as string) || '';
     const newContent = existingContent + content;
 
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.log('[handleSubagentMessageChunk] Updating reasoning content:', {
         taskId,
         reasoningId,
@@ -1092,7 +1092,7 @@ export function handleSubagentToolCalls({ taskId, assistantMessageId, toolCalls,
   const taskRefs = getOrCreateTaskRefs(refs, taskId);
   const { contentOrderCounterRef } = taskRefs;
 
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     console.log('[handleSubagentToolCalls] Processing tool calls:', {
       taskId,
       assistantMessageId,
@@ -1142,7 +1142,7 @@ export function handleSubagentToolCalls({ taskId, assistantMessageId, toolCalls,
           order: currentOrder,
         };
 
-        if (process.env.NODE_ENV === 'development') {
+        if (import.meta.env.DEV) {
           console.log('[handleSubagentToolCalls] Created new tool call:', {
             taskId,
             assistantMessageId,
@@ -1214,7 +1214,7 @@ export function handleSubagentToolCallResult({ taskId, assistantMessageId, toolC
   let messageIndex = -1;
   let targetMessage: MessageRecord | null = null;
 
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     console.log('[handleSubagentToolCallResult] Searching for tool call:', {
       taskId,
       toolCallId,
@@ -1233,7 +1233,7 @@ export function handleSubagentToolCallResult({ taskId, assistantMessageId, toolC
       targetMessage = updatedMessages[messageIndex];
       // Verify this message actually has the tool call
       if (!(targetMessage.toolCallProcesses as Record<string, unknown>)?.[toolCallId]) {
-        if (process.env.NODE_ENV === 'development') {
+        if (import.meta.env.DEV) {
           console.warn('[handleSubagentToolCallResult] Message found but tool call not in it:', {
             messageId: assistantMessageId,
             toolCallId,
@@ -1253,7 +1253,7 @@ export function handleSubagentToolCallResult({ taskId, assistantMessageId, toolC
       if ((msg.toolCallProcesses as Record<string, unknown>)?.[toolCallId]) {
         messageIndex = i;
         targetMessage = msg;
-        if (process.env.NODE_ENV === 'development') {
+        if (import.meta.env.DEV) {
           console.log('[handleSubagentToolCallResult] Found message by tool call ID:', {
             messageId: msg.id,
             toolCallId,
@@ -1297,7 +1297,7 @@ export function handleSubagentToolCallResult({ taskId, assistantMessageId, toolC
       },
     });
 
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.warn('[handleSubagentToolCallResult] Tool call not found, created new message:', {
         taskId,
         toolCallId,
@@ -1407,7 +1407,7 @@ export function handleSubagentToolCallResult({ taskId, assistantMessageId, toolC
   // - Otherwise, clear it
   const finalCurrentTool = justCompletedToolFailed ? '' : (hasInProgressTool ? currentToolName : '');
 
-  if (process.env.NODE_ENV === 'development' && justCompletedToolFailed) {
+  if (import.meta.env.DEV && justCompletedToolFailed) {
     console.log('[handleSubagentToolCallResult] Tool call failed, clearing currentTool immediately:', {
       taskId,
       toolCallId,

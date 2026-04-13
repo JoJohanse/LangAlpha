@@ -409,7 +409,7 @@ export function useMarketChat(): UseMarketChatReturn {
           hasReceivedEvents = true;
           const eventType = (event.event as string) || 'message_chunk';
           
-          if (process.env.NODE_ENV === 'development') {
+          if (import.meta.env.DEV) {
             console.log('[MarketChat] Received event:', eventType, event);
           }
 
@@ -514,7 +514,7 @@ export function useMarketChat(): UseMarketChatReturn {
       // Always stop loading
       setIsLoading(false);
       
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         if (hasReceivedError) {
           console.log('[MarketChat] Stream completed with error');
         } else {
@@ -576,7 +576,7 @@ export function useMarketChat(): UseMarketChatReturn {
             })
           );
         } else {
-          if (process.env.NODE_ENV === 'development') {
+          if (import.meta.env.DEV) {
             console.warn('[MarketChat] Stream interrupted but received partial data, marking as complete');
           }
         }
