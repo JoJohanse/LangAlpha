@@ -1009,6 +1009,34 @@ type RenderBlock =
   | NotificationRenderBlock
   | HtmlWidgetRenderBlock;
 
+interface TextBlockProps {
+  block: TextRenderBlock;
+  isFirst: boolean;
+  isStreaming: boolean;
+  hasError: boolean;
+  isSubagentView: boolean;
+  onOpenFile?: (path: string, workspaceId?: string) => void;
+}
+
+function TextBlock({ block, isFirst, isStreaming, hasError, isSubagentView, onOpenFile }: TextBlockProps): React.ReactElement | null {
+  const textContent = isSubagentView
+    ? normalizeSubagentText(block.segment.content)
+    : (block.segment.content ?? '');
+  const textEl = (
+    <TextMessageContent
+      content={textContent}
+      isStreaming={isStreaming}
+      hasError={hasError}
+      onOpenFile={onOpenFile}
+    />
+  );
+  // First-block pure-text gets a −4px offset so its first-line center matches the
+  // 32px logo center. Reasoning-leading blocks handle their own offset inside
+  // ActivityBlock. Guard on textContent so an empty streaming block doesn't render
+  // an empty wrapper that shifts later siblings.
+  return isFirst && textContent ? <div className="-mt-1">{textEl}</div> : textEl;
+}
+
 const MessageContentSegments = memo(function MessageContentSegments({ segments, reasoningProcesses, toolCallProcesses, todoListProcesses, subagentTasks, planApprovals = EMPTY_OBJ, userQuestions = EMPTY_OBJ, workspaceProposals = EMPTY_OBJ, questionProposals = EMPTY_OBJ, pendingToolCallChunks = EMPTY_OBJ, isStreaming, hasError, isAssistant = false, compactToolCalls = false, isSubagentView = false, readOnly = false, allowFiles = false, onOpenSubagentTask, onOpenFile, onOpenDir, onToolCallDetailClick, onApprovePlan, onRejectPlan, onPlanDetailClick, onAnswerQuestion, onSkipQuestion, onApproveCreateWorkspace, onRejectCreateWorkspace, onApproveStartQuestion, onRejectStartQuestion, onApprovePTCAgent, onRejectPTCAgent, onApproveSecretaryAction, onRejectSecretaryAction, ptcAgentProposals = EMPTY_OBJ, secretaryActionProposals = EMPTY_OBJ, onWidgetSendPrompt, htmlWidgetProcesses = EMPTY_OBJ, textOnly = false, flashContext }: MessageContentSegmentsProps): React.ReactElement {
   // Force re-render timer for recently-completed tool calls that need minimum exposure
   const [tick, setTick] = useState(0);
@@ -1358,17 +1386,17 @@ const MessageContentSegments = memo(function MessageContentSegments({ segments, 
           }
 
           if (block.type === 'text') {
-            const textContent = isSubagentView ? normalizeSubagentText((block as TextRenderBlock).segment.content) : ((block as TextRenderBlock).segment.content ?? '');
-            const textEl = (
-              <TextMessageContent
+            return (
+              <TextBlock
                 key={block.key}
-                content={textContent}
+                block={block as TextRenderBlock}
+                isFirst={blockIdx === 0}
                 isStreaming={!!(isStreaming && blockIdx === lastTextBlockIdx && !hasAnyTrulyInProgress)}
                 hasError={!!hasError}
+                isSubagentView={isSubagentView}
                 onOpenFile={onOpenFile}
               />
             );
-            return blockIdx === 0 && textContent ? <div key={block.key} className="-mt-1">{textEl}</div> : textEl;
           }
 
           if (block.type === 'html_widget') {
