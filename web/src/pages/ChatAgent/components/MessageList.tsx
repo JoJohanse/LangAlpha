@@ -526,8 +526,11 @@ const MessageBubble = memo(function MessageBubble({ message, isLoading, hideAvat
     if (result === null) setFeedbackRating(prevRating);
   };
 
-  // Show action buttons only when not streaming, not in subagent view, not read-only, and not loading
-  const showActions = !(message.isStreaming as boolean) && !isSubagentView && !readOnly && !isLoading;
+  // Action buttons are mounted for all normal messages (reserves layout space) and
+  // only made visible after streaming settles. Keeping them mounted prevents a
+  // ~32px layout jump on sibling messages when streaming ends.
+  const canShowActions = !isSubagentView && !readOnly;
+  const showActions = canShowActions && !(message.isStreaming as boolean) && !isLoading;
 
   const resizeTextarea = () => {
     const el = editTextareaRef.current;
@@ -769,11 +772,18 @@ const MessageBubble = memo(function MessageBubble({ message, isLoading, hideAvat
         </>
         )}
 
-        {/* Message action buttons -- visible on hover */}
-        {showActions && !isEditing && (
+        {/* Message action buttons -- always mounted (reserves space), visibility toggled.
+            aria-hidden + inert keep the buttons out of the a11y tree and tab order
+            while opacity-0 is hiding them, so screen readers don't announce
+            "Copy, Thumbs up, ..." for every streaming message. */}
+        {canShowActions && !isEditing && (
           <div
+            aria-hidden={!showActions}
+            inert={!showActions || undefined}
             className={`flex gap-1 mt-0.5 transition-opacity ${
-              isMobile ? 'opacity-70' : 'opacity-0 group-hover:opacity-100'
+              showActions
+                ? (isMobile ? 'opacity-70' : 'opacity-0 group-hover:opacity-100')
+                : 'opacity-0 pointer-events-none'
             } ${
               isUser ? 'justify-end' : 'justify-start'
             }`}
@@ -1008,6 +1018,34 @@ type RenderBlock =
   | SecretaryActionRenderBlock
   | NotificationRenderBlock
   | HtmlWidgetRenderBlock;
+
+interface TextBlockProps {
+  block: TextRenderBlock;
+  isFirst: boolean;
+  isStreaming: boolean;
+  hasError: boolean;
+  isSubagentView: boolean;
+  onOpenFile?: (path: string, workspaceId?: string) => void;
+}
+
+function TextBlock({ block, isFirst, isStreaming, hasError, isSubagentView, onOpenFile }: TextBlockProps): React.ReactElement | null {
+  const textContent = isSubagentView
+    ? normalizeSubagentText(block.segment.content)
+    : (block.segment.content ?? '');
+  const textEl = (
+    <TextMessageContent
+      content={textContent}
+      isStreaming={isStreaming}
+      hasError={hasError}
+      onOpenFile={onOpenFile}
+    />
+  );
+  // First-block pure-text gets a −4px offset so its first-line center matches the
+  // 32px logo center. Reasoning-leading blocks handle their own offset inside
+  // ActivityBlock. Guard on textContent so an empty streaming block doesn't render
+  // an empty wrapper that shifts later siblings.
+  return isFirst && textContent ? <div className="-mt-1">{textEl}</div> : textEl;
+}
 
 const MessageContentSegments = memo(function MessageContentSegments({ segments, reasoningProcesses, toolCallProcesses, todoListProcesses, subagentTasks, planApprovals = EMPTY_OBJ, userQuestions = EMPTY_OBJ, workspaceProposals = EMPTY_OBJ, questionProposals = EMPTY_OBJ, pendingToolCallChunks = EMPTY_OBJ, isStreaming, hasError, isAssistant = false, compactToolCalls = false, isSubagentView = false, readOnly = false, allowFiles = false, onOpenSubagentTask, onOpenFile, onOpenDir, onToolCallDetailClick, onApprovePlan, onRejectPlan, onPlanDetailClick, onAnswerQuestion, onSkipQuestion, onApproveCreateWorkspace, onRejectCreateWorkspace, onApproveStartQuestion, onRejectStartQuestion, onApprovePTCAgent, onRejectPTCAgent, onApproveSecretaryAction, onRejectSecretaryAction, ptcAgentProposals = EMPTY_OBJ, secretaryActionProposals = EMPTY_OBJ, onWidgetSendPrompt, htmlWidgetProcesses = EMPTY_OBJ, textOnly = false, flashContext }: MessageContentSegmentsProps): React.ReactElement {
   // Force re-render timer for recently-completed tool calls that need minimum exposure
@@ -1358,17 +1396,17 @@ const MessageContentSegments = memo(function MessageContentSegments({ segments, 
           }
 
           if (block.type === 'text') {
-            const textContent = isSubagentView ? normalizeSubagentText((block as TextRenderBlock).segment.content) : ((block as TextRenderBlock).segment.content ?? '');
-            const textEl = (
-              <TextMessageContent
+            return (
+              <TextBlock
                 key={block.key}
-                content={textContent}
+                block={block as TextRenderBlock}
+                isFirst={blockIdx === 0}
                 isStreaming={!!(isStreaming && blockIdx === lastTextBlockIdx && !hasAnyTrulyInProgress)}
                 hasError={!!hasError}
+                isSubagentView={isSubagentView}
                 onOpenFile={onOpenFile}
               />
             );
-            return blockIdx === 0 && textContent ? <div key={block.key} className="-mt-1">{textEl}</div> : textEl;
           }
 
           if (block.type === 'html_widget') {

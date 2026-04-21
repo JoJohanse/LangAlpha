@@ -82,6 +82,11 @@ function ErrorDisplay({ parsed }: ErrorDisplayProps): React.ReactElement {
   );
 }
 
-export default TextMessageContent;
+// memo'd: every streaming token re-renders MessageContentSegments, which maps
+// over earlier text blocks with unchanged content. Default shallow compare on
+// primitive props + stable onOpenFile (useCallback in ChatView/SharedChatView)
+// skips Markdown's AST parse for those stable blocks. Non-primitive props added
+// later must be referentially stable or memoization becomes a no-op.
+export default React.memo(TextMessageContent);
 // eslint-disable-next-line react-refresh/only-export-components
 export { parseErrorMessage, ErrorDisplay };

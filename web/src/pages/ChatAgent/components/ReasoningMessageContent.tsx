@@ -110,4 +110,8 @@ function ReasoningMessageContent({ reasoningContent, isReasoning, reasoningCompl
   );
 }
 
-export default ReasoningMessageContent;
+// memo'd: reasoning streams token-by-token alongside other render blocks, so
+// MessageContentSegments re-renders each token. All four props are primitives
+// and default shallow compare skips Markdown's AST parse when the reasoning
+// content for this block is unchanged.
+export default React.memo(ReasoningMessageContent);
