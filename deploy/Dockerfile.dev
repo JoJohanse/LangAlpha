@@ -41,7 +41,7 @@ COPY skills/ skills/
 
 # DB init + server start entrypoint
 COPY scripts/docker_entrypoint.sh /docker_entrypoint.sh
-RUN chmod +x /docker_entrypoint.sh
+RUN sed -i 's/\r$//' /docker_entrypoint.sh && chmod +x /docker_entrypoint.sh
 
 EXPOSE 8000
 
