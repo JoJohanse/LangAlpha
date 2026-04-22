@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Install uv from PyPI to avoid dependency on ghcr.io availability.
+RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 
@@ -20,7 +20,14 @@ COPY pyproject.toml uv.lock README.md ./
 COPY libs/ptc-cli/ libs/ptc-cli/
 
 # Install dependencies (frozen = use lockfile exactly)
-RUN uv sync --frozen --no-dev
+# INCLUDE_DEV_DEPS=1 enables pytest and other dev tooling inside the image,
+# useful when running tests via docker compose.
+ARG INCLUDE_DEV_DEPS=0
+RUN if [ "$INCLUDE_DEV_DEPS" = "1" ]; then \
+      uv sync --frozen --group dev --extra test; \
+    else \
+      uv sync --frozen --no-dev; \
+    fi
 
 # Install browsers for Scrapling crawling (--with-deps pulls OS libraries)
 # patchright: Chromium for DynamicFetcher (Tier 2)
@@ -30,6 +37,7 @@ RUN uv run patchright install --with-deps chromium \
 
 # Copy application source (will be overridden by volume mounts in dev)
 COPY src/ src/
+COPY tests/ tests/
 COPY server.py .
 COPY scripts/ scripts/
 COPY config.yaml .

@@ -309,6 +309,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to start MarketInsightService: {e}")
 
+    # Start EventService (market event aggregation)
+    try:
+        from src.server.services.event_service import EventService
+
+        event_service_inst = EventService.get_instance()
+        await event_service_inst.start()
+    except Exception as e:
+        logger.warning(f"Failed to start EventService: {e}")
+
     yield  # Server is running
 
     # Shutdown
@@ -322,6 +331,15 @@ async def lifespan(app: FastAPI):
         await insight_svc.shutdown()
     except Exception as e:
         logger.warning(f"Error shutting down MarketInsightService: {e}")
+
+    # 0.1 Shutdown EventService
+    try:
+        from src.server.services.event_service import EventService
+
+        event_svc = EventService.get_instance()
+        await event_svc.shutdown()
+    except Exception as e:
+        logger.warning(f"Error shutting down EventService: {e}")
 
     # 0.5. Shutdown PriceMonitorService (before scheduler so executions can drain)
     try:
@@ -523,6 +541,7 @@ from src.server.app.oauth import router as oauth_router
 from src.server.app.public import router as public_router
 from src.server.app.skills import router as skills_router
 from src.server.app.vault import router as vault_router
+from src.server.app.events import router as events_router
 
 # Conditionally import ginlix-data WS proxy (only when GINLIX_DATA_WS_URL is set)
 from src.config.settings import GINLIX_DATA_ENABLED
@@ -576,6 +595,7 @@ app.include_router(
     automations_router
 )  # /api/v1/automations/* - Scheduled automation triggers
 app.include_router(insights_router)  # /api/v1/insights/* - AI market insights
+app.include_router(events_router)  # /api/v1/events/* - Eventized news flow
 app.include_router(oauth_router)  # /api/v1/oauth/* - OAuth provider connections (Codex)
 app.include_router(
     public_router

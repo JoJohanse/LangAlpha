@@ -13,8 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Install uv from PyPI to avoid dependency on ghcr.io availability.
+RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 

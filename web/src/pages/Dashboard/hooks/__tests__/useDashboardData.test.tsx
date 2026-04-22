@@ -14,16 +14,24 @@ vi.mock('../../utils/api', () => ({
   normalizeIndexSymbol: vi.fn((s: string) => String(s).replace(/^\^/, '').toUpperCase()),
 }));
 
+vi.mock('../../utils/eventsApi', () => ({
+  getEvents: vi.fn(),
+  getHotEvents: vi.fn(),
+}));
+
 vi.mock('@/lib/marketUtils', () => ({
   fetchMarketStatus: vi.fn(),
 }));
 
 import { getNews, getIndices } from '../../utils/api';
+import { getEvents, getHotEvents } from '../../utils/eventsApi';
 import { fetchMarketStatus } from '@/lib/marketUtils';
 
 const mockFetchMarketStatus = fetchMarketStatus as Mock;
 const mockGetIndices = getIndices as Mock;
 const mockGetNews = getNews as Mock;
+const mockGetEvents = getEvents as Mock;
+const mockGetHotEvents = getHotEvents as Mock;
 
 describe('useDashboardData', () => {
   beforeEach(() => {
@@ -36,6 +44,8 @@ describe('useDashboardData', () => {
       failedCount: 0,
     });
     mockGetNews.mockResolvedValue({ results: [], count: 0 });
+    mockGetEvents.mockResolvedValue({ results: [], count: 0, limit: 50, offset: 0 });
+    mockGetHotEvents.mockResolvedValue({ results: [], count: 0, limit: 10, offset: 0 });
   });
 
   it('returns marketStatus from the fetched data', async () => {

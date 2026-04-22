@@ -21,9 +21,17 @@ interface OverlayData {
   [key: string]: unknown;
 }
 
+interface EventMarkerEntry {
+  event_id: string;
+  event_time: string;
+  impact_direction?: string | null;
+  display_title?: string | null;
+}
+
 interface OverlayVisibility {
   earnings?: boolean;
   grades?: boolean;
+  events?: boolean;
   [key: string]: boolean | undefined;
 }
 
@@ -66,6 +74,7 @@ export function useChartOverlays(
   chartData: ChartDataPoint[] | null,
   earningsData: EarningsEntry[] | null,
   overlayData: OverlayData | null,
+  eventMarkers: EventMarkerEntry[] | null,
   overlayVisibility: OverlayVisibility | null,
   symbol: string | null
 ): void {
@@ -121,6 +130,26 @@ export function useChartOverlays(
       });
     }
 
+    // Event markers
+    if (overlayVisibility?.events && eventMarkers && Array.isArray(eventMarkers)) {
+      eventMarkers.forEach((eventItem: EventMarkerEntry) => {
+        const date = eventItem.event_time;
+        if (!date) return;
+        const time = snapToNearestBar(chartData, date);
+        if (!time) return;
+        const direction = (eventItem.impact_direction || 'neutral').toLowerCase();
+        const isPositive = direction === 'up' || direction === 'positive';
+        const isNegative = direction === 'down' || direction === 'negative';
+        markers.push({
+          time: time as Time,
+          position: isNegative ? 'aboveBar' : 'belowBar',
+          shape: isNegative ? 'arrowDown' : isPositive ? 'arrowUp' : 'arrowUp',
+          color: isNegative ? '#ef4444' : isPositive ? '#10b981' : '#f59e0b',
+          text: 'EV',
+        });
+      });
+    }
+
     // Sort markers by time (required by lightweight-charts)
     markers.sort((a, b) => (a.time as number) - (b.time as number));
 
@@ -135,5 +164,5 @@ export function useChartOverlays(
         try { series.setMarkers([]); } catch (_) { /* already cleaned */ }
       }
     };
-  }, [candlestickSeriesRef, chartData, earningsData, overlayData, overlayVisibility, symbol]);
+  }, [candlestickSeriesRef, chartData, earningsData, overlayData, eventMarkers, overlayVisibility, symbol]);
 }

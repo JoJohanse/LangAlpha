@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { getNews, getIndices, INDEX_SYMBOLS, fallbackIndex, normalizeIndexSymbol } from '../utils/api';
+import { getEvents, getHotEvents, type MarketEvent } from '../utils/eventsApi';
 import { fetchMarketStatus } from '@/lib/marketUtils';
 import type { IndexData } from '@/types/market';
 
@@ -27,6 +28,10 @@ interface DashboardData {
   indicesLoading: boolean;
   newsItems: NewsItem[];
   newsLoading: boolean;
+  eventItems: MarketEvent[];
+  eventLoading: boolean;
+  hotEvents: MarketEvent[];
+  hotEventsLoading: boolean;
   marketStatus: MarketStatusData | null;
   marketStatusRef: { current: MarketStatusData | null };
 }
@@ -104,11 +109,37 @@ export function useDashboardData(): DashboardData {
     staleTime: 5 * 60 * 1000, // 5 minutes fresh cache
   });
 
+  const { data: eventItems = [], isLoading: eventLoading } = useQuery<MarketEvent[]>({
+    queryKey: ['dashboard', 'events'],
+    queryFn: async () => {
+      const data = await getEvents({ limit: 50, offset: 0 });
+      return data.results || [];
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    refetchIntervalInBackground: false,
+  });
+
+  const { data: hotEvents = [], isLoading: hotEventsLoading } = useQuery<MarketEvent[]>({
+    queryKey: ['dashboard', 'events', 'hot'],
+    queryFn: async () => {
+      const data = await getHotEvents(10);
+      return data.results || [];
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    refetchIntervalInBackground: false,
+  });
+
   return {
     indices,
     indicesLoading,
     newsItems,
     newsLoading,
+    eventItems,
+    eventLoading,
+    hotEvents,
+    hotEventsLoading,
     marketStatus,
     // Kept for backward compatibility with components that might use MarketStatusRef
     marketStatusRef: { current: marketStatus }

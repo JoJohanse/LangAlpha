@@ -1,4 +1,4 @@
-.PHONY: help configup down clean dev dev-web install test test-sandbox test-web test-all lint setup-db migrate
+.PHONY: help configup down clean dev dev-web install test test-sandbox test-web test-all lint setup-db migrate docker-test-backend docker-test-web docker-test-all docker-build-test
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -69,3 +69,17 @@ setup-db: ## Start PostgreSQL + Redis in Docker and initialize tables
 
 migrate: ## Run database migrations
 	uv run alembic upgrade head
+
+# ---------------------------------------------------------------------------
+# Dockerized test workflow (matches docker-compose deployment)
+# ---------------------------------------------------------------------------
+docker-build-test: ## Build backend image with test deps (pytest) enabled
+	INCLUDE_DEV_DEPS=1 docker compose build backend
+
+docker-test-backend: docker-build-test ## Run backend tests inside backend container
+	INCLUDE_DEV_DEPS=1 docker compose run --rm backend uv run pytest tests/unit/ -v --tb=short
+
+docker-test-web: ## Run frontend tests inside frontend container
+	docker compose run --rm frontend sh -lc "npm install -g pnpm@10 && pnpm install --frozen-lockfile && pnpm vitest run"
+
+docker-test-all: docker-test-backend docker-test-web ## Run backend + frontend tests via docker compose

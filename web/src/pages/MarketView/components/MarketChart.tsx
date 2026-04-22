@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef, useCallback, useMemo } from 'react';
 import { createChart, ColorType, CrosshairMode, PriceScaleMode, LineType, LineStyle } from 'lightweight-charts';
 import type { IChartApi, LogicalRange, MouseEventParams } from 'lightweight-charts';
 import html2canvas from 'html2canvas';
@@ -60,7 +60,37 @@ interface OverlayVisibility {
   earnings: boolean;
   grades: boolean;
   priceTargets: boolean;
+  events: boolean;
   [key: string]: boolean;
+}
+
+interface EventMarkerData {
+  event_id: string;
+  event_time: string;
+  impact_direction?: string | null;
+  impact_score?: number | null;
+  display_title?: string | null;
+}
+
+interface EventPopupData extends EventMarkerData {
+  snapped_time: number;
+}
+
+function snapToNearestTime(points: ChartDataBar[], target: number): number | null {
+  if (!points.length) return null;
+  let lo = 0;
+  let hi = points.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].time < target) lo = mid + 1;
+    else hi = mid;
+  }
+  if (lo > 0) {
+    const d0 = Math.abs(points[lo].time - target);
+    const d1 = Math.abs(points[lo - 1].time - target);
+    if (d1 < d0) lo -= 1;
+  }
+  return points[lo]?.time ?? null;
 }
 
 interface MarketChartProps {
@@ -73,6 +103,9 @@ interface MarketChartProps {
   quoteData: Record<string, unknown> | null;
   earningsData: unknown;
   overlayData: Record<string, unknown> | null;
+  eventMarkers?: EventMarkerData[];
+  focusEventId?: string | null;
+  focusEventTime?: string | null;
   stockMeta: Record<string, unknown> | null;
   liveTick: BarData | null;
   wsStatus: string;
@@ -98,6 +131,9 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
   quoteData,
   earningsData,
   overlayData,
+  eventMarkers = [],
+  focusEventId: _focusEventId,
+  focusEventTime,
   stockMeta,
   liveTick,
   wsStatus: _wsStatus,
@@ -147,7 +183,7 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
   const [showBaseline, setShowBaseline] = useState<boolean>(false);
   const [annotationsVisible, setAnnotationsVisible] = useState<boolean>(() => loadPref('annotationsVisible', false));
   const [overlayVisibility, setOverlayVisibility] = useState<OverlayVisibility>(
-    () => loadPref('overlayVisibility', { earnings: false, grades: false, priceTargets: false }),
+    () => loadPref('overlayVisibility', { earnings: false, grades: false, priceTargets: false, events: true }),
   );
 
   // Responsive compact mode — based on actual chart container width, not viewport
@@ -180,6 +216,7 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
 
   // Crosshair tooltip state
   const [tooltipState, setTooltipState] = useState<TooltipState>({ visible: false, x: 0, y: 0, data: null });
+  const [eventPopup, setEventPopup] = useState<EventPopupData | null>(null);
 
   // Refs for stable callbacks (avoid stale closures)
   const enabledMaPeriodsRef = useRef(DEFAULT_ENABLED_MA);
@@ -239,13 +276,37 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
 
   // Chart data state for hooks
   const [chartDataForHooks, setChartDataForHooks] = useState<ChartDataBar[]>([]);
+  const snappedEventMarkers = useMemo<EventPopupData[]>(() => {
+    if (!eventMarkers?.length || !chartDataForHooks.length) return [];
+    const result: EventPopupData[] = [];
+    for (const ev of eventMarkers) {
+      const ts = Math.floor(new Date(ev.event_time).getTime() / 1000);
+      if (!Number.isFinite(ts)) continue;
+      const snapped = snapToNearestTime(chartDataForHooks, ts);
+      if (!snapped) continue;
+      result.push({ ...ev, snapped_time: snapped });
+    }
+    return result;
+  }, [eventMarkers, chartDataForHooks]);
+  const snappedEventMarkersRef = useRef<EventPopupData[]>([]);
+  useEffect(() => {
+    snappedEventMarkersRef.current = snappedEventMarkers;
+  }, [snappedEventMarkers]);
 
   // --- Price lines via hook ---
   const priceTargetsForAnnotations = overlayVisibility.priceTargets ? (overlayData?.priceTargets as any) : null;
   useChartAnnotations(candlestickSeriesRef, stockMeta, quoteData, priceTargetsForAnnotations, annotationsVisible, symbol);
 
   // --- Series markers via hook ---
-  useChartOverlays(candlestickSeriesRef, chartDataForHooks as any, earningsData as any, overlayData as any, overlayVisibility as any, symbol);
+  useChartOverlays(
+    candlestickSeriesRef,
+    chartDataForHooks as any,
+    earningsData as any,
+    overlayData as any,
+    eventMarkers as any,
+    overlayVisibility as any,
+    symbol
+  );
 
   // --- Live tick updates from WS (1s and 1min intervals, custom/Light mode only) ---
   useEffect(() => {
@@ -928,6 +989,23 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
       });
     });
 
+    chart.subscribeClick((param: MouseEventParams) => {
+      if (!param.time || typeof param.time !== 'number') {
+        setEventPopup(null);
+        return;
+      }
+      const t = param.time;
+      const candidates = snappedEventMarkersRef.current.filter((m) => m.snapped_time === t);
+      if (!candidates.length) {
+        setEventPopup(null);
+        return;
+      }
+      const best = [...candidates].sort(
+        (a, b) => (Number(b.impact_score || 0) - Number(a.impact_score || 0))
+      )[0];
+      setEventPopup(best);
+    });
+
     // RSI chart (deferred so DOM is ready)
     const rsiTimeout = setTimeout(() => {
       if (!rsiChartContainerRef.current || rsiChartRef.current) return;
@@ -1510,6 +1588,22 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
     if (rsiChartRef.current) rsiChartRef.current.applyOptions({ timeScale: opts });
   }, [interval]);
 
+  // --- Effect: focus chart view near event time (when navigated from event links) ---
+  useEffect(() => {
+    if (!focusEventTime || !chartRef.current || !allDataRef.current.length) return;
+    const target = Math.floor(new Date(focusEventTime).getTime() / 1000);
+    if (!Number.isFinite(target)) return;
+    const snapped = snapToNearestTime(allDataRef.current, target);
+    if (!snapped) return;
+    const idx = allDataRef.current.findIndex((d) => d.time === snapped);
+    if (idx < 0) return;
+    const halfWindow = interval === '1day' ? 40 : 80;
+    chartRef.current.timeScale().setVisibleLogicalRange({
+      from: Math.max(0, idx - halfWindow),
+      to: idx + halfWindow,
+    });
+  }, [focusEventTime, interval, chartDataForHooks.length]);
+
   // --- Effect 4: Re-run updateSeriesData when MA/RSI config changes ---
   useEffect(() => {
     if (allDataRef.current.length > 0) {
@@ -1888,6 +1982,38 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
                 containerWidth={chartContainerRef.current?.clientWidth}
                 containerHeight={chartContainerRef.current?.clientHeight}
               />
+              {eventPopup && (
+                <div
+                  className="absolute top-3 right-3 z-20 max-w-[320px] rounded-lg border p-3 shadow-lg"
+                  style={{
+                    backgroundColor: 'var(--color-bg-elevated)',
+                    borderColor: 'var(--color-border-muted)',
+                  }}
+                >
+                  <div className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    Event Marker
+                  </div>
+                  <div className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+                    {eventPopup.display_title || 'Market event'}
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    {new Date(eventPopup.event_time).toLocaleString()}
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                      Impact: {eventPopup.impact_direction || 'neutral'}
+                    </span>
+                    <button
+                      type="button"
+                      className="px-2 py-1 rounded text-xs"
+                      style={{ backgroundColor: 'var(--color-bg-hover)', color: 'var(--color-text-secondary)' }}
+                      onClick={() => setEventPopup(null)}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              )}
               {scrollLoading && (
                 <div className="chart-scroll-loading">
                   <div className="chart-scroll-loading-spinner" />

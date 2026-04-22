@@ -42,39 +42,24 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile.dev
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    image: ${BACKEND_IMAGE:-langalpha/backend:phase1-mvp-20260422}
+    restart: unless-stopped
     init: true
     pids_limit: 8192
     mem_limit: 8g
     memswap_limit: 8g
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
     env_file: .env
     environment:
       BYOK_ENCRYPTION_KEY: ${BYOK_ENCRYPTION_KEY:-langalpha-local-dev-encryption-key}
-      # Default to Docker service names for inter-container networking.
-      # Override in .env to connect to external services or for host dev.
       DB_HOST: ${DB_HOST:-postgres}
       REDIS_URL: "${REDIS_URL:-redis://:${REDIS_PASSWORD:-redis}@redis:6379/0}"
-    volumes:
-      # Mount source for hot-reload
-      - ./src:/app/src
-      - ./server.py:/app/server.py
-      - ./agent_config.yaml:/app/agent_config.yaml
-      # Docker socket — only needed when SANDBOX_PROVIDER=docker (DooD pattern).
-      # Safe to remove if using only the Daytona provider.
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./config.yaml:/app/config.yaml
-      - ./mcp_servers:/app/mcp_servers
-      - ./skills:/app/skills
-      - ./scripts:/app/scripts
-      - ./alembic.ini:/app/alembic.ini
-      - ./migrations:/app/migrations
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
       interval: 10s
@@ -82,20 +67,29 @@ services:
       retries: 10
       start_period: 30s
 
-  frontend:
-    image: node:22-alpine
-    working_dir: /app
-    command: sh -c "npm install -g pnpm@10 && pnpm install --frozen-lockfile && pnpm dev --host 0.0.0.0"
-    restart: unless-stopped
-    ports:
-      - "5173:5173"
-    environment:
-      VITE_PROXY_BACKEND: http://backend:8000
+  web_assets:
+    image: ${WEB_IMAGE:-langalpha/web:phase1-mvp-20260422}
+    command: >
+      sh -lc "rm -rf /frontend/* && cp -r /dist/. /frontend/"
+    restart: "no"
     volumes:
-      - ./web:/app
-      - frontend_node_modules:/app/node_modules
+      - langalpha-frontend-dist:/frontend
+
+  frontend:
+    image: nginx:1.26-alpine
+    restart: unless-stopped
+    depends_on:
+      web_assets:
+        condition: service_completed_successfully
+      backend:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+    volumes:
+      - langalpha-frontend-dist:/usr/share/nginx/html:ro
+      - ./deploy/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
 
 volumes:
   langalpha-postgresql-data:
   langalpha-redis-data:
-  frontend_node_modules:
+  langalpha-frontend-dist:

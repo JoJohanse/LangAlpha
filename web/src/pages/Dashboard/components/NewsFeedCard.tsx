@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { TrendingUp, Clock, Briefcase, Eye, Search, X } from 'lucide-react';
+import { TrendingUp, Clock, Briefcase, Eye, Search, X, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import type { MarketEvent } from '../utils/eventsApi';
 
 interface NewsItem {
   id?: string | number;
@@ -17,6 +18,7 @@ interface NewsItem {
 
 type TabKey = 'market' | 'portfolio' | 'watchlist';
 type DateRangeKey = 'all' | '1h' | '6h' | '24h' | '7d';
+type FeedMode = 'events' | 'raw';
 
 interface TabDef {
   key: TabKey;
@@ -227,6 +229,8 @@ function EmptyState({ tab, hasFilters }: EmptyStateProps) {
 }
 
 interface NewsFeedCardProps {
+  eventItems?: MarketEvent[];
+  eventLoading?: boolean;
   marketItems?: NewsItem[];
   marketLoading?: boolean;
   portfolioItems?: NewsItem[];
@@ -234,9 +238,12 @@ interface NewsFeedCardProps {
   watchlistItems?: NewsItem[];
   watchlistLoading?: boolean;
   onNewsClick?: (id: string | number, articleUrl?: string | null) => void;
+  onEventClick?: (eventId: string) => void;
 }
 
 function NewsFeedCard({
+  eventItems = [],
+  eventLoading = false,
   marketItems = [],
   marketLoading = false,
   portfolioItems = [],
@@ -244,7 +251,9 @@ function NewsFeedCard({
   watchlistItems = [],
   watchlistLoading = false,
   onNewsClick,
+  onEventClick,
 }: NewsFeedCardProps) {
+  const [mode, setMode] = useState<FeedMode>('events');
   const [activeTab, setActiveTab] = useState<TabKey>('market');
   const [tickerFilter, setTickerFilter] = useState('');
   const [dateRange, setDateRange] = useState<DateRangeKey>('all');
@@ -293,6 +302,101 @@ function NewsFeedCard({
 
   const isMobile = useIsMobile();
 
+  const filteredEvents = useMemo(() => {
+    let result = eventItems;
+    const query = tickerFilter.trim().toUpperCase();
+    if (query) {
+      result = result.filter((item) =>
+        (item.symbols || []).some((s) => s.toUpperCase().includes(query))
+      );
+    }
+    if (dateRange !== 'all') {
+      const cutoff = getDateRangeCutoff(dateRange);
+      result = result.filter((item) => {
+        const ts = item.start_time ? new Date(item.start_time).getTime() : null;
+        return ts !== null && ts >= cutoff;
+      });
+    }
+    return result;
+  }, [eventItems, tickerFilter, dateRange]);
+
+  const renderEventRow = (item: MarketEvent, idx: number) => {
+    const score = Number(item.importance_score ?? 0);
+    const sentiment = (item.sentiment || 'neutral').toLowerCase();
+    const sentimentColor = sentiment === 'positive'
+      ? 'var(--color-profit)'
+      : sentiment === 'negative'
+        ? 'var(--color-loss)'
+        : 'var(--color-text-secondary)';
+    return (
+      <motion.div
+        key={item.event_id}
+        initial={isMobile ? false : { opacity: 0, y: 10 }}
+        animate={isMobile ? undefined : { opacity: 1, y: 0 }}
+        transition={{ delay: Math.min(idx, 10) * 0.05 }}
+        className="group flex items-start gap-3 sm:gap-4 px-2 py-2.5 sm:p-3 rounded-lg sm:rounded-xl border border-transparent transition-all cursor-pointer"
+        onClick={() => onEventClick?.(item.event_id)}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
+          e.currentTarget.style.borderColor = 'var(--color-border-muted)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = 'transparent';
+          e.currentTarget.style.borderColor = 'transparent';
+        }}
+      >
+        <div className="pt-0.5">
+          <Zap size={14} style={{ color: sentimentColor }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <span
+              className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded"
+              style={{ color: 'var(--color-accent-light)', backgroundColor: 'var(--color-accent-soft)' }}
+            >
+              Event
+            </span>
+            <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              {item.start_time ? new Date(item.start_time).toLocaleString() : ''}
+            </span>
+            <span
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded border"
+              style={{ color: sentimentColor, borderColor: 'var(--color-border-muted)' }}
+            >
+              score {score.toFixed(0)}
+            </span>
+          </div>
+          <h3 className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }} title={item.title}>
+            {item.title}
+          </h3>
+          {item.short_summary && (
+            <p className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>
+              {item.short_summary}
+            </p>
+          )}
+          {!!(item.symbols && item.symbols.length) && (
+            <div className="flex items-center gap-1.5 mt-1">
+              {item.symbols.slice(0, 5).map((t) => (
+                <span
+                  key={t}
+                  className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                  style={{ backgroundColor: 'var(--color-accent-soft)', color: 'var(--color-accent-light)' }}
+                >
+                  {t}
+                </span>
+              ))}
+              {(item.symbols?.length || 0) > 5 && (
+                <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  +{(item.symbols?.length || 0) - 5}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </motion.div>
+    );
+  };
+
   return (
     <div className={`dashboard-glass-card ${isMobile ? 'p-3' : 'p-6'}`}>
       {/* Header: tabs + filters on same row */}
@@ -300,30 +404,56 @@ function NewsFeedCard({
         className={`flex items-center justify-between gap-3 ${isMobile ? 'pb-3 mb-3' : 'pb-4 mb-4'} border-b flex-wrap`}
         style={{ borderColor: 'var(--color-border-muted)' }}
       >
-        {/* Tabs */}
-        <div className="flex items-center gap-1 p-1 rounded-lg min-w-0 overflow-x-auto" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
-          {TABS.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.key;
-            return (
-              <button
-                key={tab.key}
-                onClick={() => {
-                  setActiveTab(tab.key);
-                  setTickerFilter('');
-                  setDateRange('all');
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
-                style={{
-                  backgroundColor: isActive ? 'var(--color-bg-elevated)' : 'transparent',
-                  color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-                }}
-              >
-                <Icon size={13} />
-                {tab.label}
-              </button>
-            );
-          })}
+        {/* Modes + tabs */}
+        <div className="flex items-center gap-2 min-w-0 overflow-x-auto">
+          <div className="flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
+            <button
+              onClick={() => { setMode('events'); setTickerFilter(''); setDateRange('all'); }}
+              className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+              style={{
+                backgroundColor: mode === 'events' ? 'var(--color-bg-elevated)' : 'transparent',
+                color: mode === 'events' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+              }}
+            >
+              Events
+            </button>
+            <button
+              onClick={() => { setMode('raw'); setTickerFilter(''); setDateRange('all'); }}
+              className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+              style={{
+                backgroundColor: mode === 'raw' ? 'var(--color-bg-elevated)' : 'transparent',
+                color: mode === 'raw' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+              }}
+            >
+              Raw News
+            </button>
+          </div>
+          {mode === 'raw' && (
+            <div className="flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
+              {TABS.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => {
+                      setActiveTab(tab.key);
+                      setTickerFilter('');
+                      setDateRange('all');
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                    style={{
+                      backgroundColor: isActive ? 'var(--color-bg-elevated)' : 'transparent',
+                      color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                    }}
+                  >
+                    <Icon size={13} />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Filters */}
@@ -393,14 +523,26 @@ function NewsFeedCard({
       {/* Tab content */}
       <AnimatePresence mode="wait">
         <motion.div
-          key={activeTab}
+          key={`${mode}-${activeTab}`}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}
           transition={{ duration: 0.2 }}
           className="flex flex-col gap-1"
         >
-          {loading ? (
+          {mode === 'events' ? (
+            eventLoading ? (
+              <SkeletonRows />
+            ) : filteredEvents.length === 0 ? (
+              <div className="flex items-center justify-center py-16">
+                <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                  No events available
+                </p>
+              </div>
+            ) : (
+              filteredEvents.map((item, idx) => renderEventRow(item, idx))
+            )
+          ) : loading ? (
             <SkeletonRows />
           ) : filteredItems.length === 0 ? (
             <EmptyState tab={activeTab} hasFilters={hasFilters} />

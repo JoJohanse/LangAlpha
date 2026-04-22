@@ -5,6 +5,7 @@ Provides cached access to FMP intraday data for stocks and indexes.
 """
 
 import logging
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -31,6 +32,8 @@ from src.server.models.market_data import (
     STOCK_INTERVALS,
     INDEX_INTERVALS,
 )
+from src.server.models.events import EventMarker, EventMarkerResponse
+from src.server.database import market_event as market_event_db
 from src.server.services.cache.intraday_cache_service import (
     IntradayCacheService,
 )
@@ -174,6 +177,42 @@ async def get_stock_daily(
     except Exception as e:
         logger.error(f"Error fetching daily stock data for {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/stocks/{symbol}/events",
+    response_model=EventMarkerResponse,
+    summary="Get symbol event markers",
+    description="Retrieve event markers for a symbol to overlay on charts.",
+)
+async def get_stock_event_markers(
+    symbol: str,
+    user_id: CurrentUserId,
+    from_date: Optional[str] = Query(None, alias="from", description="Start datetime/date"),
+    to_date: Optional[str] = Query(None, alias="to", description="End datetime/date"),
+    limit: int = Query(200, ge=1, le=1000),
+) -> EventMarkerResponse:
+    def _parse_dt(raw: Optional[str]) -> Optional[datetime]:
+        if not raw:
+            return None
+        try:
+            # Accept date-only and ISO datetime
+            if len(raw) == 10:
+                return datetime.fromisoformat(f"{raw}T00:00:00+00:00")
+            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(status_code=422, detail=f"Invalid datetime: {raw}")
+
+    from_dt = _parse_dt(from_date)
+    to_dt = _parse_dt(to_date)
+    rows = await market_event_db.get_symbol_event_markers(
+        symbol=symbol,
+        from_ts=from_dt,
+        to_ts=to_dt,
+        limit=limit,
+    )
+    markers = [EventMarker(**r) for r in rows]
+    return EventMarkerResponse(symbol=symbol.upper(), markers=markers, count=len(markers))
 
 
 @router.get(

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fetchStockQuote, fetchCompanyOverview, fetchAnalystData } from '../utils/api';
+import { fetchStockQuote, fetchCompanyOverview, fetchAnalystData, fetchSymbolEvents, type SymbolEventMarker } from '../utils/api';
 import { fetchMarketStatus } from '@/lib/marketUtils';
 import type { StockInfo, RealTimePrice, SnapshotData } from '@/types/market';
 import type { ConnectionStatus, BarData } from './useMarketDataWS';
@@ -41,6 +41,7 @@ export interface UseStockDataReturn {
     overviewData: unknown;
     overviewLoading: boolean;
     overlayData: AnalystOverlayData | null;
+    eventMarkers: SymbolEventMarker[];
     marketStatus: MarketStatusData | null;
     handleLatestBar: (bar: BarData | null) => void;
 }
@@ -124,6 +125,15 @@ export function useStockData({
         staleTime: 5 * 60 * 1000, // 5 minutes fresh
     });
 
+    const { data: eventMarkers = [] } = useQuery<SymbolEventMarker[]>({
+        queryKey: ['symbolEvents', selectedStock],
+        queryFn: ({ signal }) => fetchSymbolEvents(selectedStock!, undefined, undefined, { signal }),
+        enabled: !!selectedStock,
+        staleTime: 60 * 1000,
+        refetchInterval: 60 * 1000,
+        refetchIntervalInBackground: false,
+    });
+
     // 4. Market Status
     const { data: marketStatus = null } = useQuery<MarketStatusData | null>({
         queryKey: ['dashboard', 'marketStatus'], // Matches cached value from useDashboardData
@@ -168,6 +178,7 @@ export function useStockData({
         overviewData,
         overviewLoading,
         overlayData,
+        eventMarkers,
         marketStatus,
         handleLatestBar
     };

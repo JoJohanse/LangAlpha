@@ -111,6 +111,7 @@ function MarketViewInner() {
     overviewData,
     overviewLoading,
     overlayData,
+    eventMarkers,
     marketStatus,
     handleLatestBar
   } = useStockData({
@@ -173,11 +174,15 @@ function MarketViewInner() {
 
   // Chat return path — captured from URL when navigating from chat DetailPanel
   const [chatReturnPath, setChatReturnPath] = useState<string | null>(null);
+  const [focusEventId, setFocusEventId] = useState<string | null>(null);
+  const [focusEventTime, setFocusEventTime] = useState<string | null>(null);
 
   // Handle URL parameters (symbol + returnTo from chat context)
   useEffect(() => {
     const symbolParam = searchParams.get('symbol');
     const returnToParam = searchParams.get('returnTo');
+    const eventParam = searchParams.get('event');
+    const eventTimeParam = searchParams.get('event_time');
     if (symbolParam) {
       const symbol = symbolParam.trim().toUpperCase();
       if (symbol && symbol !== selectedStock) {
@@ -189,8 +194,14 @@ function MarketViewInner() {
     if (returnToParam) {
       setChatReturnPath(returnToParam);
     }
+    if (eventParam) {
+      setFocusEventId(eventParam);
+    }
+    if (eventTimeParam) {
+      setFocusEventTime(eventTimeParam);
+    }
     // Clear all URL parameters after applying them
-    if (symbolParam || returnToParam) {
+    if (symbolParam || returnToParam || eventParam || eventTimeParam) {
       setSearchParams({});
     }
   }, [searchParams, selectedStock, setSearchParams]);
@@ -458,6 +469,9 @@ function MarketViewInner() {
               quoteData={(overviewData as OverviewData | null)?.quote || null}
               earningsData={(overviewData as OverviewData | null)?.earningsSurprises || null}
               overlayData={overlayData as Record<string, unknown> | null}
+              eventMarkers={eventMarkers}
+              focusEventId={focusEventId}
+              focusEventTime={focusEventTime}
               stockMeta={chartMeta}
               snapshot={snapshotData}
               liveTick={wsPrices.get(selectedStock)?.barData || null}
@@ -586,6 +600,9 @@ function MarketViewInner() {
                   quoteData={(overviewData as OverviewData | null)?.quote || null}
                   earningsData={(overviewData as OverviewData | null)?.earningsSurprises || null}
                   overlayData={overlayData as Record<string, unknown> | null}
+                  eventMarkers={eventMarkers}
+                  focusEventId={focusEventId}
+                  focusEventTime={focusEventTime}
                   stockMeta={chartMeta}
                   snapshot={snapshotData}
                   liveTick={wsPrices.get(selectedStock)?.barData || null}

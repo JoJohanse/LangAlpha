@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
+from src.server.models.events import InterpretRequest, InterpretResponse
 from src.server.models.news import (
     NewsArticle,
     NewsArticleCompact,
@@ -114,3 +116,29 @@ async def get_news_article(article_id: str, user_id: CurrentUserId):
         return NewsArticle(**article)
 
     raise HTTPException(status_code=404, detail="Article not found")
+
+
+@router.post("/{article_id}/interpret", response_model=InterpretResponse)
+async def interpret_news_article(
+    article_id: str, payload: InterpretRequest, user_id: CurrentUserId
+):
+    from src.data_client import get_news_data_provider
+    from src.server.services.event_service import EventService
+
+    provider = await get_news_data_provider()
+    article = await provider.get_news_article(article_id, user_id=user_id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    service = EventService.get_instance()
+    interpretation, model_name = await service.interpret_article(
+        article=article, focus_symbol=payload.focus_symbol
+    )
+    return InterpretResponse(
+        target_type="article",
+        target_id=article_id,
+        interpretation=interpretation,
+        model=model_name,
+        cached=False,
+        generated_at=datetime.now(timezone.utc),
+    )

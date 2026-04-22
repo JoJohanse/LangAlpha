@@ -155,6 +155,21 @@ interface SnapshotData {
   [key: string]: unknown;
 }
 
+export interface SymbolEventMarker {
+  event_id: string;
+  symbol: string;
+  event_time: string;
+  impact_direction?: string | null;
+  impact_score?: number | null;
+  display_title?: string | null;
+}
+
+interface SymbolEventResponse {
+  symbol: string;
+  markers: SymbolEventMarker[];
+  count: number;
+}
+
 /**
  * GET /api/v1/market-data/snapshots/stocks/{symbol} — single stock snapshot
  * Returns snapshot data with name, price, change, previous_close, open, high, low, volume, etc.
@@ -296,6 +311,31 @@ export async function fetchStockQuote(symbol: string, { signal }: { signal?: Abo
     }
     console.error('Error fetching stock quote:', error);
     return { stockInfo: fallbackInfo, realTimePrice: null, snapshot: null };
+  }
+}
+
+export async function fetchSymbolEvents(
+  symbol: string,
+  fromDate?: string,
+  toDate?: string,
+  { signal }: { signal?: AbortSignal } = {}
+): Promise<SymbolEventMarker[]> {
+  if (!symbol || !symbol.trim()) return [];
+  const params: Record<string, string> = {};
+  if (fromDate) params.from = fromDate;
+  if (toDate) params.to = toDate;
+  try {
+    const { data } = await api.get<SymbolEventResponse>(
+      `/api/v1/market-data/stocks/${encodeURIComponent(symbol.trim().toUpperCase())}/events`,
+      { params, signal }
+    );
+    return data?.markers || [];
+  } catch (error: unknown) {
+    if (error instanceof Error && (error.name === 'CanceledError' || error.name === 'AbortError')) {
+      throw error;
+    }
+    console.warn('[MarketView] fetchSymbolEvents failed:', error);
+    return [];
   }
 }
 

@@ -187,12 +187,14 @@ export const OVERLAY_COLORS: Record<string, string> = {
   earnings: '#10b981',
   grades: '#22d3ee',
   priceTargets: '#a78bfa',
+  events: '#f59e0b',
 };
 
 export const OVERLAY_LABELS: Record<string, string> = {
   earnings: 'Earn',
   grades: 'Grade',
   priceTargets: 'PT',
+  events: 'Event',
 };
 
 // --- Extended-hours detection ---

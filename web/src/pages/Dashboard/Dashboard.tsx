@@ -15,6 +15,7 @@ import EarningsCalendarCard from './components/EarningsCalendarCard';
 import PortfolioWatchlistCard from './components/PortfolioWatchlistCard';
 import NewsDetailModal from './components/NewsDetailModal';
 import InsightDetailModal from './components/InsightDetailModal';
+import EventDetailModal from './components/EventDetailModal';
 import AddWatchlistItemDialog from './components/AddWatchlistItemDialog';
 import AddPortfolioHoldingDialog from './components/AddPortfolioHoldingDialog';
 import { useWatchlistData } from './hooks/useWatchlistData';
@@ -44,6 +45,7 @@ function Dashboard() {
 
   // Insight modal state
   const [selectedMarketInsightId, setSelectedMarketInsightId] = useState<string | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   // Mobile watchlist bottom sheet
   const [showWatchlistSheet, setShowWatchlistSheet] = useState(false);
@@ -53,6 +55,8 @@ function Dashboard() {
     indicesLoading,
     newsItems,
     newsLoading,
+    eventItems,
+    eventLoading,
     marketStatus,
   } = useDashboardData();
 
@@ -189,6 +193,8 @@ function Dashboard() {
             <div className="lg:col-span-2 space-y-8">
               <AIDailyBriefCard onReadFull={setSelectedMarketInsightId} />
               <NewsFeedCard
+                eventItems={eventItems}
+                eventLoading={eventLoading}
                 marketItems={newsItems}
                 marketLoading={newsLoading}
                 portfolioItems={portfolioNews.items}
@@ -199,6 +205,7 @@ function Dashboard() {
                   setSelectedNewsId(String(id));
                   setSelectedNewsFallbackUrl(articleUrl ?? null);
                 }}
+                onEventClick={setSelectedEventId}
               />
             </div>
 
@@ -228,6 +235,7 @@ function Dashboard() {
         marketInsightId={selectedMarketInsightId}
         onClose={() => setSelectedMarketInsightId(null)}
       />
+      <EventDetailModal eventId={selectedEventId} onClose={() => setSelectedEventId(null)} />
 
       {/* Dialogs */}
       <ConfirmDialog
