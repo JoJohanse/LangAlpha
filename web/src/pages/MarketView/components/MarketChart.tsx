@@ -104,6 +104,7 @@ interface MarketChartProps {
   earningsData: unknown;
   overlayData: Record<string, unknown> | null;
   eventMarkers?: EventMarkerData[];
+  onViewEvent?: (eventId: string, symbol?: string) => void;
   focusEventId?: string | null;
   focusEventTime?: string | null;
   stockMeta: Record<string, unknown> | null;
@@ -132,6 +133,7 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
   earningsData,
   overlayData,
   eventMarkers = [],
+  onViewEvent,
   focusEventId: _focusEventId,
   focusEventTime,
   stockMeta,
@@ -2003,14 +2005,24 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
                     <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       Impact: {eventPopup.impact_direction || 'neutral'}
                     </span>
-                    <button
-                      type="button"
-                      className="px-2 py-1 rounded text-xs"
-                      style={{ backgroundColor: 'var(--color-bg-hover)', color: 'var(--color-text-secondary)' }}
-                      onClick={() => setEventPopup(null)}
-                    >
-                      Close
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="px-2 py-1 rounded text-xs"
+                        style={{ backgroundColor: 'var(--color-accent-primary)', color: '#fff' }}
+                        onClick={() => onViewEvent?.(eventPopup.event_id, symbol)}
+                      >
+                        View Event
+                      </button>
+                      <button
+                        type="button"
+                        className="px-2 py-1 rounded text-xs"
+                        style={{ backgroundColor: 'var(--color-bg-hover)', color: 'var(--color-text-secondary)' }}
+                        onClick={() => setEventPopup(null)}
+                      >
+                        Close
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

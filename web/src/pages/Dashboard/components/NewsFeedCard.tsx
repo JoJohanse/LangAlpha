@@ -19,6 +19,7 @@ interface NewsItem {
 type TabKey = 'market' | 'portfolio' | 'watchlist';
 type DateRangeKey = 'all' | '1h' | '6h' | '24h' | '7d';
 type FeedMode = 'events' | 'raw';
+type EventViewKey = 'all' | 'hot';
 
 interface TabDef {
   key: TabKey;
@@ -231,6 +232,8 @@ function EmptyState({ tab, hasFilters }: EmptyStateProps) {
 interface NewsFeedCardProps {
   eventItems?: MarketEvent[];
   eventLoading?: boolean;
+  hotEvents?: MarketEvent[];
+  hotEventsLoading?: boolean;
   marketItems?: NewsItem[];
   marketLoading?: boolean;
   portfolioItems?: NewsItem[];
@@ -244,6 +247,8 @@ interface NewsFeedCardProps {
 function NewsFeedCard({
   eventItems = [],
   eventLoading = false,
+  hotEvents = [],
+  hotEventsLoading = false,
   marketItems = [],
   marketLoading = false,
   portfolioItems = [],
@@ -255,6 +260,7 @@ function NewsFeedCard({
 }: NewsFeedCardProps) {
   const [mode, setMode] = useState<FeedMode>('events');
   const [activeTab, setActiveTab] = useState<TabKey>('market');
+  const [eventView, setEventView] = useState<EventViewKey>('hot');
   const [tickerFilter, setTickerFilter] = useState('');
   const [dateRange, setDateRange] = useState<DateRangeKey>('all');
 
@@ -319,6 +325,24 @@ function NewsFeedCard({
     }
     return result;
   }, [eventItems, tickerFilter, dateRange]);
+
+  const filteredHotEvents = useMemo(() => {
+    let result = hotEvents;
+    const query = tickerFilter.trim().toUpperCase();
+    if (query) {
+      result = result.filter((item) =>
+        (item.symbols || []).some((s) => s.toUpperCase().includes(query))
+      );
+    }
+    if (dateRange !== 'all') {
+      const cutoff = getDateRangeCutoff(dateRange);
+      result = result.filter((item) => {
+        const ts = item.start_time ? new Date(item.start_time).getTime() : null;
+        return ts !== null && ts >= cutoff;
+      });
+    }
+    return result;
+  }, [hotEvents, tickerFilter, dateRange]);
 
   const renderEventRow = (item: MarketEvent, idx: number) => {
     const score = Number(item.importance_score ?? 0);
@@ -408,7 +432,7 @@ function NewsFeedCard({
         <div className="flex items-center gap-2 min-w-0 overflow-x-auto">
           <div className="flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
             <button
-              onClick={() => { setMode('events'); setTickerFilter(''); setDateRange('all'); }}
+              onClick={() => { setMode('events'); setTickerFilter(''); setDateRange('all'); setEventView('hot'); }}
               className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
               style={{
                 backgroundColor: mode === 'events' ? 'var(--color-bg-elevated)' : 'transparent',
@@ -428,6 +452,30 @@ function NewsFeedCard({
               Raw News
             </button>
           </div>
+          {mode === 'events' && (
+            <div className="flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
+              <button
+                onClick={() => setEventView('hot')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                style={{
+                  backgroundColor: eventView === 'hot' ? 'var(--color-bg-elevated)' : 'transparent',
+                  color: eventView === 'hot' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                }}
+              >
+                Hot Events
+              </button>
+              <button
+                onClick={() => setEventView('all')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                style={{
+                  backgroundColor: eventView === 'all' ? 'var(--color-bg-elevated)' : 'transparent',
+                  color: eventView === 'all' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                }}
+              >
+                All Events
+              </button>
+            </div>
+          )}
           {mode === 'raw' && (
             <div className="flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
               {TABS.map((tab) => {
@@ -531,16 +579,16 @@ function NewsFeedCard({
           className="flex flex-col gap-1"
         >
           {mode === 'events' ? (
-            eventLoading ? (
+            (eventView === 'all' ? eventLoading : hotEventsLoading) ? (
               <SkeletonRows />
-            ) : filteredEvents.length === 0 ? (
+            ) : (eventView === 'all' ? filteredEvents : filteredHotEvents).length === 0 ? (
               <div className="flex items-center justify-center py-16">
                 <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                  No events available
+                  {eventView === 'all' ? 'No events available' : 'No hot events available'}
                 </p>
               </div>
             ) : (
-              filteredEvents.map((item, idx) => renderEventRow(item, idx))
+              (eventView === 'all' ? filteredEvents : filteredHotEvents).map((item, idx) => renderEventRow(item, idx))
             )
           ) : loading ? (
             <SkeletonRows />

@@ -1,4 +1,4 @@
-.PHONY: help configup down clean dev dev-web install test test-sandbox test-web test-all lint setup-db migrate docker-test-backend docker-test-web docker-test-all docker-build-test
+.PHONY: help configup down clean dev dev-web install test test-sandbox test-web test-all lint setup-db migrate docker-test-backend docker-test-web docker-test-all docker-build-test docker-phase1-backend docker-phase1-web docker-phase1-check
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -83,3 +83,19 @@ docker-test-web: ## Run frontend tests inside frontend container
 	docker compose run --rm frontend sh -lc "npm install -g pnpm@10 && pnpm install --frozen-lockfile && pnpm vitest run"
 
 docker-test-all: docker-test-backend docker-test-web ## Run backend + frontend tests via docker compose
+
+# ---------------------------------------------------------------------------
+# Phase 1 MVP closure regression (events + market-data-events + frontend closure)
+# ---------------------------------------------------------------------------
+docker-phase1-backend: docker-build-test ## Run phase1 backend regression tests in Docker
+	INCLUDE_DEV_DEPS=1 docker compose run --rm -v ./tests:/app/tests backend uv run pytest -q \
+		tests/unit/server/app/test_events.py \
+		tests/unit/server/app/test_market_data_events.py
+
+docker-phase1-web: ## Run phase1 frontend regression tests in Docker
+	docker compose run --rm frontend_test "corepack enable && pnpm install --frozen-lockfile && pnpm vitest run \
+		src/pages/Dashboard/components/__tests__/HotEventsCard.test.tsx \
+		src/pages/Dashboard/__tests__/Dashboard.eventDeepLink.test.tsx \
+		src/pages/MarketView/utils/__tests__/navigation.test.ts"
+
+docker-phase1-check: docker-phase1-backend docker-phase1-web ## Run full phase1 closure regression in Docker

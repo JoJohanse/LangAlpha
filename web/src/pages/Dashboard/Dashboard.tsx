@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ListFilter, Sparkles, X } from 'lucide-react';
 import { MobileBottomSheet } from '../../components/ui/mobile-bottom-sheet';
@@ -34,6 +35,7 @@ interface DeleteConfirmState {
 
 function Dashboard() {
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isMobile = useIsMobile();
   const mainRef = useRef<HTMLElement>(null);
   const handleScrollToTop = useCallback(() => {
@@ -57,8 +59,21 @@ function Dashboard() {
     newsLoading,
     eventItems,
     eventLoading,
+    hotEvents,
+    hotEventsLoading,
     marketStatus,
   } = useDashboardData();
+
+  useEffect(() => {
+    const eventId = searchParams.get('event');
+    if (!eventId) return;
+
+    setSelectedEventId(eventId);
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('event');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const {
     showPersonalizationBanner,
@@ -195,6 +210,8 @@ function Dashboard() {
               <NewsFeedCard
                 eventItems={eventItems}
                 eventLoading={eventLoading}
+                hotEvents={hotEvents}
+                hotEventsLoading={hotEventsLoading}
                 marketItems={newsItems}
                 marketLoading={newsLoading}
                 portfolioItems={portfolioNews.items}
