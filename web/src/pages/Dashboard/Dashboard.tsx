@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ListFilter, Sparkles, X } from 'lucide-react';
 import { MobileBottomSheet } from '../../components/ui/mobile-bottom-sheet';
@@ -35,6 +35,7 @@ interface DeleteConfirmState {
 
 function Dashboard() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const isMobile = useIsMobile();
   const mainRef = useRef<HTMLElement>(null);
@@ -61,6 +62,10 @@ function Dashboard() {
     eventLoading,
     hotEvents,
     hotEventsLoading,
+    hotNewsItems,
+    hotNewsLoading,
+    quickNewsItems,
+    quickNewsLoading,
     marketStatus,
   } = useDashboardData();
 
@@ -212,6 +217,10 @@ function Dashboard() {
                 eventLoading={eventLoading}
                 hotEvents={hotEvents}
                 hotEventsLoading={hotEventsLoading}
+                hotNewsItems={hotNewsItems}
+                hotNewsLoading={hotNewsLoading}
+                quickItems={quickNewsItems}
+                quickLoading={quickNewsLoading}
                 marketItems={newsItems}
                 marketLoading={newsLoading}
                 portfolioItems={portfolioNews.items}
@@ -221,6 +230,28 @@ function Dashboard() {
                 onNewsClick={(id, articleUrl) => {
                   setSelectedNewsId(String(id));
                   setSelectedNewsFallbackUrl(articleUrl ?? null);
+                }}
+                onAskNews={(id) => {
+                  const article = [...newsItems, ...quickNewsItems, ...hotNewsItems].find((x) => String(x.id) === String(id));
+                  const initialMessage = article?.title
+                    ? `Please analyze this market news and potential impact: ${article.title}`
+                    : 'Please analyze this market news and potential impact.';
+                  navigate('/chat', {
+                    state: {
+                      initialMessage,
+                      additionalContext: article ? [{
+                        type: 'news_article',
+                        article_id: article.id,
+                        title: article.title,
+                        source: article.source,
+                        article_url: article.articleUrl,
+                        tickers: article.tickers,
+                        sector: article.sector,
+                        topic: article.topic,
+                        region: article.region,
+                      }] : null,
+                    },
+                  });
                 }}
                 onEventClick={setSelectedEventId}
               />

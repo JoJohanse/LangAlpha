@@ -13,6 +13,7 @@ interface InsightTopic {
 interface Insight {
   market_insight_id: string;
   type: string;
+  brief_session?: 'morning' | 'evening' | null;
   headline: string;
   summary: string;
   completed_at?: string;
@@ -29,13 +30,15 @@ interface TypeConfigEntry {
   accent: string;
 }
 
+type BriefSession = 'morning' | 'evening';
+
 // Module-level cache (survives navigation, clears on page refresh)
 let insightsCache: Insight[] | null = null;
 
 const TYPE_CONFIG: Record<string, TypeConfigEntry> = {
-  pre_market: { label: 'Pre-Market', accent: 'var(--color-profit)' },
-  market_update: { label: 'Market Update', accent: 'var(--color-accent-primary)' },
-  post_market: { label: 'Post-Market', accent: '#a78bfa' },
+  pre_market: { label: 'Morning Brief', accent: 'var(--color-profit)' },
+  market_update: { label: 'Intraday Update', accent: 'var(--color-accent-primary)' },
+  post_market: { label: 'Evening Brief', accent: '#a78bfa' },
   personalized: { label: 'Personalized', accent: '#f59e0b' },
 };
 
@@ -61,6 +64,17 @@ function formatTime(timestamp: string | undefined): string {
   } catch {
     return '';
   }
+}
+
+function inferBriefSession(insight: Insight): BriefSession {
+  if (insight.brief_session === 'morning' || insight.brief_session === 'evening') {
+    return insight.brief_session;
+  }
+  const ts = insight.completed_at;
+  if (!ts) return 'morning';
+  const hour = new Date(ts).getHours();
+  // 00:00-11:59 => morning, 12:00-23:59 => evening
+  return hour < 12 ? 'morning' : 'evening';
 }
 
 /** On mobile: show tags in a single row, overflow hidden with "+N more". Desktop: wrap freely. */
@@ -127,6 +141,7 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
   const [insights, setInsights] = useState<Insight[]>(insightsCache || []);
   const [loading, setLoading] = useState(!insightsCache);
   const [expanded, setExpanded] = useState(false);
+  const [session, setSession] = useState<BriefSession>(() => (new Date().getHours() < 12 ? 'morning' : 'evening'));
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const mountedRef = useRef(true);
@@ -150,8 +165,9 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
     return () => { cancelled = true; };
   }, []);
 
-  const latest: Insight | null = insights[0] || null;
-  const older = insights.slice(1);
+  const displayInsights = insights.filter((item) => inferBriefSession(item) === session);
+  const latest: Insight | null = displayInsights[0] || null;
+  const older = displayInsights.slice(1);
 
   const handleCardClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     // Don't expand if clicking the CTA button or a link
@@ -263,7 +279,24 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
       >
         <div className="text-center">
           <Newspaper size={40} className="mx-auto mb-3 opacity-30" style={{ color: 'var(--color-accent-primary)' }} />
-          <p style={{ color: 'var(--color-text-secondary)' }}>Generating first insight...</p>
+          <p style={{ color: 'var(--color-text-secondary)' }}>
+            No {session === 'morning' ? 'morning' : 'evening'} brief available yet.
+          </p>
+          <div className="mt-3 inline-flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
+            {(['morning', 'evening'] as const).map((key) => (
+              <button
+                key={key}
+                onClick={() => setSession(key)}
+                className="px-2 py-1 rounded-md text-xs font-medium"
+                style={{
+                  backgroundColor: session === key ? 'var(--color-bg-elevated)' : 'transparent',
+                  color: session === key ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                }}
+              >
+                {key === 'morning' ? 'Morning' : 'Evening'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -272,6 +305,11 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
   const updatedAgo = formatRelativeTime(latest.completed_at);
   const topics = latest.topics || [];
   const latestType = TYPE_CONFIG[latest.type] || TYPE_CONFIG.market_update;
+  const sessionLabel = latest.brief_session === 'morning'
+    ? 'Morning Brief'
+    : latest.brief_session === 'evening'
+      ? 'Evening Brief'
+      : null;
   const isPersonalized = latest.type === 'personalized';
 
   return (
@@ -350,11 +388,41 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
                   Based on your watchlist & portfolio
                 </span>
               )}
+              {!isPersonalized && sessionLabel && (
+                <span
+                  className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider"
+                  style={{
+                    color: latestType.accent,
+                    backgroundColor: `color-mix(in srgb, ${latestType.accent} 15%, transparent)`,
+                  }}
+                >
+                  {sessionLabel}
+                </span>
+              )}
               {updatedAgo && (
                 <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                   Updated {updatedAgo}
                 </span>
               )}
+            </div>
+            <div className="inline-flex items-center gap-1 p-1 rounded-lg mb-4" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
+              {(['morning', 'evening'] as const).map((key) => (
+                <button
+                  key={key}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSession(key);
+                    setExpanded(false);
+                  }}
+                  className="px-2 py-1 rounded-md text-xs font-medium"
+                  style={{
+                    backgroundColor: session === key ? 'var(--color-bg-elevated)' : 'transparent',
+                    color: session === key ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                  }}
+                >
+                  {key === 'morning' ? 'Morning' : 'Evening'}
+                </button>
+              ))}
             </div>
 
             {/* Headline */}

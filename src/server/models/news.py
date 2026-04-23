@@ -47,9 +47,55 @@ class NewsArticleCompact(BaseModel):
     source: NewsPublisher
     tickers: list[str] = []
     has_sentiment: bool = False
+    sector: str | None = None
+    topic: str | None = None
+    region: str | None = None
+    tags: list[str] = []
 
 
 class NewsCompactResponse(BaseModel):
     results: list[NewsArticleCompact]
     count: int
     next_cursor: str | None = None
+
+
+class NewsTag(BaseModel):
+    article_id: str
+    sector: str = "general"
+    topic: str = "general"
+    region: str = "US"
+    tags: list[str] = []
+
+
+class NewsHotRankItem(BaseModel):
+    article_id: str
+    title: str
+    article_url: str | None = None
+    source_name: str | None = None
+    published_at: str | None = None
+    tickers: list[str] = []
+    sector: str = "general"
+    topic: str = "general"
+    region: str = "US"
+    tags: list[str] = []
+    importance_score: float = 0
+    recency_score: float = 0
+    source_count: int = 0
+
+
+class NewsHotRankResponse(BaseModel):
+    results: list[NewsHotRankItem]
+    count: int
+    limit: int
+
+
+class NewsAskRequest(BaseModel):
+    question: str | None = None
+    focus_symbol: str | None = None
+
+
+class NewsAskResponse(BaseModel):
+    article_id: str
+    thread_initial_message: str
+    fallback_message: str
+    additional_context: list[dict]

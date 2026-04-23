@@ -1,20 +1,28 @@
-"""News feed endpoint — replaces the infoflow proxy for news sections."""
+"""News APIs: feed, hot rank, tag filters, ask, and interpretation."""
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from src.data_client import get_news_data_provider
+from src.server.database import news_article_tags as tags_db
 from src.server.models.events import InterpretRequest, InterpretResponse
 from src.server.models.news import (
     NewsArticle,
     NewsArticleCompact,
+    NewsAskRequest,
+    NewsAskResponse,
     NewsCompactResponse,
+    NewsHotRankItem,
+    NewsHotRankResponse,
     NewsPublisher,
 )
 from src.server.services.cache.news_cache_service import NewsCacheService
+from src.server.services.news_enrichment_service import NewsEnrichmentService
 from src.server.utils.api import CurrentUserId
 
 logger = logging.getLogger(__name__)
@@ -22,10 +30,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/news", tags=["News"])
 
 _cache = NewsCacheService()
+_enrichment = NewsEnrichmentService()
 
 
-def _compact(article: dict) -> NewsArticleCompact | None:
-    """Convert a full article dict to a compact model. Returns None for invalid articles."""
+def _build_tag_map(tagged_articles: list[Any]) -> dict[str, dict[str, Any]]:
+    return {a.article_id: a.as_dict() for a in tagged_articles}
+
+
+def _compact(article: dict, tag_map: dict[str, dict[str, Any]] | None = None) -> NewsArticleCompact | None:
     title = article.get("title")
     if not title:
         return None
@@ -34,6 +46,7 @@ def _compact(article: dict) -> NewsArticleCompact | None:
     source = article.get("source")
     if not article_id or not source:
         return None
+    tags = (tag_map or {}).get(article_id, {})
     return NewsArticleCompact(
         id=article_id,
         title=title,
@@ -43,7 +56,16 @@ def _compact(article: dict) -> NewsArticleCompact | None:
         source=NewsPublisher(**source),
         tickers=article.get("tickers", []),
         has_sentiment=bool(sentiments and len(sentiments) > 0),
+        sector=tags.get("sector"),
+        topic=tags.get("topic"),
+        region=tags.get("region"),
+        tags=tags.get("tags") or [],
     )
+
+
+async def _ensure_tags(raw_articles: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    tagged = await _enrichment.build_and_store_tags(raw_articles)
+    return _build_tag_map(tagged)
 
 
 @router.get("", response_model=NewsCompactResponse)
@@ -56,25 +78,19 @@ async def get_news(
     published_before: str | None = Query(None, description="ISO 8601 date filter"),
     order: str | None = Query(None, description="Sort order: asc or desc"),
     sort: str | None = Query(None, description="Sort field, e.g. published_utc"),
+    feed_mode: str = Query("standard", pattern="^(standard|quick)$"),
 ) -> NewsCompactResponse:
-    ticker_list = (
-        [t.strip().upper() for t in tickers.split(",") if t.strip()]
-        if tickers
-        else None
-    )
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()] if tickers else None
 
-    # Check cache (skip when cursor is used — paginated requests bypass cache)
     if not cursor:
         cached = await _cache.get(tickers=ticker_list, limit=limit)
         if cached:
-            results = [c for a in cached["results"] if (c := _compact(a)) is not None]
-            return NewsCompactResponse(
-                results=results,
-                count=len(results),
-                next_cursor=cached.get("next_cursor"),
-            )
-
-    from src.data_client import get_news_data_provider
+            raw_results = cached.get("results") or []
+            tag_map = await _ensure_tags(raw_results)
+            results = [c for a in raw_results if (c := _compact(a, tag_map=tag_map)) is not None]
+            if feed_mode == "quick":
+                results = sorted(results, key=lambda x: x.published_at, reverse=True)
+            return NewsCompactResponse(results=results, count=len(results), next_cursor=cached.get("next_cursor"))
 
     provider = await get_news_data_provider()
     data = await provider.get_news(
@@ -88,31 +104,157 @@ async def get_news(
         user_id=user_id,
     )
 
-    # Populate cache (stores full articles internally)
     if not cursor:
         await _cache.set(data, tickers=ticker_list, limit=limit)
 
-    results = [c for a in data["results"] if (c := _compact(a)) is not None]
-    return NewsCompactResponse(
-        results=results,
-        count=len(results),
-        next_cursor=data.get("next_cursor"),
-    )
+    raw_results = data.get("results", []) if isinstance(data, dict) else []
+    tag_map = await _ensure_tags(raw_results)
+    results = [c for a in raw_results if (c := _compact(a, tag_map=tag_map)) is not None]
+    if feed_mode == "quick":
+        results = sorted(results, key=lambda x: x.published_at, reverse=True)
+    return NewsCompactResponse(results=results, count=len(results), next_cursor=data.get("next_cursor"))
+
+
+@router.get("/hot-rank", response_model=NewsHotRankResponse)
+async def get_news_hot_rank(
+    user_id: CurrentUserId,
+    limit: int = Query(20, ge=1, le=100),
+    window_hours: int = Query(24, ge=1, le=168),
+) -> NewsHotRankResponse:
+    provider = await get_news_data_provider()
+    after_dt = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+    data = await provider.get_news(limit=max(50, limit * 2), published_after=after_dt.isoformat(), user_id=user_id)
+    raw = data.get("results", []) if isinstance(data, dict) else []
+    tagged = await _enrichment.build_and_store_tags(raw)
+    ranked = _enrichment.build_hot_rank(tagged_articles=tagged, window_hours=window_hours, limit=limit)
+    items = [
+        NewsHotRankItem(
+            article_id=r["article_id"],
+            title=r["title"],
+            article_url=r.get("article_url"),
+            source_name=r.get("source_name"),
+            published_at=r["published_at"].isoformat() if r.get("published_at") else None,
+            tickers=r.get("tickers") or [],
+            sector=r.get("sector") or "general",
+            topic=r.get("topic") or "general",
+            region=r.get("region") or "US",
+            tags=r.get("tags") or [],
+            importance_score=float(r.get("importance_score") or 0),
+            recency_score=float(r.get("recency_score") or 0),
+            source_count=int(r.get("source_count") or 0),
+        )
+        for r in ranked
+    ]
+    return NewsHotRankResponse(results=items, count=len(items), limit=limit)
+
+
+@router.get("/by-sector/{sector}", response_model=NewsCompactResponse)
+async def get_news_by_sector(
+    sector: str,
+    user_id: CurrentUserId,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> NewsCompactResponse:
+    provider = await get_news_data_provider()
+    rows = await tags_db.list_articles_by_sector(sector=sector, limit=limit, offset=offset)
+    if not rows:
+        data = await provider.get_news(limit=max(60, limit * 3), user_id=user_id)
+        raw = data.get("results", []) if isinstance(data, dict) else []
+        await _ensure_tags(raw)
+        rows = await tags_db.list_articles_by_sector(sector=sector, limit=limit, offset=offset)
+    results = [
+        NewsArticleCompact(
+            id=row["article_id"],
+            title=row["title"],
+            published_at=row["published_at"].isoformat() if row.get("published_at") else "",
+            article_url=row.get("article_url"),
+            source=NewsPublisher(name=row.get("source_name") or "Unknown"),
+            tickers=row.get("tickers") or [],
+            has_sentiment=False,
+            sector=row.get("sector"),
+            topic=row.get("topic"),
+            region=row.get("region"),
+            tags=row.get("tags") or [],
+        )
+        for row in rows
+    ]
+    return NewsCompactResponse(results=results, count=len(results), next_cursor=None)
+
+
+@router.get("/by-topic/{topic}", response_model=NewsCompactResponse)
+async def get_news_by_topic(
+    topic: str,
+    user_id: CurrentUserId,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> NewsCompactResponse:
+    provider = await get_news_data_provider()
+    rows = await tags_db.list_articles_by_topic(topic=topic, limit=limit, offset=offset)
+    if not rows:
+        data = await provider.get_news(limit=max(60, limit * 3), user_id=user_id)
+        raw = data.get("results", []) if isinstance(data, dict) else []
+        await _ensure_tags(raw)
+        rows = await tags_db.list_articles_by_topic(topic=topic, limit=limit, offset=offset)
+    results = [
+        NewsArticleCompact(
+            id=row["article_id"],
+            title=row["title"],
+            published_at=row["published_at"].isoformat() if row.get("published_at") else "",
+            article_url=row.get("article_url"),
+            source=NewsPublisher(name=row.get("source_name") or "Unknown"),
+            tickers=row.get("tickers") or [],
+            has_sentiment=False,
+            sector=row.get("sector"),
+            topic=row.get("topic"),
+            region=row.get("region"),
+            tags=row.get("tags") or [],
+        )
+        for row in rows
+    ]
+    return NewsCompactResponse(results=results, count=len(results), next_cursor=None)
+
+
+@router.post("/{article_id}/ask", response_model=NewsAskResponse)
+async def ask_about_news_article(
+    article_id: str,
+    payload: NewsAskRequest,
+    user_id: CurrentUserId,
+) -> NewsAskResponse:
+    provider = await get_news_data_provider()
+    article = await provider.get_news_article(article_id, user_id=user_id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    ask = _enrichment.build_ask_payload(article, question=payload.question)
+    return NewsAskResponse(article_id=article_id, **ask)
 
 
 @router.get("/{article_id}", response_model=NewsArticle)
 async def get_news_article(article_id: str, user_id: CurrentUserId):
-    # Fast path: check cache
     cached = await _cache.get_article_by_id(article_id)
     if cached:
         return NewsArticle(**cached)
 
-    # Slow path: fetch from provider chain
     from src.data_client import get_news_data_provider
 
     provider = await get_news_data_provider()
     article = await provider.get_news_article(article_id, user_id=user_id)
     if article:
+        tagged = _enrichment._tag_article(article)  # noqa: SLF001
+        if tagged:
+            await tags_db.upsert_news_article_tag(
+                {
+                    "article_id": tagged.article_id,
+                    "title": tagged.title,
+                    "article_url": tagged.article_url,
+                    "source_name": tagged.source_name,
+                    "published_at": tagged.published_at,
+                    "tickers": tagged.tickers,
+                    "sector": tagged.sector,
+                    "topic": tagged.topic,
+                    "region": tagged.region,
+                    "tags": tagged.tags,
+                }
+            )
         return NewsArticle(**article)
 
     raise HTTPException(status_code=404, detail="Article not found")
@@ -122,7 +264,6 @@ async def get_news_article(article_id: str, user_id: CurrentUserId):
 async def interpret_news_article(
     article_id: str, payload: InterpretRequest, user_id: CurrentUserId
 ):
-    from src.data_client import get_news_data_provider
     from src.server.services.event_service import EventService
 
     provider = await get_news_data_provider()

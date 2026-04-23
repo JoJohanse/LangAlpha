@@ -33,6 +33,7 @@ STALENESS_WINDOWS = {
 
 # Max symbols to include in personalized prompt context
 DEFAULT_MAX_SYMBOLS = 20
+DEFAULT_MAX_NEWS_ITEMS = 80
 DEFAULT_GENERATION_TIMEOUT = 600
 DEFAULT_DEDUP_WINDOW_MINUTES = 5
 
@@ -59,6 +60,67 @@ Include 4-8 news_items and 3-5 topics. Respond with ONLY the JSON object.
 """
 
 
+def _safe_parse_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _news_window_for_job(insight_type: str, now_et: datetime) -> tuple[datetime, datetime, str]:
+    tz = now_et.tzinfo or ET
+    day_start = datetime.combine(now_et.date(), datetime.min.time(), tzinfo=tz)
+    noon = day_start + timedelta(hours=12)
+    day_end = day_start + timedelta(days=1)
+
+    if insight_type == "pre_market":
+        return day_start, noon, "morning(00:00-12:00 ET)"
+    if insight_type == "post_market":
+        return noon, day_end, "evening(12:00-24:00 ET)"
+
+    # market_update
+    return now_et - timedelta(hours=1), now_et, "rolling 1h"
+
+
+def _build_news_context_from_articles(
+    articles: list[dict], window_start_et: datetime, window_end_et: datetime, window_label: str
+) -> str:
+    lines: list[str] = []
+    for idx, item in enumerate(articles, start=1):
+        published_at = _safe_parse_dt(item.get("published_at"))
+        published_et = (
+            published_at.astimezone(ET).strftime("%Y-%m-%d %H:%M ET")
+            if published_at
+            else "unknown time"
+        )
+        source_name = ((item.get("source") or {}).get("name")) or "Unknown"
+        title = str(item.get("title") or "").strip() or "Untitled"
+        summary = str(item.get("description") or item.get("summary") or "").strip()
+        tickers = ", ".join([str(t).upper() for t in (item.get("tickers") or []) if t]) or "N/A"
+        article_url = str(item.get("article_url") or "").strip() or "N/A"
+        lines.append(
+            f"{idx}. [{published_et}] {title}\n"
+            f"   source={source_name} tickers={tickers}\n"
+            f"   summary={summary or 'N/A'}\n"
+            f"   url={article_url}"
+        )
+
+    start_text = window_start_et.strftime("%Y-%m-%d %H:%M ET")
+    end_text = window_end_et.strftime("%Y-%m-%d %H:%M ET")
+    header = (
+        f"Time window: {window_label}\n"
+        f"Window bounds: {start_text} -> {end_text}\n"
+        "Use ONLY the following news list as source material.\n"
+        "If the list is short, still stay within these items and do not invent new stories.\n"
+    )
+    return header + "\n\n" + ("\n\n".join(lines) if lines else "No news items found in this window.")
+
+
 def _build_instruction(insight_type: str, now_et: datetime) -> str:
     """Build the research instruction for the given job type."""
     time_str = now_et.strftime("%A, %B %-d, %Y %-I:%M %p ET")
@@ -69,10 +131,10 @@ def _build_instruction(insight_type: str, now_et: datetime) -> str:
         yesterday_date = yesterday.strftime("%A, %B %-d, %Y")
         return (
             f"Current time: {time_str}\n\n"
-            f"Curate the most significant US financial market news "
+            f"Generate a morning brief. Curate the most significant US financial market news "
             f"from last night ({yesterday_date} ~8 PM ET) through this morning. "
             f"For each story, provide a short headline and a 2-4 sentence "
-            f"factual summary of what happened. {_TAIL}"
+            f"factual summary of what happened. Strictly stay inside the selected time window. {_TAIL}"
         )
 
     if insight_type == "market_update":
@@ -83,16 +145,16 @@ def _build_instruction(insight_type: str, now_et: datetime) -> str:
             f"Curate the most significant US financial market news from the "
             f"past hour ({window_start} – {window_end} ET). "
             f"For each story, provide a short headline and a 2-4 sentence "
-            f"factual summary of what happened. {_TAIL}"
+            f"factual summary of what happened. Strictly stay inside the selected time window. {_TAIL}"
         )
 
     # post_market
     return (
         f"Current time: {time_str}\n\n"
-        f"Curate the most significant US financial market news from today "
+        f"Generate an evening brief. Curate the most significant US financial market news from today "
         f"({today_date}) for an end-of-day recap. "
         f"For each story, provide a short headline and a 2-4 sentence "
-        f"factual summary of what happened. {_TAIL}"
+        f"factual summary of what happened. Strictly stay inside the selected time window. {_TAIL}"
     )
 
 
@@ -274,6 +336,7 @@ class InsightService:
         self._tz = ET
         self._generation_timeout = DEFAULT_GENERATION_TIMEOUT
         self._max_symbols = DEFAULT_MAX_SYMBOLS
+        self._max_news_items = DEFAULT_MAX_NEWS_ITEMS
         self._dedup_window_minutes = DEFAULT_DEDUP_WINDOW_MINUTES
         # Schedule times (overridden by config)
         self._pre_market = datetime.strptime("04:00", "%H:%M").time()
@@ -290,6 +353,7 @@ class InsightService:
             "generation_timeout", DEFAULT_GENERATION_TIMEOUT
         )
         self._max_symbols = config.get("max_symbols_context", DEFAULT_MAX_SYMBOLS)
+        self._max_news_items = config.get("max_news_items", DEFAULT_MAX_NEWS_ITEMS)
         self._dedup_window_minutes = config.get(
             "dedup_window_minutes", DEFAULT_DEDUP_WINDOW_MINUTES
         )
@@ -335,6 +399,8 @@ class InsightService:
         )
 
         now_et = datetime.now(self._tz)
+        window_job_type = "pre_market" if now_et.hour < 12 else "post_market"
+        news_context, _ = await self._build_windowed_news_context(window_job_type, now_et)
         next_job = self._next_job(now_et)
         if next_job:
             run_at, job_type = next_job
@@ -384,12 +450,25 @@ class InsightService:
         # Fetch context
         symbols_context = await self._build_user_context(user_id)
         now_et = datetime.now(self._tz)
+        news_context = ""
+        try:
+            window_job_type = "pre_market" if now_et.hour < 12 else "post_market"
+            news_context, _ = await self._build_windowed_news_context(window_job_type, now_et)
+        except Exception as e:
+            logger.warning("[MARKET_INSIGHT] personalized windowed news fetch failed: %s", e)
 
         if symbols_context:
             prompt = _build_personalized_instruction(symbols_context, now_et)
         else:
             # Empty watchlist/portfolio — fall back to generic brief
             prompt = _build_instruction("market_update", now_et)
+        prompt = (
+            prompt
+            + "\n\n"
+            + news_context
+            + "\n\n"
+            + "When generating this personalized brief, use only news within this time window."
+        )
 
         # Atomic idempotency: try to insert, handle conflict from partial unique index
         row = await insight_db.create_market_insight_if_not_generating(
@@ -699,6 +778,39 @@ class InsightService:
         window = STALENESS_WINDOWS.get(job_type, timedelta(minutes=30))
         return age < window
 
+    async def _build_windowed_news_context(self, job_type: str, now_et: datetime) -> tuple[str, int]:
+        from src.data_client import get_news_data_provider
+
+        window_start_et, window_end_et, window_label = _news_window_for_job(job_type, now_et)
+        provider = await get_news_data_provider()
+        response = await provider.get_news(
+            limit=self._max_news_items,
+            published_after=window_start_et.astimezone(timezone.utc).isoformat(),
+            published_before=window_end_et.astimezone(timezone.utc).isoformat(),
+            order="desc",
+            sort="published_utc",
+        )
+        raw = response.get("results", []) if isinstance(response, dict) else []
+
+        # Keep strict time range even if upstream ignores published_before.
+        filtered: list[dict] = []
+        start_utc = window_start_et.astimezone(timezone.utc)
+        end_utc = window_end_et.astimezone(timezone.utc)
+        for item in raw:
+            published_at = _safe_parse_dt(item.get("published_at"))
+            if published_at is None:
+                continue
+            if start_utc <= published_at < end_utc:
+                filtered.append(item)
+
+        context = _build_news_context_from_articles(
+            articles=filtered[: min(len(filtered), 40)],
+            window_start_et=window_start_et,
+            window_end_et=window_end_et,
+            window_label=window_label,
+        )
+        return context, len(filtered)
+
     # ------------------------------------------------------------------
     # Insight generation (system scheduled)
     # ------------------------------------------------------------------
@@ -708,8 +820,16 @@ class InsightService:
     ) -> None:
         """Generate a single market insight via flash agent."""
         instruction = _build_instruction(job_type, now_et)
+        news_context, news_count = await self._build_windowed_news_context(job_type, now_et)
+        final_prompt = (
+            instruction
+            + "\n\n"
+            + news_context
+            + "\n\n"
+            + "Output must summarize only the provided items inside the time window."
+        )
 
-        logger.info(f"[MARKET_INSIGHT] Starting {job_type} (flash agent)")
+        logger.info(f"[MARKET_INSIGHT] Starting {job_type} (flash agent), windowed_news=%s", news_count)
         start_time = time.monotonic()
 
         # When auth is off (local dev / self-hosted), use the local dev user's
@@ -720,13 +840,17 @@ class InsightService:
         row = await insight_db.create_market_insight(
             model="flash",
             type=job_type,
-            metadata={"instruction": instruction, "schema_version": 3},
+            metadata={
+                "instruction": instruction,
+                "schema_version": 4,
+                "windowed_news_count": news_count,
+            },
         )
         insight_id = row["market_insight_id"]
 
         try:
             raw_text = await asyncio.wait_for(
-                _run_flash_agent(instruction + "\n\n" + _JSON_GUIDELINES, user_id=system_user_id),
+                _run_flash_agent(final_prompt + "\n\n" + _JSON_GUIDELINES, user_id=system_user_id),
                 timeout=self._generation_timeout,
             )
             parsed = await self._extract_with_fallback(raw_text)

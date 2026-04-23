@@ -29,6 +29,7 @@ class InsightOutputSchema(BaseModel):
 class MarketInsightLatestResponse(BaseModel):
     market_insight_id: str
     type: str
+    brief_session: Optional[str] = None
     status: Optional[str] = None
     headline: Optional[str] = None
     summary: Optional[str] = None

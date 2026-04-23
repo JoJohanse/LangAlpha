@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { X, Calendar, Hash, ExternalLink, TrendingUp, TrendingDown, Minus, Tag } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getNewsArticle } from '../utils/api';
+import { useNavigate } from 'react-router-dom';
+import { askNewsArticle, getNewsArticle } from '../utils/api';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { MobileBottomSheet } from '@/components/ui/mobile-bottom-sheet';
 
@@ -410,7 +411,9 @@ function NewsDetailModal({ newsId, onClose, fallbackUrl }: NewsDetailModalProps)
   const [loading, setLoading] = useState(false);
   const [fetchFailed, setFetchFailed] = useState(false);
   const [expandedSentiment, setExpandedSentiment] = useState<number | null>(null);
+  const [askLoading, setAskLoading] = useState(false);
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!newsId) {
@@ -464,6 +467,32 @@ function NewsDetailModal({ newsId, onClose, fallbackUrl }: NewsDetailModalProps)
     />
   );
 
+  const handleAskAI = async () => {
+    if (!newsId || askLoading) return;
+    setAskLoading(true);
+    try {
+      const payload = await askNewsArticle(newsId) as { thread_initial_message?: string; additional_context?: Record<string, unknown>[] };
+      navigate('/chat', {
+        state: {
+          initialMessage: payload.thread_initial_message || (article?.title ? `Please analyze this market news and potential impact: ${article.title}` : ''),
+          additionalContext: payload.additional_context || null,
+        },
+      });
+      onClose();
+    } catch {
+      if (article?.title) {
+        navigate('/chat', {
+          state: {
+            initialMessage: `Please analyze this market news and potential impact: ${article.title}`,
+          },
+        });
+        onClose();
+      }
+    } finally {
+      setAskLoading(false);
+    }
+  };
+
   // Mobile: use MobileBottomSheet
   if (isMobile) {
     return (
@@ -513,6 +542,18 @@ function NewsDetailModal({ newsId, onClose, fallbackUrl }: NewsDetailModalProps)
               }}
             >
               <X size={20} />
+            </button>
+            <button
+              onClick={handleAskAI}
+              className="absolute top-4 right-16 z-20 px-2.5 py-1.5 rounded-full transition-colors text-xs border"
+              style={{
+                backgroundColor: 'rgba(0,0,0,0.45)',
+                color: '#fff',
+                borderColor: 'rgba(255,255,255,0.35)',
+                backdropFilter: 'blur(8px)',
+              }}
+            >
+              {askLoading ? '...' : 'Ask AI'}
             </button>
 
             <div className="overflow-y-auto flex-1">

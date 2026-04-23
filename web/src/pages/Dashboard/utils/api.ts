@@ -80,6 +80,12 @@ interface NewsResponse {
   next_cursor: string | null;
 }
 
+interface HotNewsRankResponse {
+  results: Record<string, unknown>[];
+  count: number;
+  limit: number;
+}
+
 interface EarningsParams {
   from?: string;
   to?: string;
@@ -553,6 +559,48 @@ export async function getNews({ tickers, limit = 20, cursor }: NewsParams = {}):
     console.error('[API] getNews failed:', err?.message);
     return { results: [], count: 0, next_cursor: null };
   }
+}
+
+export async function getHotNewsRank(limit: number = 20, windowHours: number = 24): Promise<HotNewsRankResponse> {
+  try {
+    const { data } = await api.get('/api/v1/news/hot-rank', {
+      params: { limit, window_hours: windowHours },
+    });
+    return data || { results: [], count: 0, limit };
+  } catch (e: unknown) {
+    const err = e as { message?: string };
+    console.error('[API] getHotNewsRank failed:', err?.message);
+    return { results: [], count: 0, limit };
+  }
+}
+
+export async function getNewsBySector(sector: string, limit: number = 20): Promise<NewsResponse> {
+  try {
+    const { data } = await api.get(`/api/v1/news/by-sector/${encodeURIComponent(sector)}`, { params: { limit } });
+    return data || { results: [], count: 0, next_cursor: null };
+  } catch (e: unknown) {
+    const err = e as { message?: string };
+    console.error('[API] getNewsBySector failed:', err?.message);
+    return { results: [], count: 0, next_cursor: null };
+  }
+}
+
+export async function getNewsByTopic(topic: string, limit: number = 20): Promise<NewsResponse> {
+  try {
+    const { data } = await api.get(`/api/v1/news/by-topic/${encodeURIComponent(topic)}`, { params: { limit } });
+    return data || { results: [], count: 0, next_cursor: null };
+  } catch (e: unknown) {
+    const err = e as { message?: string };
+    console.error('[API] getNewsByTopic failed:', err?.message);
+    return { results: [], count: 0, next_cursor: null };
+  }
+}
+
+export async function askNewsArticle(articleId: string, question?: string): Promise<Record<string, unknown>> {
+  const payload: Record<string, unknown> = {};
+  if (question) payload.question = question;
+  const { data } = await api.post(`/api/v1/news/${encodeURIComponent(articleId)}/ask`, payload);
+  return data;
 }
 
 /**

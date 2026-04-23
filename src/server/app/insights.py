@@ -24,12 +24,24 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["Insights"])
 
+_BRIEF_SESSION_MAP = {
+    "pre_market": "morning",
+    "post_market": "evening",
+}
+
+
+def _attach_brief_session(row: dict) -> dict:
+    mapped = dict(row)
+    mapped["brief_session"] = _BRIEF_SESSION_MAP.get(str(row.get("type") or ""))
+    return mapped
+
 
 @router.get("/insights/today", response_model=MarketInsightListResponse)
 @handle_api_exceptions("get today's insights", logger)
 async def get_todays_insights(user_id: CurrentUserId):
     rows = await market_insight_db.get_todays_market_insights(user_id=user_id)
-    return {"insights": rows, "count": len(rows)}
+    enriched = [_attach_brief_session(row) for row in rows]
+    return {"insights": enriched, "count": len(enriched)}
 
 
 @router.get(
@@ -47,7 +59,7 @@ async def get_insight_detail(market_insight_id: str, user_id: CurrentUserId):
     if row.get("user_id") is not None and str(row["user_id"]) != user_id:
         raise_not_found("Market Insight")
 
-    return row
+    return _attach_brief_session(row)
 
 
 @router.post(
@@ -81,4 +93,4 @@ async def generate_personalized_insight(user_id: CurrentUserId):
             detail="Insight generation failed",
         )
 
-    return result
+    return _attach_brief_session(result)

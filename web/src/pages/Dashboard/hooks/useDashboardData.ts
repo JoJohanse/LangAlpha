@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { getNews, getIndices, INDEX_SYMBOLS, fallbackIndex, normalizeIndexSymbol } from '../utils/api';
+import { getNews, getHotNewsRank, getIndices, INDEX_SYMBOLS, fallbackIndex, normalizeIndexSymbol } from '../utils/api';
 import { getEvents, getHotEvents, type MarketEvent } from '../utils/eventsApi';
 import { fetchMarketStatus } from '@/lib/marketUtils';
 import type { IndexData } from '@/types/market';
@@ -15,12 +15,18 @@ interface NewsItem {
   id: string;
   title: string;
   time: string;
+  publishedAt?: string | null;
   isHot: boolean;
   source: string;
   favicon: string | null;
   image: string | null;
   tickers: string[];
   articleUrl?: string | null;
+  sector?: string | null;
+  topic?: string | null;
+  region?: string | null;
+  tags?: string[];
+  importanceScore?: number;
 }
 
 interface DashboardData {
@@ -32,6 +38,10 @@ interface DashboardData {
   eventLoading: boolean;
   hotEvents: MarketEvent[];
   hotEventsLoading: boolean;
+  hotNewsItems: NewsItem[];
+  hotNewsLoading: boolean;
+  quickNewsItems: NewsItem[];
+  quickNewsLoading: boolean;
   marketStatus: MarketStatusData | null;
   marketStatusRef: { current: MarketStatusData | null };
 }
@@ -96,12 +106,17 @@ export function useDashboardData(): DashboardData {
           id: r.id as string,
           title: r.title as string,
           time: formatRelativeTime(r.published_at as string | null | undefined),
+          publishedAt: (r.published_at as string) || null,
           isHot: r.has_sentiment as boolean,
           source: (r.source as Record<string, unknown> | undefined)?.name as string || '',
           favicon: (r.source as Record<string, unknown> | undefined)?.favicon_url as string || null,
           image: r.image_url as string || null,
           tickers: (r.tickers as string[]) || [],
           articleUrl: (r.article_url as string) || null,
+          sector: (r.sector as string) || null,
+          topic: (r.topic as string) || null,
+          region: (r.region as string) || null,
+          tags: (r.tags as string[]) || [],
         }));
       }
       return [];
@@ -131,6 +146,60 @@ export function useDashboardData(): DashboardData {
     refetchIntervalInBackground: false,
   });
 
+  const { data: hotNewsItems = [], isLoading: hotNewsLoading } = useQuery<NewsItem[]>({
+    queryKey: ['dashboard', 'news', 'hot-rank'],
+    queryFn: async () => {
+      const data = await getHotNewsRank(15, 24);
+      return (data.results || []).map((r: Record<string, unknown>) => ({
+        id: r.article_id as string,
+        title: r.title as string,
+        time: formatRelativeTime(r.published_at as string | null | undefined),
+        publishedAt: (r.published_at as string) || null,
+        isHot: true,
+        source: (r.source_name as string) || '',
+        favicon: null,
+        image: null,
+        tickers: (r.tickers as string[]) || [],
+        articleUrl: (r.article_url as string) || null,
+        sector: (r.sector as string) || null,
+        topic: (r.topic as string) || null,
+        region: (r.region as string) || null,
+        tags: (r.tags as string[]) || [],
+        importanceScore: Number(r.importance_score || 0),
+      }));
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    refetchIntervalInBackground: false,
+  });
+
+  const { data: quickNewsItems = [], isLoading: quickNewsLoading } = useQuery<NewsItem[]>({
+    queryKey: ['dashboard', 'news', 'quick'],
+    queryFn: async () => {
+      const data = await getNews({ limit: 50 });
+      const items = (data.results || []).map((r: Record<string, unknown>) => ({
+        id: r.id as string,
+        title: r.title as string,
+        time: formatRelativeTime(r.published_at as string | null | undefined),
+        publishedAt: (r.published_at as string) || null,
+        isHot: r.has_sentiment as boolean,
+        source: (r.source as Record<string, unknown> | undefined)?.name as string || '',
+        favicon: (r.source as Record<string, unknown> | undefined)?.favicon_url as string || null,
+        image: r.image_url as string || null,
+        tickers: (r.tickers as string[]) || [],
+        articleUrl: (r.article_url as string) || null,
+        sector: (r.sector as string) || null,
+        topic: (r.topic as string) || null,
+        region: (r.region as string) || null,
+        tags: (r.tags as string[]) || [],
+      }));
+      return items;
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    refetchIntervalInBackground: false,
+  });
+
   return {
     indices,
     indicesLoading,
@@ -140,6 +209,10 @@ export function useDashboardData(): DashboardData {
     eventLoading,
     hotEvents,
     hotEventsLoading,
+    hotNewsItems,
+    hotNewsLoading,
+    quickNewsItems,
+    quickNewsLoading,
     marketStatus,
     // Kept for backward compatibility with components that might use MarketStatusRef
     marketStatusRef: { current: marketStatus }

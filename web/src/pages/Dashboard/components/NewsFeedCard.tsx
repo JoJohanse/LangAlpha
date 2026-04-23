@@ -9,17 +9,24 @@ interface NewsItem {
   title: string;
   source?: string;
   time?: string;
+  publishedAt?: string | null;
   image?: string | null;
   favicon?: string | null;
   tickers?: string[];
   isHot?: boolean;
   articleUrl?: string | null;
+  sector?: string | null;
+  topic?: string | null;
+  region?: string | null;
+  tags?: string[];
+  importanceScore?: number;
 }
 
 type TabKey = 'market' | 'portfolio' | 'watchlist';
 type DateRangeKey = 'all' | '1h' | '6h' | '24h' | '7d';
-type FeedMode = 'events' | 'raw';
+type FeedMode = 'events' | 'raw' | 'quick';
 type EventViewKey = 'all' | 'hot';
+type HotSourceKey = 'events' | 'news';
 
 interface TabDef {
   key: TabKey;
@@ -75,10 +82,11 @@ interface NewsRowProps {
   item: NewsItem;
   idx: number;
   onNewsClick?: (id: string | number, articleUrl?: string | null) => void;
+  onAskNews?: (id: string | number) => void;
   skipAnimation?: boolean;
 }
 
-function NewsRow({ item, idx, onNewsClick, skipAnimation }: NewsRowProps) {
+function NewsRow({ item, idx, onNewsClick, onAskNews, skipAnimation }: NewsRowProps) {
   const sentiment = item.isHot ? 'positive' : 'neutral';
   const sentimentColor =
     sentiment === 'positive'
@@ -178,6 +186,21 @@ function NewsRow({ item, idx, onNewsClick, skipAnimation }: NewsRowProps) {
             )}
           </div>
         )}
+        {item.id != null && (
+          <div className="mt-1.5">
+            <button
+              type="button"
+              className="text-[11px] px-2 py-0.5 rounded border"
+              style={{ color: 'var(--color-accent-light)', borderColor: 'var(--color-border-muted)' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAskNews?.(item.id as string | number);
+              }}
+            >
+              Ask AI
+            </button>
+          </div>
+        )}
       </div>
     </Wrapper>
   );
@@ -234,6 +257,10 @@ interface NewsFeedCardProps {
   eventLoading?: boolean;
   hotEvents?: MarketEvent[];
   hotEventsLoading?: boolean;
+  hotNewsItems?: NewsItem[];
+  hotNewsLoading?: boolean;
+  quickItems?: NewsItem[];
+  quickLoading?: boolean;
   marketItems?: NewsItem[];
   marketLoading?: boolean;
   portfolioItems?: NewsItem[];
@@ -241,6 +268,7 @@ interface NewsFeedCardProps {
   watchlistItems?: NewsItem[];
   watchlistLoading?: boolean;
   onNewsClick?: (id: string | number, articleUrl?: string | null) => void;
+  onAskNews?: (id: string | number) => void;
   onEventClick?: (eventId: string) => void;
 }
 
@@ -249,6 +277,10 @@ function NewsFeedCard({
   eventLoading = false,
   hotEvents = [],
   hotEventsLoading = false,
+  hotNewsItems = [],
+  hotNewsLoading = false,
+  quickItems = [],
+  quickLoading = false,
   marketItems = [],
   marketLoading = false,
   portfolioItems = [],
@@ -256,12 +288,16 @@ function NewsFeedCard({
   watchlistItems = [],
   watchlistLoading = false,
   onNewsClick,
+  onAskNews,
   onEventClick,
 }: NewsFeedCardProps) {
   const [mode, setMode] = useState<FeedMode>('events');
   const [activeTab, setActiveTab] = useState<TabKey>('market');
   const [eventView, setEventView] = useState<EventViewKey>('hot');
+  const [hotSource, setHotSource] = useState<HotSourceKey>('events');
   const [tickerFilter, setTickerFilter] = useState('');
+  const [sectorFilter, setSectorFilter] = useState('');
+  const [topicFilter, setTopicFilter] = useState('');
   const [dateRange, setDateRange] = useState<DateRangeKey>('all');
 
   const dataMap: Record<TabKey, { items: NewsItem[]; loading: boolean }> = {
@@ -270,9 +306,11 @@ function NewsFeedCard({
     watchlist: { items: watchlistItems, loading: watchlistLoading },
   };
 
-  const { items, loading } = dataMap[activeTab];
+  const { items: rawItems, loading } = dataMap[activeTab];
+  const items = mode === 'quick' ? quickItems : rawItems;
+  const currentLoading = mode === 'quick' ? quickLoading : loading;
 
-  const hasFilters = tickerFilter.trim() !== '' || dateRange !== 'all';
+  const hasFilters = tickerFilter.trim() !== '' || sectorFilter.trim() !== '' || topicFilter.trim() !== '' || dateRange !== 'all';
 
   const filteredItems = useMemo(() => {
     let result = items;
@@ -283,6 +321,14 @@ function NewsFeedCard({
       result = result.filter((item) =>
         item.tickers?.some((t) => t.toUpperCase().includes(query))
       );
+    }
+    const sector = sectorFilter.trim().toLowerCase();
+    if (sector) {
+      result = result.filter((item) => String(item.sector || '').toLowerCase().includes(sector));
+    }
+    const topic = topicFilter.trim().toLowerCase();
+    if (topic) {
+      result = result.filter((item) => String(item.topic || '').toLowerCase().includes(topic));
     }
 
     // Date range filter
@@ -295,7 +341,7 @@ function NewsFeedCard({
     }
 
     return result;
-  }, [items, tickerFilter, dateRange]);
+  }, [items, tickerFilter, sectorFilter, topicFilter, dateRange]);
 
   // Collect unique tickers across current items for quick-pick
   const _availableTickers = useMemo(() => {
@@ -327,11 +373,33 @@ function NewsFeedCard({
   }, [eventItems, tickerFilter, dateRange]);
 
   const filteredHotEvents = useMemo(() => {
-    let result = hotEvents;
+    let result = hotSource === 'events'
+      ? hotEvents
+      : hotNewsItems.map((n) => ({
+        event_id: String(n.id || ''),
+        title: n.title,
+        short_summary: n.topic ? `Topic: ${n.topic}` : null,
+        importance_score: n.importanceScore || 0,
+        sentiment: n.isHot ? 'positive' : 'neutral',
+        start_time: n.publishedAt || null,
+        symbols: n.tickers || [],
+      } as MarketEvent));
     const query = tickerFilter.trim().toUpperCase();
     if (query) {
       result = result.filter((item) =>
         (item.symbols || []).some((s) => s.toUpperCase().includes(query))
+      );
+    }
+    const sector = sectorFilter.trim().toLowerCase();
+    if (sector && hotSource === 'news') {
+      result = result.filter((item) =>
+        String((hotNewsItems.find((x) => String(x.id) === item.event_id)?.sector) || '').toLowerCase().includes(sector)
+      );
+    }
+    const topic = topicFilter.trim().toLowerCase();
+    if (topic && hotSource === 'news') {
+      result = result.filter((item) =>
+        String((hotNewsItems.find((x) => String(x.id) === item.event_id)?.topic) || '').toLowerCase().includes(topic)
       );
     }
     if (dateRange !== 'all') {
@@ -342,7 +410,7 @@ function NewsFeedCard({
       });
     }
     return result;
-  }, [hotEvents, tickerFilter, dateRange]);
+  }, [hotEvents, hotNewsItems, hotSource, tickerFilter, sectorFilter, topicFilter, dateRange]);
 
   const renderEventRow = (item: MarketEvent, idx: number) => {
     const score = Number(item.importance_score ?? 0);
@@ -432,7 +500,7 @@ function NewsFeedCard({
         <div className="flex items-center gap-2 min-w-0 overflow-x-auto">
           <div className="flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
             <button
-              onClick={() => { setMode('events'); setTickerFilter(''); setDateRange('all'); setEventView('hot'); }}
+              onClick={() => { setMode('events'); setTickerFilter(''); setSectorFilter(''); setTopicFilter(''); setDateRange('all'); setEventView('hot'); setHotSource('events'); }}
               className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
               style={{
                 backgroundColor: mode === 'events' ? 'var(--color-bg-elevated)' : 'transparent',
@@ -442,7 +510,7 @@ function NewsFeedCard({
               Events
             </button>
             <button
-              onClick={() => { setMode('raw'); setTickerFilter(''); setDateRange('all'); }}
+              onClick={() => { setMode('raw'); setTickerFilter(''); setSectorFilter(''); setTopicFilter(''); setDateRange('all'); }}
               className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
               style={{
                 backgroundColor: mode === 'raw' ? 'var(--color-bg-elevated)' : 'transparent',
@@ -451,30 +519,66 @@ function NewsFeedCard({
             >
               Raw News
             </button>
+            <button
+              onClick={() => { setMode('quick'); setTickerFilter(''); setSectorFilter(''); setTopicFilter(''); setDateRange('all'); }}
+              className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+              style={{
+                backgroundColor: mode === 'quick' ? 'var(--color-bg-elevated)' : 'transparent',
+                color: mode === 'quick' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+              }}
+            >
+              7x24
+            </button>
           </div>
           {mode === 'events' && (
-            <div className="flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
-              <button
-                onClick={() => setEventView('hot')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
-                style={{
-                  backgroundColor: eventView === 'hot' ? 'var(--color-bg-elevated)' : 'transparent',
-                  color: eventView === 'hot' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-                }}
-              >
-                Hot Events
-              </button>
-              <button
-                onClick={() => setEventView('all')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
-                style={{
-                  backgroundColor: eventView === 'all' ? 'var(--color-bg-elevated)' : 'transparent',
-                  color: eventView === 'all' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-                }}
-              >
-                All Events
-              </button>
-            </div>
+            <>
+              <div className="flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
+                <button
+                  onClick={() => setEventView('hot')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                  style={{
+                    backgroundColor: eventView === 'hot' ? 'var(--color-bg-elevated)' : 'transparent',
+                    color: eventView === 'hot' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                  }}
+                >
+                  Hot
+                </button>
+                <button
+                  onClick={() => setEventView('all')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                  style={{
+                    backgroundColor: eventView === 'all' ? 'var(--color-bg-elevated)' : 'transparent',
+                    color: eventView === 'all' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                  }}
+                >
+                  All Events
+                </button>
+              </div>
+              {eventView === 'hot' && (
+                <div className="flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
+                  <button
+                    onClick={() => setHotSource('events')}
+                    className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                    style={{
+                      backgroundColor: hotSource === 'events' ? 'var(--color-bg-elevated)' : 'transparent',
+                      color: hotSource === 'events' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                    }}
+                  >
+                    Event Hot
+                  </button>
+                  <button
+                    onClick={() => setHotSource('news')}
+                    className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                    style={{
+                      backgroundColor: hotSource === 'news' ? 'var(--color-bg-elevated)' : 'transparent',
+                      color: hotSource === 'news' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                    }}
+                  >
+                    News Hot
+                  </button>
+                </div>
+              )}
+            </>
           )}
           {mode === 'raw' && (
             <div className="flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
@@ -487,6 +591,8 @@ function NewsFeedCard({
                     onClick={() => {
                       setActiveTab(tab.key);
                       setTickerFilter('');
+                      setSectorFilter('');
+                      setTopicFilter('');
                       setDateRange('all');
                     }}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
@@ -535,6 +641,42 @@ function NewsFeedCard({
               </button>
             )}
           </div>
+          <div
+            className="flex items-center gap-1.5 h-7 px-2 rounded-lg border"
+            style={{
+              backgroundColor: 'var(--color-bg-input, var(--color-bg-tag))',
+              borderColor: 'var(--color-border-muted)',
+              width: sectorFilter ? 150 : 110,
+              transition: 'width 0.2s',
+            }}
+          >
+            <input
+              type="text"
+              placeholder="Sector..."
+              value={sectorFilter}
+              onChange={(e) => setSectorFilter(e.target.value)}
+              className="flex-1 text-[11px] bg-transparent border-none outline-none min-w-0"
+              style={{ color: 'var(--color-text-primary)' }}
+            />
+          </div>
+          <div
+            className="flex items-center gap-1.5 h-7 px-2 rounded-lg border"
+            style={{
+              backgroundColor: 'var(--color-bg-input, var(--color-bg-tag))',
+              borderColor: 'var(--color-border-muted)',
+              width: topicFilter ? 140 : 100,
+              transition: 'width 0.2s',
+            }}
+          >
+            <input
+              type="text"
+              placeholder="Topic..."
+              value={topicFilter}
+              onChange={(e) => setTopicFilter(e.target.value)}
+              className="flex-1 text-[11px] bg-transparent border-none outline-none min-w-0"
+              style={{ color: 'var(--color-text-primary)' }}
+            />
+          </div>
 
           {/* Date range pills */}
           <div className="flex items-center gap-0.5 p-0.5 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
@@ -559,7 +701,7 @@ function NewsFeedCard({
           {/* Clear */}
           {hasFilters && (
             <button
-              onClick={() => { setTickerFilter(''); setDateRange('all'); }}
+              onClick={() => { setTickerFilter(''); setSectorFilter(''); setTopicFilter(''); setDateRange('all'); }}
               style={{ color: 'var(--color-text-secondary)' }}
             >
               <X size={14} />
@@ -579,7 +721,7 @@ function NewsFeedCard({
           className="flex flex-col gap-1"
         >
           {mode === 'events' ? (
-            (eventView === 'all' ? eventLoading : hotEventsLoading) ? (
+            (eventView === 'all' ? eventLoading : (hotSource === 'events' ? hotEventsLoading : hotNewsLoading)) ? (
               <SkeletonRows />
             ) : (eventView === 'all' ? filteredEvents : filteredHotEvents).length === 0 ? (
               <div className="flex items-center justify-center py-16">
@@ -590,13 +732,13 @@ function NewsFeedCard({
             ) : (
               (eventView === 'all' ? filteredEvents : filteredHotEvents).map((item, idx) => renderEventRow(item, idx))
             )
-          ) : loading ? (
+          ) : currentLoading ? (
             <SkeletonRows />
           ) : filteredItems.length === 0 ? (
             <EmptyState tab={activeTab} hasFilters={hasFilters} />
           ) : (
             filteredItems.map((item, idx) => (
-              <NewsRow key={item.id || idx} item={item} idx={idx} onNewsClick={onNewsClick} skipAnimation={isMobile} />
+              <NewsRow key={item.id || idx} item={item} idx={idx} onNewsClick={onNewsClick} onAskNews={onAskNews} skipAnimation={isMobile} />
             ))
           )}
         </motion.div>

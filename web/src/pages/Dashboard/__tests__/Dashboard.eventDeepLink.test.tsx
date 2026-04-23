@@ -22,6 +22,10 @@ vi.mock('../hooks/useDashboardData', () => ({
     eventLoading: false,
     hotEvents: [],
     hotEventsLoading: false,
+    hotNewsItems: [],
+    hotNewsLoading: false,
+    quickNewsItems: [],
+    quickNewsLoading: false,
     marketStatus: null,
     marketStatusRef: { current: null },
   }),
@@ -102,4 +106,3 @@ describe('Dashboard event deep link', () => {
     });
   });
 });
-
