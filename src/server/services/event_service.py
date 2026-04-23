@@ -272,10 +272,12 @@ class EventService:
                 if sent in {"positive", "negative", "neutral"}:
                     sentiments.append(sent)
             source_name = str(((raw.get("source") or {}).get("name")) or "").strip()
+            article_url = str(raw.get("article_url") or "").strip()
             articles.append(
                 {
                     "id": article_id,
                     "title": title,
+                    "article_url": article_url or None,
                     "published_at": published_at,
                     "tickers": sorted(tickers),
                     # Include ticker tokens in similarity signature so wording
@@ -372,6 +374,10 @@ class EventService:
                         "article_id": article["id"],
                         "relevance_score": round(max(0.0, 1.0 - (idx * 0.08)), 2),
                         "is_primary": idx == 0,
+                        "title": article.get("title"),
+                        "article_url": article.get("article_url"),
+                        "source_name": article.get("source_name"),
+                        "published_at": article.get("published_at"),
                     }
                 )
             await market_event_db.replace_event_articles(

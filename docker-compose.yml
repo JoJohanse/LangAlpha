@@ -42,24 +42,40 @@ services:
       retries: 5
 
   backend:
-    image: ${BACKEND_IMAGE:-langalpha/backend:phase1-mvp-20260422}
-    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.dev
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    image: ${BACKEND_IMAGE:-langalpha/backend:latest}
     init: true
     pids_limit: 8192
     mem_limit: 8g
     memswap_limit: 8g
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
     env_file: .env
     environment:
       BYOK_ENCRYPTION_KEY: ${BYOK_ENCRYPTION_KEY:-langalpha-local-dev-encryption-key}
+      # Default to Docker service names for inter-container networking.
+      # Override in .env to connect to external services or for host dev.
       DB_HOST: ${DB_HOST:-postgres}
       REDIS_URL: "${REDIS_URL:-redis://:${REDIS_PASSWORD:-redis}@redis:6379/0}"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    ports:
-      - "8000:8000"
+    volumes:
+      # Mount source for hot-reload
+      - ./src:/app/src
+      - ./server.py:/app/server.py
+      - ./agent_config.yaml:/app/agent_config.yaml
+      # Docker socket — only needed when SANDBOX_PROVIDER=docker (DooD pattern).
+      # Safe to remove if using only the Daytona provider.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config.yaml:/app/config.yaml
+      - ./mcp_servers:/app/mcp_servers
+      - ./skills:/app/skills
+      - ./scripts:/app/scripts
+      - ./alembic.ini:/app/alembic.ini
+      - ./migrations:/app/migrations
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
       interval: 10s
@@ -67,8 +83,9 @@ services:
       retries: 10
       start_period: 30s
 
+
   web_assets:
-    image: ${WEB_IMAGE:-langalpha/web:phase1-mvp-20260422}
+    image: ${WEB_IMAGE:-langalpha/web:latest}
     command: >
       sh -lc "rm -rf /frontend/* && cp -r /dist/. /frontend/"
     restart: "no"

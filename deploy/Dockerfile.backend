@@ -35,7 +35,9 @@ RUN uv run patchright install --with-deps chromium \
 COPY src/ src/
 COPY server.py .
 COPY scripts/ scripts/
-RUN chmod +x scripts/docker_entrypoint.sh
+COPY migrations ./migrations
+COPY alembic.ini ./
+RUN sed -i 's/\r$//' scripts/docker_entrypoint.sh && chmod +x scripts/docker_entrypoint.sh
 COPY config.yaml .
 COPY agent_config.yaml .
 COPY mcp_servers/ mcp_servers/
@@ -47,5 +49,5 @@ EXPOSE 8000
 # subreaper so tini works even when not PID 1 (e.g. under compose's
 # `init: true`, which puts docker-init at PID 1 and our tini at PID 7).
 # Without `-s`, tini warns it can't reap and no-ops.
-ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
+ENTRYPOINT ["/usr/bin/tini", "-s", "--", "/app/scripts/docker_entrypoint.sh"]
 CMD ["uv", "run", "python", "server.py", "--host", "0.0.0.0", "--port", "8000"]

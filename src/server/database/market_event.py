@@ -70,23 +70,54 @@ async def replace_event_articles(
                 (event_id,),
             )
             for article in articles:
-                await cur.execute(
-                    """
-                    INSERT INTO market_event_articles (
-                        event_id, article_id, relevance_score, is_primary
-                    ) VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (event_id, article_id)
-                    DO UPDATE SET
-                        relevance_score = EXCLUDED.relevance_score,
-                        is_primary = EXCLUDED.is_primary
-                    """,
-                    (
-                        event_id,
-                        article["article_id"],
-                        article.get("relevance_score"),
-                        bool(article.get("is_primary", False)),
-                    ),
-                )
+                try:
+                    await cur.execute(
+                        """
+                        INSERT INTO market_event_articles (
+                            event_id, article_id, relevance_score, is_primary,
+                            title, article_url, source_name, published_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (event_id, article_id)
+                        DO UPDATE SET
+                            relevance_score = EXCLUDED.relevance_score,
+                            is_primary = EXCLUDED.is_primary,
+                            title = EXCLUDED.title,
+                            article_url = EXCLUDED.article_url,
+                            source_name = EXCLUDED.source_name,
+                            published_at = EXCLUDED.published_at
+                        """,
+                        (
+                            event_id,
+                            article["article_id"],
+                            article.get("relevance_score"),
+                            bool(article.get("is_primary", False)),
+                            article.get("title"),
+                            article.get("article_url"),
+                            article.get("source_name"),
+                            article.get("published_at"),
+                        ),
+                    )
+                except Exception as exc:
+                    # Backward compatibility for DBs not yet migrated to revision 011.
+                    if getattr(exc, "sqlstate", None) != "42703":
+                        raise
+                    await cur.execute(
+                        """
+                        INSERT INTO market_event_articles (
+                            event_id, article_id, relevance_score, is_primary
+                        ) VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (event_id, article_id)
+                        DO UPDATE SET
+                            relevance_score = EXCLUDED.relevance_score,
+                            is_primary = EXCLUDED.is_primary
+                        """,
+                        (
+                            event_id,
+                            article["article_id"],
+                            article.get("relevance_score"),
+                            bool(article.get("is_primary", False)),
+                        ),
+                    )
 
 
 async def replace_symbol_links(
@@ -182,15 +213,43 @@ async def get_event(event_id: str) -> dict[str, Any] | None:
 async def list_event_article_links(event_id: str) -> list[dict[str, Any]]:
     async with get_db_connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
-            await cur.execute(
-                """
-                SELECT article_id, relevance_score, is_primary
-                FROM market_event_articles
-                WHERE event_id = %s
-                ORDER BY is_primary DESC, relevance_score DESC NULLS LAST, created_at DESC
-                """,
-                (event_id,),
-            )
+            try:
+                await cur.execute(
+                    """
+                    SELECT
+                        article_id,
+                        relevance_score,
+                        is_primary,
+                        title,
+                        article_url,
+                        source_name,
+                        published_at
+                    FROM market_event_articles
+                    WHERE event_id = %s
+                    ORDER BY is_primary DESC, relevance_score DESC NULLS LAST, created_at DESC
+                    """,
+                    (event_id,),
+                )
+            except Exception as exc:
+                # Backward compatibility for DBs not yet migrated to revision 011.
+                if getattr(exc, "sqlstate", None) != "42703":
+                    raise
+                await cur.execute(
+                    """
+                    SELECT
+                        article_id,
+                        relevance_score,
+                        is_primary,
+                        NULL::TEXT AS title,
+                        NULL::TEXT AS article_url,
+                        NULL::VARCHAR(255) AS source_name,
+                        NULL::TIMESTAMPTZ AS published_at
+                    FROM market_event_articles
+                    WHERE event_id = %s
+                    ORDER BY is_primary DESC, relevance_score DESC NULLS LAST, created_at DESC
+                    """,
+                    (event_id,),
+                )
             return [dict(row) for row in await cur.fetchall()]
 
 

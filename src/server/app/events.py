@@ -62,24 +62,18 @@ async def get_event_detail(event_id: str, user_id: CurrentUserId) -> EventDetail
         raise HTTPException(status_code=404, detail="Event not found")
 
     links = await market_event_db.list_event_article_links(event_id)
-    related_articles: list[EventArticle] = []
-    if links:
-        from src.data_client import get_news_data_provider
-
-        provider = await get_news_data_provider()
-        for link in links[:20]:
-            article = await provider.get_news_article(link["article_id"], user_id=user_id)
-            related_articles.append(
-                EventArticle(
-                    article_id=link["article_id"],
-                    relevance_score=link.get("relevance_score"),
-                    is_primary=bool(link.get("is_primary", False)),
-                    title=(article or {}).get("title"),
-                    article_url=(article or {}).get("article_url"),
-                    source_name=((article or {}).get("source") or {}).get("name"),
-                    published_at=(article or {}).get("published_at"),
-                )
-            )
+    related_articles = [
+        EventArticle(
+            article_id=str(link.get("article_id") or ""),
+            relevance_score=link.get("relevance_score"),
+            is_primary=bool(link.get("is_primary", False)),
+            title=link.get("title"),
+            article_url=link.get("article_url"),
+            source_name=link.get("source_name"),
+            published_at=link.get("published_at"),
+        )
+        for link in links[:20]
+    ]
     return EventDetail(**row, related_articles=related_articles)
 
 

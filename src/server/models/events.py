@@ -35,7 +35,7 @@ class EventArticle(BaseModel):
     title: str | None = None
     article_url: str | None = None
     source_name: str | None = None
-    published_at: str | None = None
+    published_at: datetime | None = None
 
 
 class EventDetail(EventListItem):
