@@ -37,6 +37,37 @@ def _build_tag_map(tagged_articles: list[Any]) -> dict[str, dict[str, Any]]:
     return {a.article_id: a.as_dict() for a in tagged_articles}
 
 
+def _article_from_snapshot(article_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+    published_at = snapshot.get("published_at")
+    if isinstance(published_at, datetime):
+        published_at_str = published_at.astimezone(timezone.utc).isoformat()
+    else:
+        published_at_str = datetime.now(timezone.utc).isoformat()
+    return {
+        "id": article_id,
+        "title": snapshot.get("title") or "Untitled",
+        "author": None,
+        "description": "",
+        "published_at": published_at_str,
+        "article_url": snapshot.get("article_url") or "",
+        "image_url": None,
+        "source": {
+            "name": snapshot.get("source_name") or "Unknown",
+            "logo_url": None,
+            "homepage_url": None,
+            "favicon_url": None,
+        },
+        "tickers": snapshot.get("tickers") or [],
+        "keywords": snapshot.get("tags") or [],
+        "sentiments": [],
+    }
+
+
+async def _persisted_tag_map_from_raw(raw_articles: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    ids = [str(a.get("id") or "").strip() for a in raw_articles if str(a.get("id") or "").strip()]
+    return await tags_db.list_article_tags_by_ids(ids)
+
+
 def _compact(article: dict, tag_map: dict[str, dict[str, Any]] | None = None) -> NewsArticleCompact | None:
     title = article.get("title")
     if not title:
@@ -87,7 +118,14 @@ async def get_news(
         if cached:
             raw_results = cached.get("results") or []
             tag_map = await _ensure_tags(raw_results)
-            results = [c for a in raw_results if (c := _compact(a, tag_map=tag_map)) is not None]
+            persisted_tag_map = await _persisted_tag_map_from_raw(raw_results)
+            merged_tag_map = {**tag_map, **persisted_tag_map}
+            results = [
+                c
+                for a in raw_results
+                if str(a.get("id") or "").strip() in persisted_tag_map
+                and (c := _compact(a, tag_map=merged_tag_map)) is not None
+            ]
             if feed_mode == "quick":
                 results = sorted(results, key=lambda x: x.published_at, reverse=True)
             return NewsCompactResponse(results=results, count=len(results), next_cursor=cached.get("next_cursor"))
@@ -109,7 +147,14 @@ async def get_news(
 
     raw_results = data.get("results", []) if isinstance(data, dict) else []
     tag_map = await _ensure_tags(raw_results)
-    results = [c for a in raw_results if (c := _compact(a, tag_map=tag_map)) is not None]
+    persisted_tag_map = await _persisted_tag_map_from_raw(raw_results)
+    merged_tag_map = {**tag_map, **persisted_tag_map}
+    results = [
+        c
+        for a in raw_results
+        if str(a.get("id") or "").strip() in persisted_tag_map
+        and (c := _compact(a, tag_map=merged_tag_map)) is not None
+    ]
     if feed_mode == "quick":
         results = sorted(results, key=lambda x: x.published_at, reverse=True)
     return NewsCompactResponse(results=results, count=len(results), next_cursor=data.get("next_cursor"))
@@ -126,6 +171,8 @@ async def get_news_hot_rank(
     data = await provider.get_news(limit=max(50, limit * 2), published_after=after_dt.isoformat(), user_id=user_id)
     raw = data.get("results", []) if isinstance(data, dict) else []
     tagged = await _enrichment.build_and_store_tags(raw)
+    persisted_tag_map = await _persisted_tag_map_from_raw(raw)
+    tagged = [t for t in tagged if t.article_id in persisted_tag_map]
     ranked = _enrichment.build_hot_rank(tagged_articles=tagged, window_hours=window_hours, limit=limit)
     items = [
         NewsHotRankItem(
@@ -223,7 +270,10 @@ async def ask_about_news_article(
     provider = await get_news_data_provider()
     article = await provider.get_news_article(article_id, user_id=user_id)
     if article is None:
-        raise HTTPException(status_code=404, detail="Article not found")
+        snapshot = await tags_db.get_article_tag(article_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="Article not found")
+        article = _article_from_snapshot(article_id, snapshot)
     ask = _enrichment.build_ask_payload(article, question=payload.question)
     return NewsAskResponse(article_id=article_id, **ask)
 
@@ -257,6 +307,10 @@ async def get_news_article(article_id: str, user_id: CurrentUserId):
             )
         return NewsArticle(**article)
 
+    snapshot = await tags_db.get_article_tag(article_id)
+    if snapshot:
+        return NewsArticle(**_article_from_snapshot(article_id, snapshot))
+
     raise HTTPException(status_code=404, detail="Article not found")
 
 
@@ -269,7 +323,10 @@ async def interpret_news_article(
     provider = await get_news_data_provider()
     article = await provider.get_news_article(article_id, user_id=user_id)
     if article is None:
-        raise HTTPException(status_code=404, detail="Article not found")
+        snapshot = await tags_db.get_article_tag(article_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="Article not found")
+        article = _article_from_snapshot(article_id, snapshot)
 
     service = EventService.get_instance()
     interpretation, model_name = await service.interpret_article(

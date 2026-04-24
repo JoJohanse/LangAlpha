@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from urllib import request
 from typing import Any
 
 from .base import (
@@ -43,6 +44,15 @@ def _yfinance_available() -> bool:
 
         return True
     except ImportError:
+        return False
+
+
+def _pobo_proxy_available() -> bool:
+    url = "http://host.docker.internal:5000/health"
+    try:
+        with request.urlopen(url, timeout=1.5) as resp:  # noqa: S310
+            return 200 <= resp.status < 300
+    except Exception:
         return False
 
 
@@ -91,6 +101,12 @@ async def _build_yfinance_news_source() -> NewsDataSource:
     return YFinanceNewsSource()
 
 
+async def _build_pobo_proxy_news_source() -> NewsDataSource:
+    from .pobo_proxy.news_source import PoboProxyNewsSource
+
+    return PoboProxyNewsSource()
+
+
 # ---------------------------------------------------------------------------
 # Source registries — map config name → (availability_check, async_constructor)
 # ---------------------------------------------------------------------------
@@ -102,6 +118,7 @@ _SOURCE_REGISTRY: dict[str, tuple[Any, Any]] = {
 }
 
 _NEWS_SOURCE_REGISTRY: dict[str, tuple[Any, Any]] = {
+    "pobo-proxy": (_pobo_proxy_available, _build_pobo_proxy_news_source),
     "ginlix-data": (_ginlix_data_available, _build_ginlix_data_news_source),
     "fmp": (_fmp_available, _build_fmp_news_source),
     "yfinance": (_yfinance_available, _build_yfinance_news_source),

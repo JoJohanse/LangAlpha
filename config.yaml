@@ -151,6 +151,7 @@ market_data:
 # Ordered news provider chain — sequential fallback (no market routing).
 news_data:
   providers:
+    - name: pobo-proxy
     - name: ginlix-data
     - name: fmp
     - name: yfinance

@@ -74,6 +74,36 @@ async def get_article_tag(article_id: str) -> dict[str, Any] | None:
             return dict(row) if row else None
 
 
+async def list_article_tags_by_ids(article_ids: list[str]) -> dict[str, dict[str, Any]]:
+    ids = [str(i).strip() for i in article_ids if str(i).strip()]
+    if not ids:
+        return {}
+    async with get_db_connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT
+                    article_id,
+                    title,
+                    article_url,
+                    source_name,
+                    published_at,
+                    tickers,
+                    sector,
+                    topic,
+                    region,
+                    tags,
+                    created_at,
+                    updated_at
+                FROM news_article_tags
+                WHERE article_id = ANY(%s)
+                """,
+                (ids,),
+            )
+            rows = await cur.fetchall()
+            return {str(row["article_id"]): dict(row) for row in rows}
+
+
 async def list_articles_by_sector(
     sector: str, limit: int = 20, offset: int = 0
 ) -> list[dict[str, Any]]:

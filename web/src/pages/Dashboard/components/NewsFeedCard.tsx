@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { TrendingUp, Clock, Briefcase, Eye, Search, X, Zap } from 'lucide-react';
+import { Clock, Search, X, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import type { MarketEvent } from '../utils/eventsApi';
@@ -22,28 +22,14 @@ interface NewsItem {
   importanceScore?: number;
 }
 
-type TabKey = 'market' | 'portfolio' | 'watchlist';
 type DateRangeKey = 'all' | '1h' | '6h' | '24h' | '7d';
-type FeedMode = 'events' | 'raw' | 'quick';
+type FeedMode = 'events' | 'quick';
 type EventViewKey = 'all' | 'hot';
-type HotSourceKey = 'events' | 'news';
-
-interface TabDef {
-  key: TabKey;
-  label: string;
-  icon: React.ComponentType<{ size?: number }>;
-}
 
 interface DateRangeDef {
   key: DateRangeKey;
   label: string;
 }
-
-const TABS: TabDef[] = [
-  { key: 'market', label: 'Market Pulse', icon: TrendingUp },
-  { key: 'portfolio', label: 'Your Portfolio', icon: Briefcase },
-  { key: 'watchlist', label: 'Your Watchlist', icon: Eye },
-];
 
 const DATE_RANGES: DateRangeDef[] = [
   { key: 'all', label: 'All' },
@@ -76,6 +62,12 @@ function getDateRangeCutoff(key: DateRangeKey): number {
     case '7d': return now - 7 * 86400 * 1000;
     default: return 0;
   }
+}
+
+function parseDateTimeLocal(value: string): number | null {
+  if (!value) return null;
+  const ts = new Date(value).getTime();
+  return Number.isNaN(ts) ? null : ts;
 }
 
 interface NewsRowProps {
@@ -221,12 +213,7 @@ function SkeletonRows({ count = 6 }: { count?: number }) {
   ));
 }
 
-interface EmptyStateProps {
-  tab: TabKey;
-  hasFilters: boolean;
-}
-
-function EmptyState({ tab, hasFilters }: EmptyStateProps) {
+function EmptyState({ hasFilters }: { hasFilters: boolean }) {
   if (hasFilters) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -237,16 +224,10 @@ function EmptyState({ tab, hasFilters }: EmptyStateProps) {
     );
   }
 
-  const messages: Record<TabKey, string> = {
-    market: 'No market news available',
-    portfolio: 'Add stocks to your portfolio to see relevant news here',
-    watchlist: 'Add stocks to your watchlist to see relevant news here',
-  };
-
   return (
     <div className="flex items-center justify-center py-16">
       <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-        {messages[tab] || 'No news available'}
+        No news available
       </p>
     </div>
   );
@@ -257,16 +238,8 @@ interface NewsFeedCardProps {
   eventLoading?: boolean;
   hotEvents?: MarketEvent[];
   hotEventsLoading?: boolean;
-  hotNewsItems?: NewsItem[];
-  hotNewsLoading?: boolean;
   quickItems?: NewsItem[];
   quickLoading?: boolean;
-  marketItems?: NewsItem[];
-  marketLoading?: boolean;
-  portfolioItems?: NewsItem[];
-  portfolioLoading?: boolean;
-  watchlistItems?: NewsItem[];
-  watchlistLoading?: boolean;
   onNewsClick?: (id: string | number, articleUrl?: string | null) => void;
   onAskNews?: (id: string | number) => void;
   onEventClick?: (eventId: string) => void;
@@ -277,40 +250,30 @@ function NewsFeedCard({
   eventLoading = false,
   hotEvents = [],
   hotEventsLoading = false,
-  hotNewsItems = [],
-  hotNewsLoading = false,
   quickItems = [],
   quickLoading = false,
-  marketItems = [],
-  marketLoading = false,
-  portfolioItems = [],
-  portfolioLoading = false,
-  watchlistItems = [],
-  watchlistLoading = false,
   onNewsClick,
   onAskNews,
   onEventClick,
 }: NewsFeedCardProps) {
   const [mode, setMode] = useState<FeedMode>('events');
-  const [activeTab, setActiveTab] = useState<TabKey>('market');
   const [eventView, setEventView] = useState<EventViewKey>('hot');
-  const [hotSource, setHotSource] = useState<HotSourceKey>('events');
   const [tickerFilter, setTickerFilter] = useState('');
   const [sectorFilter, setSectorFilter] = useState('');
   const [topicFilter, setTopicFilter] = useState('');
   const [dateRange, setDateRange] = useState<DateRangeKey>('all');
+  const [startDateTime, setStartDateTime] = useState('');
+  const [endDateTime, setEndDateTime] = useState('');
+  const items = quickItems;
+  const currentLoading = quickLoading;
 
-  const dataMap: Record<TabKey, { items: NewsItem[]; loading: boolean }> = {
-    market: { items: marketItems, loading: marketLoading },
-    portfolio: { items: portfolioItems, loading: portfolioLoading },
-    watchlist: { items: watchlistItems, loading: watchlistLoading },
-  };
-
-  const { items: rawItems, loading } = dataMap[activeTab];
-  const items = mode === 'quick' ? quickItems : rawItems;
-  const currentLoading = mode === 'quick' ? quickLoading : loading;
-
-  const hasFilters = tickerFilter.trim() !== '' || sectorFilter.trim() !== '' || topicFilter.trim() !== '' || dateRange !== 'all';
+  const hasFilters =
+    tickerFilter.trim() !== '' ||
+    sectorFilter.trim() !== '' ||
+    topicFilter.trim() !== '' ||
+    dateRange !== 'all' ||
+    startDateTime !== '' ||
+    endDateTime !== '';
 
   const filteredItems = useMemo(() => {
     let result = items;
@@ -335,22 +298,28 @@ function NewsFeedCard({
     if (dateRange !== 'all') {
       const cutoff = getDateRangeCutoff(dateRange);
       result = result.filter((item) => {
-        const ts = parseRelativeTime(item.time);
+        const ts = item.publishedAt ? new Date(item.publishedAt).getTime() : parseRelativeTime(item.time);
         return ts !== null && ts >= cutoff;
       });
     }
 
-    return result;
-  }, [items, tickerFilter, sectorFilter, topicFilter, dateRange]);
-
-  // Collect unique tickers across current items for quick-pick
-  const _availableTickers = useMemo(() => {
-    const set = new Set<string>();
-    for (const item of items) {
-      if (item.tickers) item.tickers.forEach((t) => set.add(t));
+    const startTs = parseDateTimeLocal(startDateTime);
+    if (startTs !== null) {
+      result = result.filter((item) => {
+        const ts = item.publishedAt ? new Date(item.publishedAt).getTime() : parseRelativeTime(item.time);
+        return ts !== null && ts >= startTs;
+      });
     }
-    return [...set].sort();
-  }, [items]);
+    const endTs = parseDateTimeLocal(endDateTime);
+    if (endTs !== null) {
+      result = result.filter((item) => {
+        const ts = item.publishedAt ? new Date(item.publishedAt).getTime() : parseRelativeTime(item.time);
+        return ts !== null && ts <= endTs;
+      });
+    }
+
+    return result;
+  }, [items, tickerFilter, sectorFilter, topicFilter, dateRange, startDateTime, endDateTime]);
 
   const isMobile = useIsMobile();
 
@@ -369,37 +338,29 @@ function NewsFeedCard({
         return ts !== null && ts >= cutoff;
       });
     }
+    const startTs = parseDateTimeLocal(startDateTime);
+    if (startTs !== null) {
+      result = result.filter((item) => {
+        const ts = item.start_time ? new Date(item.start_time).getTime() : null;
+        return ts !== null && ts >= startTs;
+      });
+    }
+    const endTs = parseDateTimeLocal(endDateTime);
+    if (endTs !== null) {
+      result = result.filter((item) => {
+        const ts = item.start_time ? new Date(item.start_time).getTime() : null;
+        return ts !== null && ts <= endTs;
+      });
+    }
     return result;
-  }, [eventItems, tickerFilter, dateRange]);
+  }, [eventItems, tickerFilter, dateRange, startDateTime, endDateTime]);
 
   const filteredHotEvents = useMemo(() => {
-    let result = hotSource === 'events'
-      ? hotEvents
-      : hotNewsItems.map((n) => ({
-        event_id: String(n.id || ''),
-        title: n.title,
-        short_summary: n.topic ? `Topic: ${n.topic}` : null,
-        importance_score: n.importanceScore || 0,
-        sentiment: n.isHot ? 'positive' : 'neutral',
-        start_time: n.publishedAt || null,
-        symbols: n.tickers || [],
-      } as MarketEvent));
+    let result = hotEvents;
     const query = tickerFilter.trim().toUpperCase();
     if (query) {
       result = result.filter((item) =>
         (item.symbols || []).some((s) => s.toUpperCase().includes(query))
-      );
-    }
-    const sector = sectorFilter.trim().toLowerCase();
-    if (sector && hotSource === 'news') {
-      result = result.filter((item) =>
-        String((hotNewsItems.find((x) => String(x.id) === item.event_id)?.sector) || '').toLowerCase().includes(sector)
-      );
-    }
-    const topic = topicFilter.trim().toLowerCase();
-    if (topic && hotSource === 'news') {
-      result = result.filter((item) =>
-        String((hotNewsItems.find((x) => String(x.id) === item.event_id)?.topic) || '').toLowerCase().includes(topic)
       );
     }
     if (dateRange !== 'all') {
@@ -409,8 +370,22 @@ function NewsFeedCard({
         return ts !== null && ts >= cutoff;
       });
     }
+    const startTs = parseDateTimeLocal(startDateTime);
+    if (startTs !== null) {
+      result = result.filter((item) => {
+        const ts = item.start_time ? new Date(item.start_time).getTime() : null;
+        return ts !== null && ts >= startTs;
+      });
+    }
+    const endTs = parseDateTimeLocal(endDateTime);
+    if (endTs !== null) {
+      result = result.filter((item) => {
+        const ts = item.start_time ? new Date(item.start_time).getTime() : null;
+        return ts !== null && ts <= endTs;
+      });
+    }
     return result;
-  }, [hotEvents, hotNewsItems, hotSource, tickerFilter, sectorFilter, topicFilter, dateRange]);
+  }, [hotEvents, tickerFilter, dateRange, startDateTime, endDateTime]);
 
   const renderEventRow = (item: MarketEvent, idx: number) => {
     const score = Number(item.importance_score ?? 0);
@@ -500,7 +475,7 @@ function NewsFeedCard({
         <div className="flex items-center gap-2 min-w-0 overflow-x-auto">
           <div className="flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
             <button
-              onClick={() => { setMode('events'); setTickerFilter(''); setSectorFilter(''); setTopicFilter(''); setDateRange('all'); setEventView('hot'); setHotSource('events'); }}
+              onClick={() => { setMode('events'); setTickerFilter(''); setSectorFilter(''); setTopicFilter(''); setDateRange('all'); setStartDateTime(''); setEndDateTime(''); setEventView('hot'); }}
               className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
               style={{
                 backgroundColor: mode === 'events' ? 'var(--color-bg-elevated)' : 'transparent',
@@ -510,17 +485,7 @@ function NewsFeedCard({
               Events
             </button>
             <button
-              onClick={() => { setMode('raw'); setTickerFilter(''); setSectorFilter(''); setTopicFilter(''); setDateRange('all'); }}
-              className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
-              style={{
-                backgroundColor: mode === 'raw' ? 'var(--color-bg-elevated)' : 'transparent',
-                color: mode === 'raw' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-              }}
-            >
-              Raw News
-            </button>
-            <button
-              onClick={() => { setMode('quick'); setTickerFilter(''); setSectorFilter(''); setTopicFilter(''); setDateRange('all'); }}
+              onClick={() => { setMode('quick'); setTickerFilter(''); setSectorFilter(''); setTopicFilter(''); setDateRange('all'); setStartDateTime(''); setEndDateTime(''); }}
               className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
               style={{
                 backgroundColor: mode === 'quick' ? 'var(--color-bg-elevated)' : 'transparent',
@@ -554,59 +519,7 @@ function NewsFeedCard({
                   All Events
                 </button>
               </div>
-              {eventView === 'hot' && (
-                <div className="flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
-                  <button
-                    onClick={() => setHotSource('events')}
-                    className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
-                    style={{
-                      backgroundColor: hotSource === 'events' ? 'var(--color-bg-elevated)' : 'transparent',
-                      color: hotSource === 'events' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-                    }}
-                  >
-                    Event Hot
-                  </button>
-                  <button
-                    onClick={() => setHotSource('news')}
-                    className="px-3 py-1.5 rounded-md text-xs font-medium transition-all"
-                    style={{
-                      backgroundColor: hotSource === 'news' ? 'var(--color-bg-elevated)' : 'transparent',
-                      color: hotSource === 'news' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-                    }}
-                  >
-                    News Hot
-                  </button>
-                </div>
-              )}
             </>
-          )}
-          {mode === 'raw' && (
-            <div className="flex items-center gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
-              {TABS.map((tab) => {
-                const Icon = tab.icon;
-                const isActive = activeTab === tab.key;
-                return (
-                  <button
-                    key={tab.key}
-                    onClick={() => {
-                      setActiveTab(tab.key);
-                      setTickerFilter('');
-                      setSectorFilter('');
-                      setTopicFilter('');
-                      setDateRange('all');
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
-                    style={{
-                      backgroundColor: isActive ? 'var(--color-bg-elevated)' : 'transparent',
-                      color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-                    }}
-                  >
-                    <Icon size={13} />
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
           )}
         </div>
 
@@ -677,6 +590,48 @@ function NewsFeedCard({
               style={{ color: 'var(--color-text-primary)' }}
             />
           </div>
+          <div
+            className="flex items-center gap-1.5 h-7 px-2 rounded-lg border"
+            style={{
+              backgroundColor: 'var(--color-bg-input, var(--color-bg-tag))',
+              borderColor: 'var(--color-border-muted)',
+              width: 170,
+            }}
+            title="Start time (YYYY-MM-DD HH)"
+          >
+            <input
+              type="datetime-local"
+              step={3600}
+              value={startDateTime}
+              onChange={(e) => {
+                setStartDateTime(e.target.value);
+                setDateRange('all');
+              }}
+              className="flex-1 text-[11px] bg-transparent border-none outline-none min-w-0"
+              style={{ color: 'var(--color-text-primary)' }}
+            />
+          </div>
+          <div
+            className="flex items-center gap-1.5 h-7 px-2 rounded-lg border"
+            style={{
+              backgroundColor: 'var(--color-bg-input, var(--color-bg-tag))',
+              borderColor: 'var(--color-border-muted)',
+              width: 170,
+            }}
+            title="End time (YYYY-MM-DD HH)"
+          >
+            <input
+              type="datetime-local"
+              step={3600}
+              value={endDateTime}
+              onChange={(e) => {
+                setEndDateTime(e.target.value);
+                setDateRange('all');
+              }}
+              className="flex-1 text-[11px] bg-transparent border-none outline-none min-w-0"
+              style={{ color: 'var(--color-text-primary)' }}
+            />
+          </div>
 
           {/* Date range pills */}
           <div className="flex items-center gap-0.5 p-0.5 rounded-lg" style={{ backgroundColor: 'var(--color-bg-tag)' }}>
@@ -701,7 +656,7 @@ function NewsFeedCard({
           {/* Clear */}
           {hasFilters && (
             <button
-              onClick={() => { setTickerFilter(''); setSectorFilter(''); setTopicFilter(''); setDateRange('all'); }}
+              onClick={() => { setTickerFilter(''); setSectorFilter(''); setTopicFilter(''); setDateRange('all'); setStartDateTime(''); setEndDateTime(''); }}
               style={{ color: 'var(--color-text-secondary)' }}
             >
               <X size={14} />
@@ -713,7 +668,7 @@ function NewsFeedCard({
       {/* Tab content */}
       <AnimatePresence mode="wait">
         <motion.div
-          key={`${mode}-${activeTab}`}
+          key={mode}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}
@@ -721,7 +676,7 @@ function NewsFeedCard({
           className="flex flex-col gap-1"
         >
           {mode === 'events' ? (
-            (eventView === 'all' ? eventLoading : (hotSource === 'events' ? hotEventsLoading : hotNewsLoading)) ? (
+            (eventView === 'all' ? eventLoading : hotEventsLoading) ? (
               <SkeletonRows />
             ) : (eventView === 'all' ? filteredEvents : filteredHotEvents).length === 0 ? (
               <div className="flex items-center justify-center py-16">
@@ -735,7 +690,7 @@ function NewsFeedCard({
           ) : currentLoading ? (
             <SkeletonRows />
           ) : filteredItems.length === 0 ? (
-            <EmptyState tab={activeTab} hasFilters={hasFilters} />
+            <EmptyState hasFilters={hasFilters} />
           ) : (
             filteredItems.map((item, idx) => (
               <NewsRow key={item.id || idx} item={item} idx={idx} onNewsClick={onNewsClick} onAskNews={onAskNews} skipAnimation={isMobile} />

@@ -63,6 +63,7 @@ async def test_get_news_hot_rank(client):
         patch("src.server.app.news.get_news_data_provider", AsyncMock(return_value=provider)),
         patch("src.server.app.news._enrichment.build_and_store_tags", AsyncMock(return_value=tagged)),
         patch("src.server.app.news._enrichment.build_hot_rank", return_value=ranked),
+        patch("src.server.app.news.tags_db.list_article_tags_by_ids", AsyncMock(return_value={"n1": {"article_id": "n1"}})),
     ):
         resp = await client.get("/api/v1/news/hot-rank?limit=5")
     assert resp.status_code == 200
@@ -139,4 +140,27 @@ async def test_news_ask_returns_chat_payload(client):
     body = resp.json()
     assert body["article_id"] == "n5"
     assert "thread_initial_message" in body
+    assert len(body["additional_context"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_news_ask_fallback_to_snapshot_when_provider_misses(client):
+    provider = SimpleNamespace(get_news_article=AsyncMock(return_value=None))
+    snapshot = {
+        "article_id": "n9",
+        "title": "Fallback title",
+        "article_url": "https://example.com/n9",
+        "source_name": "SnapshotSource",
+        "published_at": datetime.now(timezone.utc),
+        "tickers": ["NVDA"],
+        "tags": ["ai"],
+    }
+    with (
+        patch("src.server.app.news.get_news_data_provider", AsyncMock(return_value=provider)),
+        patch("src.server.app.news.tags_db.get_article_tag", AsyncMock(return_value=snapshot)),
+    ):
+        resp = await client.post("/api/v1/news/n9/ask", json={})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["article_id"] == "n9"
     assert len(body["additional_context"]) == 1

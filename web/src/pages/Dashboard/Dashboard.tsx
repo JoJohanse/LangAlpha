@@ -21,7 +21,6 @@ import AddWatchlistItemDialog from './components/AddWatchlistItemDialog';
 import AddPortfolioHoldingDialog from './components/AddPortfolioHoldingDialog';
 import { useWatchlistData } from './hooks/useWatchlistData';
 import { usePortfolioData, type PortfolioRow } from './hooks/usePortfolioData';
-import { useTickerNews } from './hooks/useTickerNews';
 import { useDashboardData } from './hooks/useDashboardData';
 import { useOnboarding, snoozePersonalization } from './hooks/useOnboarding';
 import './Dashboard.css';
@@ -57,13 +56,11 @@ function Dashboard() {
     indices,
     indicesLoading,
     newsItems,
-    newsLoading,
     eventItems,
     eventLoading,
     hotEvents,
     hotEventsLoading,
     hotNewsItems,
-    hotNewsLoading,
     quickNewsItems,
     quickNewsLoading,
     marketStatus,
@@ -89,9 +86,6 @@ function Dashboard() {
 
   const watchlist = useWatchlistData();
   const portfolio = usePortfolioData();
-
-  const portfolioNews = useTickerNews(portfolio.rows, 'portfolio');
-  const watchlistNews = useTickerNews(watchlist.rows, 'watchlist');
 
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState>({
     open: false,
@@ -217,16 +211,8 @@ function Dashboard() {
                 eventLoading={eventLoading}
                 hotEvents={hotEvents}
                 hotEventsLoading={hotEventsLoading}
-                hotNewsItems={hotNewsItems}
-                hotNewsLoading={hotNewsLoading}
                 quickItems={quickNewsItems}
                 quickLoading={quickNewsLoading}
-                marketItems={newsItems}
-                marketLoading={newsLoading}
-                portfolioItems={portfolioNews.items}
-                portfolioLoading={portfolioNews.loading}
-                watchlistItems={watchlistNews.items}
-                watchlistLoading={watchlistNews.loading}
                 onNewsClick={(id, articleUrl) => {
                   setSelectedNewsId(String(id));
                   setSelectedNewsFallbackUrl(articleUrl ?? null);
