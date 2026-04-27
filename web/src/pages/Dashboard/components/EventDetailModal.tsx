@@ -4,6 +4,7 @@ import { X, Sparkles, ExternalLink, BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MobileBottomSheet } from '@/components/ui/mobile-bottom-sheet';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useFormatTime } from '@/hooks/useFormatTime';
 import {
   getEventDetail,
   interpretEvent,
@@ -23,6 +24,7 @@ function EventDetailModal({ eventId, onClose }: EventDetailModalProps) {
   const [interpretResult, setInterpretResult] = useState<InterpretResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const isMobile = useIsMobile();
+  const formatTime = useFormatTime();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -97,7 +99,7 @@ function EventDetailModal({ eventId, onClose }: EventDetailModalProps) {
         <div className="space-y-5">
           <div>
             <div className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-              {eventData.start_time ? new Date(eventData.start_time).toLocaleString() : ''}
+              {eventData.start_time ? formatTime(eventData.start_time) : ''}
             </div>
             <h2 className="text-xl font-bold" style={{ color: 'var(--color-text-primary)' }}>
               {eventData.title}

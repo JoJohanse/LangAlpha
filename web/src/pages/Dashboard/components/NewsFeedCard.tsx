@@ -2,6 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { Clock, Search, X, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useFormatTime } from '@/hooks/useFormatTime';
+import { parseServerDate } from '@/lib/dateTime';
 import type { MarketEvent } from '../utils/eventsApi';
 
 interface NewsItem {
@@ -256,6 +258,7 @@ function NewsFeedCard({
   onAskNews,
   onEventClick,
 }: NewsFeedCardProps) {
+  const formatTime = useFormatTime();
   const [mode, setMode] = useState<FeedMode>('events');
   const [eventView, setEventView] = useState<EventViewKey>('hot');
   const [tickerFilter, setTickerFilter] = useState('');
@@ -298,7 +301,7 @@ function NewsFeedCard({
     if (dateRange !== 'all') {
       const cutoff = getDateRangeCutoff(dateRange);
       result = result.filter((item) => {
-        const ts = item.publishedAt ? new Date(item.publishedAt).getTime() : parseRelativeTime(item.time);
+        const ts = item.publishedAt ? parseServerDate(item.publishedAt)?.getTime() ?? null : parseRelativeTime(item.time);
         return ts !== null && ts >= cutoff;
       });
     }
@@ -306,14 +309,14 @@ function NewsFeedCard({
     const startTs = parseDateTimeLocal(startDateTime);
     if (startTs !== null) {
       result = result.filter((item) => {
-        const ts = item.publishedAt ? new Date(item.publishedAt).getTime() : parseRelativeTime(item.time);
+        const ts = item.publishedAt ? parseServerDate(item.publishedAt)?.getTime() ?? null : parseRelativeTime(item.time);
         return ts !== null && ts >= startTs;
       });
     }
     const endTs = parseDateTimeLocal(endDateTime);
     if (endTs !== null) {
       result = result.filter((item) => {
-        const ts = item.publishedAt ? new Date(item.publishedAt).getTime() : parseRelativeTime(item.time);
+        const ts = item.publishedAt ? parseServerDate(item.publishedAt)?.getTime() ?? null : parseRelativeTime(item.time);
         return ts !== null && ts <= endTs;
       });
     }
@@ -334,21 +337,21 @@ function NewsFeedCard({
     if (dateRange !== 'all') {
       const cutoff = getDateRangeCutoff(dateRange);
       result = result.filter((item) => {
-        const ts = item.start_time ? new Date(item.start_time).getTime() : null;
+        const ts = item.start_time ? parseServerDate(item.start_time)?.getTime() ?? null : null;
         return ts !== null && ts >= cutoff;
       });
     }
     const startTs = parseDateTimeLocal(startDateTime);
     if (startTs !== null) {
       result = result.filter((item) => {
-        const ts = item.start_time ? new Date(item.start_time).getTime() : null;
+        const ts = item.start_time ? parseServerDate(item.start_time)?.getTime() ?? null : null;
         return ts !== null && ts >= startTs;
       });
     }
     const endTs = parseDateTimeLocal(endDateTime);
     if (endTs !== null) {
       result = result.filter((item) => {
-        const ts = item.start_time ? new Date(item.start_time).getTime() : null;
+        const ts = item.start_time ? parseServerDate(item.start_time)?.getTime() ?? null : null;
         return ts !== null && ts <= endTs;
       });
     }
@@ -366,21 +369,21 @@ function NewsFeedCard({
     if (dateRange !== 'all') {
       const cutoff = getDateRangeCutoff(dateRange);
       result = result.filter((item) => {
-        const ts = item.start_time ? new Date(item.start_time).getTime() : null;
+        const ts = item.start_time ? parseServerDate(item.start_time)?.getTime() ?? null : null;
         return ts !== null && ts >= cutoff;
       });
     }
     const startTs = parseDateTimeLocal(startDateTime);
     if (startTs !== null) {
       result = result.filter((item) => {
-        const ts = item.start_time ? new Date(item.start_time).getTime() : null;
+        const ts = item.start_time ? parseServerDate(item.start_time)?.getTime() ?? null : null;
         return ts !== null && ts >= startTs;
       });
     }
     const endTs = parseDateTimeLocal(endDateTime);
     if (endTs !== null) {
       result = result.filter((item) => {
-        const ts = item.start_time ? new Date(item.start_time).getTime() : null;
+        const ts = item.start_time ? parseServerDate(item.start_time)?.getTime() ?? null : null;
         return ts !== null && ts <= endTs;
       });
     }
@@ -424,7 +427,7 @@ function NewsFeedCard({
               Event
             </span>
             <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              {item.start_time ? new Date(item.start_time).toLocaleString() : ''}
+              {item.start_time ? formatTime(item.start_time) : ''}
             </span>
             <span
               className="text-[10px] font-semibold px-1.5 py-0.5 rounded border"

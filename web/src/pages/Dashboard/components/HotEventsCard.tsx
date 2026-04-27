@@ -1,4 +1,5 @@
 import type { MarketEvent } from '../utils/eventsApi';
+import { useFormatTime } from '@/hooks/useFormatTime';
 
 interface HotEventsCardProps {
   events: MarketEvent[];
@@ -7,6 +8,7 @@ interface HotEventsCardProps {
 }
 
 function HotEventsCard({ events, loading = false, onEventClick }: HotEventsCardProps) {
+  const formatTime = useFormatTime();
   return (
     <div className="dashboard-glass-card p-4">
       <div className="flex items-center justify-between mb-3">
@@ -40,7 +42,7 @@ function HotEventsCard({ events, loading = false, onEventClick }: HotEventsCardP
               onClick={() => onEventClick?.(event.event_id)}
             >
               <div className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {event.start_time ? new Date(event.start_time).toLocaleString() : ''}
+                {event.start_time ? formatTime(event.start_time) : ''}
               </div>
               <div className="text-sm font-medium line-clamp-2" style={{ color: 'var(--color-text-primary)' }}>
                 {event.title}

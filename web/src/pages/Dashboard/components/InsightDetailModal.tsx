@@ -5,6 +5,7 @@ import TopicBadge from './TopicBadge';
 import { getInsightDetail } from '../utils/api';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { MobileBottomSheet } from '@/components/ui/mobile-bottom-sheet';
+import { useFormatTime } from '@/hooks/useFormatTime';
 
 interface InsightTopic {
   text: string;
@@ -40,22 +41,6 @@ interface InsightDetailModalProps {
   onClose: () => void;
 }
 
-function formatDate(dateString: string | undefined): string {
-  if (!dateString) return '';
-  try {
-    const d = new Date(dateString);
-    return d.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  } catch {
-    return dateString;
-  }
-}
-
 /** Shared inner content for both mobile bottom sheet and desktop dialog */
 function InsightBody({
   detail,
@@ -70,6 +55,8 @@ function InsightBody({
   setSourcesOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isMobile: boolean;
 }) {
+  const formatTime = useFormatTime();
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -119,7 +106,14 @@ function InsightBody({
           )}
           {detail.completed_at && (
             <span className="text-[11px] sm:text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              {formatDate(detail.completed_at)}
+              {formatTime(detail.completed_at, {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+              })}
             </span>
           )}
         </div>

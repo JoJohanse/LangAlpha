@@ -7,6 +7,7 @@ from email.utils import parsedate_to_datetime
 import logging
 import re
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BASE_URL = "http://host.docker.internal:5000"
 _DETAIL_FETCH_LIMIT = 300
 _DESC_MAX_LEN = 240
+_POBO_SOURCE_TZ = ZoneInfo("Asia/Shanghai")
 
 _INFOTYPE_NAME_TO_TICKERS: dict[str, list[str]] = {
     "金融财经": ["PB_MACRO"],
@@ -58,7 +60,8 @@ def _parse_dt_to_iso(value: Any) -> str:
             return datetime.now(timezone.utc).isoformat()
 
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        # Pobo CreateTime is local China time when tz info is omitted.
+        dt = dt.replace(tzinfo=_POBO_SOURCE_TZ)
     return dt.astimezone(timezone.utc).isoformat()
 
 

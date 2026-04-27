@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ExternalLink, Loader2 } from 'lucide-react';
 import { getNewsArticle } from '../Dashboard/utils/api';
+import { useFormatTime } from '@/hooks/useFormatTime';
 
 interface ArticleSentiment {
   ticker: string;
@@ -28,6 +29,7 @@ interface NewsArticle {
 }
 
 function NewsDetailPage() {
+  const formatTime = useFormatTime();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [article, setArticle] = useState<NewsArticle | null>(null);
@@ -92,7 +94,7 @@ function NewsDetailPage() {
         <div className="flex items-center gap-3 flex-wrap">
           {article.published_at && (
             <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              {new Date(article.published_at).toLocaleString()}
+              {formatTime(article.published_at)}
             </span>
           )}
           {article.author && (

@@ -4,6 +4,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import TopicBadge from './TopicBadge';
 import { getTodayInsights, getInsightDetail, generatePersonalizedInsight } from '../utils/api';
 import { useIsMobile } from '@/hooks/useIsMobile';
+import { useFormatTime } from '@/hooks/useFormatTime';
+import { useUser } from '@/hooks/useUser';
+import { parseServerDate } from '@/lib/dateTime';
 
 interface InsightTopic {
   text: string;
@@ -44,8 +47,9 @@ const TYPE_CONFIG: Record<string, TypeConfigEntry> = {
 
 function formatRelativeTime(timestamp: string | undefined): string {
   if (!timestamp) return '';
+  const then = parseServerDate(timestamp);
+  if (!then) return '';
   const now = new Date();
-  const then = new Date(timestamp);
   const diffMs = now.getTime() - then.getTime();
   const diffMin = Math.floor(diffMs / 60000);
   if (diffMin < 1) return 'just now';
@@ -56,23 +60,21 @@ function formatRelativeTime(timestamp: string | undefined): string {
   return `${diffDay}d ago`;
 }
 
-function formatTime(timestamp: string | undefined): string {
-  if (!timestamp) return '';
-  try {
-    const d = new Date(timestamp);
-    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  } catch {
-    return '';
-  }
-}
-
-function inferBriefSession(insight: Insight): BriefSession {
+function inferBriefSession(insight: Insight, timezone: string): BriefSession {
   if (insight.brief_session === 'morning' || insight.brief_session === 'evening') {
     return insight.brief_session;
   }
   const ts = insight.completed_at;
   if (!ts) return 'morning';
-  const hour = new Date(ts).getHours();
+  const parsed = parseServerDate(ts);
+  if (!parsed) return 'morning';
+  const hour = Number(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: '2-digit',
+      hour12: false,
+    }).format(parsed),
+  );
   // 00:00-11:59 => morning, 12:00-23:59 => evening
   return hour < 12 ? 'morning' : 'evening';
 }
@@ -138,10 +140,20 @@ function MobileTopicRow({ topics }: { topics: InsightTopic[] }) {
 }
 
 function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
+  const { user } = useUser();
+  const formatTime = useFormatTime();
+  const userTimezone = user?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC';
+  const initialHour = Number(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: userTimezone,
+      hour: '2-digit',
+      hour12: false,
+    }).format(new Date()),
+  );
   const [insights, setInsights] = useState<Insight[]>(insightsCache || []);
   const [loading, setLoading] = useState(!insightsCache);
   const [expanded, setExpanded] = useState(false);
-  const [session, setSession] = useState<BriefSession>(() => (new Date().getHours() < 12 ? 'morning' : 'evening'));
+  const [session, setSession] = useState<BriefSession>(() => (initialHour < 12 ? 'morning' : 'evening'));
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const mountedRef = useRef(true);
@@ -165,7 +177,7 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
     return () => { cancelled = true; };
   }, []);
 
-  const displayInsights = insights.filter((item) => inferBriefSession(item) === session);
+  const displayInsights = insights.filter((item) => inferBriefSession(item, userTimezone) === session);
   const latest: Insight | null = displayInsights[0] || null;
   const older = displayInsights.slice(1);
 
@@ -605,7 +617,14 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
                           className="text-xs font-medium shrink-0 w-16 text-right tabular-nums"
                           style={{ color: 'var(--color-text-tertiary)' }}
                         >
-                          {formatTime(item.completed_at)}
+                          {formatTime(item.completed_at, {
+                            year: undefined,
+                            month: undefined,
+                            day: undefined,
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: false,
+                          })}
                         </span>
 
                         {/* Timeline dot */}

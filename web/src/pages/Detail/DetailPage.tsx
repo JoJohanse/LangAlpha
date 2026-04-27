@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { getInfoFlowDetail } from '../Dashboard/utils/api';
+import { useFormatTime } from '@/hooks/useFormatTime';
 import './DetailPage.css';
 
 interface DetailImage {
@@ -39,6 +40,7 @@ interface InfoFlowDetail {
 }
 
 function DetailPage() {
+  const formatTime = useFormatTime();
   const { indexNumber } = useParams<{ indexNumber: string }>();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<InfoFlowDetail | null>(null);
@@ -121,7 +123,7 @@ function DetailPage() {
         <div className="flex items-center gap-3 flex-wrap">
           {detail.event_timestamp && (
             <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              {new Date(detail.event_timestamp).toLocaleString()}
+              {formatTime(detail.event_timestamp)}
             </span>
           )}
           {detail.market_type && (

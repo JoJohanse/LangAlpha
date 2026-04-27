@@ -30,6 +30,8 @@ import { loadPref, savePref } from '../utils/prefs';
 import type { SnapshotData } from '@/types/market';
 import type { BarData } from '../hooks/useMarketDataWS';
 import { useOnClickOutside } from '@/hooks/useOnClickOutside';
+import { useFormatTime } from '@/hooks/useFormatTime';
+import { parseServerDate } from '@/lib/dateTime';
 
 interface ChartDataBar {
   time: number;
@@ -143,6 +145,7 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
   marketStatus,
   snapshot,
 }, ref) => {
+  const formatTime = useFormatTime();
   const { theme } = useTheme();
   const ct = getChartTheme(theme as 'dark' | 'light');
   const providers = Array.isArray(marketStatus?.providers) ? marketStatus.providers as string[] : [];
@@ -282,7 +285,8 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
     if (!eventMarkers?.length || !chartDataForHooks.length) return [];
     const result: EventPopupData[] = [];
     for (const ev of eventMarkers) {
-      const ts = Math.floor(new Date(ev.event_time).getTime() / 1000);
+      const parsed = parseServerDate(ev.event_time);
+      const ts = parsed ? Math.floor(parsed.getTime() / 1000) : Number.NaN;
       if (!Number.isFinite(ts)) continue;
       const snapped = snapToNearestTime(chartDataForHooks, ts);
       if (!snapped) continue;
@@ -1593,7 +1597,8 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
   // --- Effect: focus chart view near event time (when navigated from event links) ---
   useEffect(() => {
     if (!focusEventTime || !chartRef.current || !allDataRef.current.length) return;
-    const target = Math.floor(new Date(focusEventTime).getTime() / 1000);
+    const parsed = parseServerDate(focusEventTime);
+    const target = parsed ? Math.floor(parsed.getTime() / 1000) : Number.NaN;
     if (!Number.isFinite(target)) return;
     const snapped = snapToNearestTime(allDataRef.current, target);
     if (!snapped) return;
@@ -1999,7 +2004,7 @@ const MarketChart = React.memo(forwardRef<MarketChartHandle, MarketChartProps>((
                     {eventPopup.display_title || 'Market event'}
                   </div>
                   <div className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {new Date(eventPopup.event_time).toLocaleString()}
+                    {formatTime(eventPopup.event_time)}
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>

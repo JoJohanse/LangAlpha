@@ -121,3 +121,26 @@ def test_pobo_proxy_available_false_on_error():
     with patch("src.data_client.registry.request.urlopen", side_effect=OSError("no route")):
         assert _pobo_proxy_available() is False
 
+
+@pytest.mark.asyncio
+async def test_get_news_treats_naive_create_time_as_shanghai_time():
+    source = PoboProxyNewsSource(
+        base_url="http://test.local",
+        transport=_mock_transport(
+            {
+                "count": 1,
+                "items": [
+                    {
+                        "InfoID": 125,
+                        "InfoTitle": "naive-local-time",
+                        "CreateTime": "2026-04-27 13:31:00",
+                        "InfoType": "021",
+                    }
+                ],
+            }
+        ),
+    )
+    data = await source.get_news(limit=20)
+    await source.close()
+
+    assert data["results"][0]["published_at"] == "2026-04-27T05:31:00+00:00"

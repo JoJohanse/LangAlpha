@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { askNewsArticle, getNewsArticle } from '../utils/api';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { MobileBottomSheet } from '@/components/ui/mobile-bottom-sheet';
+import { useFormatTime } from '@/hooks/useFormatTime';
 
 interface ArticleSource {
   name: string;
@@ -71,22 +72,6 @@ function sentimentStyle(sentiment: string): React.CSSProperties {
   }
 }
 
-function formatDate(dateString: string | undefined): string {
-  if (!dateString) return '';
-  try {
-    const d = new Date(dateString);
-    return d.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  } catch {
-    return dateString;
-  }
-}
-
 /** Shared inner content for both mobile bottom sheet and desktop dialog */
 function NewsBody({
   article,
@@ -105,6 +90,8 @@ function NewsBody({
   setExpandedSentiment: React.Dispatch<React.SetStateAction<number | null>>;
   isMobile: boolean;
 }) {
+  const formatTime = useFormatTime();
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -206,7 +193,7 @@ function NewsBody({
           )}
           {article.published_at && (
             <span className="flex items-center gap-1.5 sm:gap-2">
-              <Calendar size={isMobile ? 12 : 14} /> {formatDate(article.published_at)}
+              <Calendar size={isMobile ? 12 : 14} /> {formatTime(article.published_at)}
             </span>
           )}
           {article.article_url && (

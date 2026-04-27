@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getNews, getHotNewsRank, getIndices, INDEX_SYMBOLS, fallbackIndex, normalizeIndexSymbol } from '../utils/api';
 import { getEvents, getHotEvents, type MarketEvent } from '../utils/eventsApi';
 import { fetchMarketStatus } from '@/lib/marketUtils';
+import { parseServerDate } from '@/lib/dateTime';
 import type { IndexData } from '@/types/market';
 
 interface MarketStatusData {
@@ -52,7 +53,8 @@ interface DashboardData {
 function formatRelativeTime(timestamp: string | number | null | undefined): string {
   if (!timestamp) return '';
   const now = new Date();
-  const then = new Date(timestamp);
+  const then = typeof timestamp === 'string' ? parseServerDate(timestamp) : new Date(timestamp);
+  if (!then) return '';
   const diffMs = now.getTime() - then.getTime();
   const diffMin = Math.floor(diffMs / 60000);
   if (diffMin < 1) return 'just now';

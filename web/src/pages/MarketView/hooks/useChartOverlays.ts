@@ -1,6 +1,7 @@
 import { useEffect, type RefObject } from 'react';
 import type { ISeriesApi, Time } from 'lightweight-charts';
 import type { ChartDataPoint } from '@/types/market';
+import { parseServerDate } from '@/lib/dateTime';
 
 interface EarningsEntry {
   date?: string;
@@ -43,7 +44,8 @@ function snapToNearestBar(chartData: ChartDataPoint[], dateStr: string): number 
   if (!chartData || chartData.length === 0) return null;
 
   // Convert date string to unix timestamp (seconds)
-  const target = Math.floor(new Date(dateStr).getTime() / 1000);
+  const parsed = parseServerDate(dateStr);
+  const target = parsed ? Math.floor(parsed.getTime() / 1000) : Number.NaN;
   if (isNaN(target)) return null;
 
   let lo = 0;
