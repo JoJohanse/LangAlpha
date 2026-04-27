@@ -204,7 +204,8 @@ class EventService:
             system_prompt = (
                 "You are a financial market analyst. "
                 "Provide concise factual interpretation and potential market impact in 3-5 sentences. "
-                "No investment advice. Use plain text only."
+                "No investment advice. Use plain text only. "
+                "Respond in Chinese (Simplified Chinese, 中文)."
             )
             user_prompt = f"Target type: {target_type}\nPayload: {payload}"
             text = await asyncio.wait_for(

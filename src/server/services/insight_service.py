@@ -47,16 +47,16 @@ _JSON_GUIDELINES = """
 You MUST respond with ONLY a valid JSON object (no markdown, no explanation, no preamble).
 The JSON must have exactly these fields:
 {
-  "headline": "Concise headline capturing the dominant market theme (max 120 chars)",
-  "summary": "2-3 sentence overview of the most important developments",
+  "headline": "简洁标题，概括主要市场主题（最多120个字符）",
+  "summary": "2-3句话概述最重要的进展",
   "news_items": [
-    {"title": "Short factual headline", "body": "2-4 sentence factual summary", "url": "source URL or null"}
+    {"title": "简短的事实性标题", "body": "2-4句话的事实性摘要", "url": "source URL or null"}
   ],
   "topics": [
-    {"text": "Topic name (1-2 words)", "trend": "up|down|neutral"}
+    {"text": "主题名称（1-2个词）", "trend": "up|down|neutral"}
   ]
 }
-Include 4-8 news_items and 3-5 topics. Respond with ONLY the JSON object.
+Include 4-8 news_items and 3-5 topics. All text values must be written in Chinese (Simplified Chinese, 中文). Respond with ONLY the JSON object.
 """
 
 
@@ -256,7 +256,8 @@ async def _llm_extract_fallback(raw_text: str) -> dict:
         system_prompt=(
             "You are a structured data extractor. Extract the market insight data "
             "from the provided text into the required JSON schema. "
-            "Include all news items and topics mentioned."
+            "Include all news items and topics mentioned. "
+            "All text values (headline, summary, title, body, topic text) must be written in Chinese (Simplified Chinese, 中文)."
         ),
         user_prompt=raw_text,
         response_schema=InsightOutputSchema,

@@ -141,8 +141,8 @@ redis:
 # "all" is a catch-all that matches any market.
 market_data:
   providers:
-    - name: ginlix-data
-      markets: [us]          # US equities only
+    # - name: ginlix-data
+    #   markets: [us]          # US equities only
     - name: fmp
       markets: [all]         # FMP — global coverage, catch-all fallback
     - name: yfinance
@@ -152,9 +152,9 @@ market_data:
 news_data:
   providers:
     - name: pobo-proxy
-    - name: ginlix-data
-    - name: fmp
-    - name: yfinance
+    # - name: ginlix-data
+    # - name: fmp
+    # - name: yfinance
 
 
 # =============================================================================
@@ -162,7 +162,7 @@ news_data:
 # =============================================================================
 market_insight:
   enabled: true
-  timezone: "America/New_York"
+  timezone: "China/Shanghai"  # Timezone for scheduling (e.g., market open/close times)
   generation_timeout: 600         # Seconds before background generation times out
   max_symbols_context: 20         # Max symbols in personalized prompt context
   dedup_window_minutes: 5         # Dedup window for per-user insights

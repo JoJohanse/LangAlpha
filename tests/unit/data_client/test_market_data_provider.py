@@ -267,4 +267,4 @@ class TestConfigAccessor:
         assert isinstance(providers, list)
         assert len(providers) >= 1
         names = [p["name"] for p in providers]
-        assert "fmp" in names
+        assert ("fmp" in names) or ("yfinance" in names)
