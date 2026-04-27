@@ -41,6 +41,7 @@ _INFOTYPE_CODE_TO_TICKERS: dict[str, list[str]] = {
 }
 
 _TAG_RE = re.compile(r"<[^>]+>")
+_INVALID_DESC_RE = re.compile(r"^\d+$")
 
 
 def _safe_text(value: Any) -> str:
@@ -71,11 +72,14 @@ def _strip_html(html: Any) -> str:
 
 
 def _description(row: dict[str, Any]) -> str:
+    title = _safe_text(row.get("InfoTitle"))
     summary = _safe_text(row.get("Summary"))
-    if summary:
+    if summary and not _INVALID_DESC_RE.fullmatch(summary):
         return summary[:_DESC_MAX_LEN]
     body = _strip_html(row.get("InfoBody"))
-    return body[:_DESC_MAX_LEN]
+    if body and not _INVALID_DESC_RE.fullmatch(body):
+        return body[:_DESC_MAX_LEN]
+    return title[:_DESC_MAX_LEN]
 
 
 def _extract_infotype_name(row: dict[str, Any]) -> str:

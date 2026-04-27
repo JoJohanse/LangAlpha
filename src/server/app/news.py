@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -31,10 +32,19 @@ router = APIRouter(prefix="/api/v1/news", tags=["News"])
 
 _cache = NewsCacheService()
 _enrichment = NewsEnrichmentService()
+_INVALID_DESC_RE = re.compile(r"^\d+$")
 
 
 def _build_tag_map(tagged_articles: list[Any]) -> dict[str, dict[str, Any]]:
     return {a.article_id: a.as_dict() for a in tagged_articles}
+
+
+def _effective_description(article: dict[str, Any]) -> str:
+    title = str(article.get("title") or "").strip()
+    description = str(article.get("description") or "").strip()
+    if not description or _INVALID_DESC_RE.fullmatch(description):
+        return title
+    return description
 
 
 def _article_from_snapshot(article_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -43,11 +53,12 @@ def _article_from_snapshot(article_id: str, snapshot: dict[str, Any]) -> dict[st
         published_at_str = published_at.astimezone(timezone.utc).isoformat()
     else:
         published_at_str = datetime.now(timezone.utc).isoformat()
+    title = snapshot.get("title") or "Untitled"
     return {
         "id": article_id,
-        "title": snapshot.get("title") or "Untitled",
+        "title": title,
         "author": None,
-        "description": "",
+        "description": title,
         "published_at": published_at_str,
         "article_url": snapshot.get("article_url") or "",
         "image_url": None,
@@ -282,6 +293,7 @@ async def ask_about_news_article(
 async def get_news_article(article_id: str, user_id: CurrentUserId):
     cached = await _cache.get_article_by_id(article_id)
     if cached:
+        cached["description"] = _effective_description(cached)
         return NewsArticle(**cached)
 
     from src.data_client import get_news_data_provider
@@ -289,6 +301,7 @@ async def get_news_article(article_id: str, user_id: CurrentUserId):
     provider = await get_news_data_provider()
     article = await provider.get_news_article(article_id, user_id=user_id)
     if article:
+        article["description"] = _effective_description(article)
         tagged = _enrichment._tag_article(article)  # noqa: SLF001
         if tagged:
             await tags_db.upsert_news_article_tag(
