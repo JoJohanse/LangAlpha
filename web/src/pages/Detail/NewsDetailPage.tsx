@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ExternalLink, Loader2 } from 'lucide-react';
-import { getNewsArticle } from '../Dashboard/utils/api';
+import { ArrowLeft, ExternalLink, Loader2, Sparkles } from 'lucide-react';
+import { getNewsArticle, askNewsArticle } from '../Dashboard/utils/api';
 import { useFormatTime } from '@/hooks/useFormatTime';
 
 interface ArticleSentiment {
@@ -26,6 +26,10 @@ interface NewsArticle {
   description?: string;
   sentiments?: ArticleSentiment[];
   article_url?: string;
+  sector?: string | null;
+  topic?: string | null;
+  region?: string | null;
+  tags?: string[];
 }
 
 function NewsDetailPage() {
@@ -35,6 +39,7 @@ function NewsDetailPage() {
   const [article, setArticle] = useState<NewsArticle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [askLoading, setAskLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,6 +53,30 @@ function NewsDetailPage() {
   }, [id]);
 
   const handleBack = () => navigate('/dashboard');
+
+  const handleAskAI = async () => {
+    if (!id || askLoading) return;
+    setAskLoading(true);
+    try {
+      const payload = await askNewsArticle(id) as { thread_initial_message?: string; additional_context?: Record<string, unknown>[] };
+      navigate('/chat', {
+        state: {
+          initialMessage: payload.thread_initial_message || (article?.title ? `Please analyze this market news and potential impact: ${article.title}` : ''),
+          additionalContext: payload.additional_context || null,
+        },
+      });
+    } catch {
+      if (article?.title) {
+        navigate('/chat', {
+          state: {
+            initialMessage: `Please analyze this market news and potential impact: ${article.title}`,
+          },
+        });
+      }
+    } finally {
+      setAskLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -76,15 +105,26 @@ function NewsDetailPage() {
 
   return (
     <div className="flex flex-col gap-6 p-6 max-w-4xl mx-auto" style={{ color: 'var(--color-text-primary)' }}>
-      {/* Back button */}
-      <button
-        onClick={handleBack}
-        className="flex items-center gap-2 self-start px-3 py-1.5 rounded-md cursor-pointer transition-colors"
-        style={{ backgroundColor: 'var(--color-bg-card)', border: '1px solid var(--color-border-default)', color: 'var(--color-text-primary)' }}
-      >
-        <ArrowLeft className="w-4 h-4" />
-        <span className="text-sm">Back</span>
-      </button>
+      {/* Nav row */}
+      <div className="flex items-center justify-between gap-2">
+        <button
+          onClick={handleBack}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-md cursor-pointer transition-colors"
+          style={{ backgroundColor: 'var(--color-bg-card)', border: '1px solid var(--color-border-default)', color: 'var(--color-text-primary)' }}
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span className="text-sm">Back</span>
+        </button>
+        <button
+          onClick={handleAskAI}
+          disabled={askLoading}
+          className="flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-colors disabled:opacity-50"
+          style={{ backgroundColor: 'var(--color-accent-primary)', color: '#fff' }}
+        >
+          <Sparkles className="w-4 h-4" />
+          {askLoading ? 'Loading...' : 'Ask AI'}
+        </button>
+      </div>
 
       {/* Title & metadata */}
       <div className="flex flex-col gap-3">
@@ -119,6 +159,32 @@ function NewsDetailPage() {
             </span>
           )}
         </div>
+
+        {/* Classification */}
+        {(article.sector || article.topic || article.region || (article.tags?.length ?? 0) > 0) && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {article.sector && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: 'var(--color-accent-soft)', color: 'var(--color-accent-light)' }}>
+                {article.sector}
+              </span>
+            )}
+            {article.topic && (
+              <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-bg-tag)', color: 'var(--color-text-secondary)' }}>
+                {article.topic}
+              </span>
+            )}
+            {article.region && (
+              <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-bg-tag)', color: 'var(--color-text-tertiary)' }}>
+                {article.region}
+              </span>
+            )}
+            {article.tags?.map((tag, i) => (
+              <span key={i} className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-bg-tag)', color: 'var(--color-text-secondary)' }}>
+                #{tag}
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Tickers */}
         {article.tickers && article.tickers.length > 0 && (

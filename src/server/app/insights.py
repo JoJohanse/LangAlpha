@@ -1,6 +1,8 @@
 """API routes for AI market insights."""
 
 import logging
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 
@@ -29,10 +31,32 @@ _BRIEF_SESSION_MAP = {
     "post_market": "evening",
 }
 
+_DISPLAY_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _infer_session_from_timestamp(ts_str: str | None) -> str | None:
+    if not ts_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local_hour = dt.astimezone(_DISPLAY_TZ).hour
+        return "morning" if local_hour < 12 else "evening"
+    except Exception:
+        return None
+
 
 def _attach_brief_session(row: dict) -> dict:
     mapped = dict(row)
-    mapped["brief_session"] = _BRIEF_SESSION_MAP.get(str(row.get("type") or ""))
+    insight_type = str(row.get("type") or "")
+    session = _BRIEF_SESSION_MAP.get(insight_type)
+    if session is None:
+        # For market_update, personalized, and other types: infer from completed_at time
+        session = _infer_session_from_timestamp(
+            str(row.get("completed_at") or "") or None
+        )
+    mapped["brief_session"] = session
     return mapped
 
 

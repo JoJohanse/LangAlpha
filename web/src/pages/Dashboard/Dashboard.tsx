@@ -55,7 +55,6 @@ function Dashboard() {
   const {
     indices,
     indicesLoading,
-    newsItems,
     eventItems,
     eventLoading,
     hotEvents,
@@ -218,7 +217,7 @@ function Dashboard() {
                   setSelectedNewsFallbackUrl(articleUrl ?? null);
                 }}
                 onAskNews={(id) => {
-                  const article = [...newsItems, ...quickNewsItems, ...hotNewsItems].find((x) => String(x.id) === String(id));
+                  const article = [...quickNewsItems, ...hotNewsItems].find((x) => String(x.id) === String(id));
                   const initialMessage = article?.title
                     ? `Please analyze this market news and potential impact: ${article.title}`
                     : 'Please analyze this market news and potential impact.';

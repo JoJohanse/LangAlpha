@@ -29,6 +29,10 @@ interface Article {
   tickers?: string[];
   sentiments?: ArticleSentiment[];
   source?: ArticleSource;
+  sector?: string | null;
+  topic?: string | null;
+  region?: string | null;
+  tags?: string[];
   [key: string]: unknown;
 }
 
@@ -210,6 +214,70 @@ function NewsBody({
         </div>
 
         <div className="space-y-6 sm:space-y-8">
+          {/* Classification tags (sector / topic / region / tags) */}
+          {(article.sector || article.topic || article.region || (article.tags?.length ?? 0) > 0) && (
+            <div>
+              <h3
+                className={`${isMobile ? 'text-base' : 'text-lg'} font-bold mb-2 sm:mb-3 flex items-center gap-2`}
+                style={{ color: 'var(--color-text-primary)' }}
+              >
+                <Tag size={isMobile ? 16 : 18} style={{ color: 'var(--color-accent-light)' }} />
+                Classification
+              </h3>
+              <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                {article.sector && (
+                  <span
+                    className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full border text-[11px] sm:text-xs font-medium"
+                    style={{
+                      backgroundColor: 'var(--color-accent-soft)',
+                      borderColor: 'var(--color-accent-overlay)',
+                      color: 'var(--color-accent-light)',
+                    }}
+                  >
+                    {article.sector}
+                  </span>
+                )}
+                {article.topic && (
+                  <span
+                    className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full border text-[11px] sm:text-xs font-medium"
+                    style={{
+                      backgroundColor: 'var(--color-bg-hover)',
+                      borderColor: 'var(--color-border-muted)',
+                      color: 'var(--color-text-secondary)',
+                    }}
+                  >
+                    {article.topic}
+                  </span>
+                )}
+                {article.region && (
+                  <span
+                    className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full border text-[11px] sm:text-xs"
+                    style={{
+                      backgroundColor: 'var(--color-bg-hover)',
+                      borderColor: 'var(--color-border-muted)',
+                      color: 'var(--color-text-tertiary)',
+                    }}
+                  >
+                    {article.region}
+                  </span>
+                )}
+                {article.tags?.map((tag, i) => (
+                  <span
+                    key={i}
+                    className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full border text-[11px] sm:text-xs"
+                    style={{
+                      backgroundColor: 'var(--color-bg-hover)',
+                      borderColor: 'var(--color-border-muted)',
+                      color: 'var(--color-text-secondary)',
+                    }}
+                  >
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Related Topics */}
           {(article.keywords?.length ?? 0) > 0 && (
             <div>

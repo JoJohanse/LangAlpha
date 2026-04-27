@@ -33,8 +33,6 @@ interface NewsItem {
 interface DashboardData {
   indices: IndexData[] | undefined;
   indicesLoading: boolean;
-  newsItems: NewsItem[];
-  newsLoading: boolean;
   eventItems: MarketEvent[];
   eventLoading: boolean;
   hotEvents: MarketEvent[];
@@ -96,34 +94,6 @@ export function useDashboardData(): DashboardData {
     refetchInterval: isMarketOpen ? 30000 : 60000,
     refetchIntervalInBackground: false,
     staleTime: 10000,
-  });
-
-  // 3. News Feed (Fetched once, cached for 5 minutes)
-  const { data: newsItems = [], isLoading: newsLoading } = useQuery<NewsItem[]>({
-    queryKey: ['dashboard', 'news'],
-    queryFn: async (): Promise<NewsItem[]> => {
-      const data = await getNews({ limit: 50 });
-      if (data.results && data.results.length > 0) {
-        return data.results.map((r: Record<string, unknown>) => ({
-          id: r.id as string,
-          title: r.title as string,
-          time: formatRelativeTime(r.published_at as string | null | undefined),
-          publishedAt: (r.published_at as string) || null,
-          isHot: r.has_sentiment as boolean,
-          source: (r.source as Record<string, unknown> | undefined)?.name as string || '',
-          favicon: (r.source as Record<string, unknown> | undefined)?.favicon_url as string || null,
-          image: r.image_url as string || null,
-          tickers: (r.tickers as string[]) || [],
-          articleUrl: (r.article_url as string) || null,
-          sector: (r.sector as string) || null,
-          topic: (r.topic as string) || null,
-          region: (r.region as string) || null,
-          tags: (r.tags as string[]) || [],
-        }));
-      }
-      return [];
-    },
-    staleTime: 5 * 60 * 1000, // 5 minutes fresh cache
   });
 
   const { data: eventItems = [], isLoading: eventLoading } = useQuery<MarketEvent[]>({
@@ -205,8 +175,6 @@ export function useDashboardData(): DashboardData {
   return {
     indices,
     indicesLoading,
-    newsItems,
-    newsLoading,
     eventItems,
     eventLoading,
     hotEvents,
@@ -216,7 +184,6 @@ export function useDashboardData(): DashboardData {
     quickNewsItems,
     quickNewsLoading,
     marketStatus,
-    // Kept for backward compatibility with components that might use MarketStatusRef
     marketStatusRef: { current: marketStatus }
   };
 }

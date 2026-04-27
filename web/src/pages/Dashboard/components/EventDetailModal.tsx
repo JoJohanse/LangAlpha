@@ -58,7 +58,7 @@ function EventDetailModal({ eventId, onClose }: EventDetailModalProps) {
     if (!eventId || interpretLoading) return;
     setInterpretLoading(true);
     try {
-      const result = await interpretEvent(eventId);
+      const result = await interpretEvent(eventId, { refresh: true });
       setInterpretResult(result);
     } catch (e) {
       console.error('[EventDetailModal] interpret failed', e);

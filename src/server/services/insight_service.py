@@ -40,23 +40,27 @@ DEFAULT_DEDUP_WINDOW_MINUTES = 5
 
 _TAIL = (
     "Only include genuinely noteworthy stories. "
-    "Report facts, not predictions or recommendations. US market focus."
+    "Report facts, not predictions or recommendations. "
+    "Do not assume a US-only market focus unless the provided news explicitly supports it. "
+    "All narrative output must be written in Simplified Chinese."
 )
 
 _JSON_GUIDELINES = """
 You MUST respond with ONLY a valid JSON object (no markdown, no explanation, no preamble).
 The JSON must have exactly these fields:
 {
-  "headline": "简洁标题，概括主要市场主题（最多120个字符）",
-  "summary": "2-3句话概述最重要的进展",
+  "headline": "Concise headline capturing the dominant market theme (max 120 chars)",
+  "summary": "2-3 sentence overview of the most important developments",
   "news_items": [
-    {"title": "简短的事实性标题", "body": "2-4句话的事实性摘要", "url": "source URL or null"}
+    {"title": "Short factual headline", "body": "2-4 sentence factual summary", "url": "source URL or null"}
   ],
   "topics": [
-    {"text": "主题名称（1-2个词）", "trend": "up|down|neutral"}
+    {"text": "Topic name (1-2 words)", "trend": "up|down|neutral"}
   ]
 }
-Include 4-8 news_items and 3-5 topics. All text values must be written in Chinese (Simplified Chinese, 中文). Respond with ONLY the JSON object.
+Include 4-8 news_items and 3-5 topics.
+All text fields except "trend" must be written in Simplified Chinese.
+Respond with ONLY the JSON object.
 """
 
 
@@ -131,10 +135,10 @@ def _build_instruction(insight_type: str, now_et: datetime) -> str:
         yesterday_date = yesterday.strftime("%A, %B %-d, %Y")
         return (
             f"Current time: {time_str}\n\n"
-            f"Generate a morning brief. Curate the most significant US financial market news "
+            f"Generate a morning brief. Curate the most significant market news "
             f"from last night ({yesterday_date} ~8 PM ET) through this morning. "
             f"For each story, provide a short headline and a 2-4 sentence "
-            f"factual summary of what happened. Strictly stay inside the selected time window. {_TAIL}"
+            f"factual summary of what happened. Use only the provided news list and stay strictly inside the selected time window. {_TAIL}"
         )
 
     if insight_type == "market_update":
@@ -142,19 +146,19 @@ def _build_instruction(insight_type: str, now_et: datetime) -> str:
         window_start = (now_et - timedelta(hours=1)).strftime("%-I:%M %p")
         return (
             f"Current time: {time_str}\n\n"
-            f"Curate the most significant US financial market news from the "
+            f"Curate the most significant market news from the "
             f"past hour ({window_start} – {window_end} ET). "
             f"For each story, provide a short headline and a 2-4 sentence "
-            f"factual summary of what happened. Strictly stay inside the selected time window. {_TAIL}"
+            f"factual summary of what happened. Use only the provided news list and stay strictly inside the selected time window. {_TAIL}"
         )
 
     # post_market
     return (
         f"Current time: {time_str}\n\n"
-        f"Generate an evening brief. Curate the most significant US financial market news from today "
+        f"Generate an evening brief. Curate the most significant market news from today "
         f"({today_date}) for an end-of-day recap. "
         f"For each story, provide a short headline and a 2-4 sentence "
-        f"factual summary of what happened. Strictly stay inside the selected time window. {_TAIL}"
+        f"factual summary of what happened. Use only the provided news list and stay strictly inside the selected time window. {_TAIL}"
     )
 
 
@@ -170,7 +174,7 @@ def _build_personalized_instruction(
         f"and developments for these holdings:\n\n{symbols_context}\n\n"
         f"For each relevant story, provide a short headline and a 2-4 sentence "
         f"factual summary. Prioritize stories that directly affect the listed "
-        f"symbols. {_TAIL}"
+        f"symbols. Use only the provided news list as source material. {_TAIL}"
     )
 
 

@@ -188,6 +188,16 @@ class PoboProxyNewsSource:
         if not info_id:
             return None
 
+        # Try dedicated single-article endpoint first (avoids fetching hundreds of items).
+        try:
+            resp = await self._client.get(f"/news/{info_id}")
+            resp.raise_for_status()
+            body = resp.json()
+            if isinstance(body, dict) and body.get("InfoID") is not None:
+                return _normalize_row(body)
+        except Exception:
+            pass  # endpoint not supported or article not found — fall back to list scan
+
         resp = await self._client.get("/news", params={"limit": _DETAIL_FETCH_LIMIT})
         resp.raise_for_status()
         body = resp.json()

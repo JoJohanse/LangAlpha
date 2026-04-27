@@ -56,6 +56,10 @@ def _pobo_proxy_available() -> bool:
         return False
 
 
+async def _pobo_proxy_available_async() -> bool:
+    return await asyncio.to_thread(_pobo_proxy_available)
+
+
 # ---------------------------------------------------------------------------
 # Async source constructors
 # ---------------------------------------------------------------------------
@@ -118,7 +122,7 @@ _SOURCE_REGISTRY: dict[str, tuple[Any, Any]] = {
 }
 
 _NEWS_SOURCE_REGISTRY: dict[str, tuple[Any, Any]] = {
-    "pobo-proxy": (_pobo_proxy_available, _build_pobo_proxy_news_source),
+    "pobo-proxy": (_pobo_proxy_available_async, _build_pobo_proxy_news_source),
     "ginlix-data": (_ginlix_data_available, _build_ginlix_data_news_source),
     "fmp": (_fmp_available, _build_fmp_news_source),
     "yfinance": (_yfinance_available, _build_yfinance_news_source),
@@ -210,12 +214,21 @@ async def get_news_data_provider():
         for cfg in provider_configs:
             name = cfg["name"]
             reg = _NEWS_SOURCE_REGISTRY.get(name)
-            if reg and reg[0]():  # availability check
-                source = await reg[1]()
-                sources.append((name, source))
-                logger.debug("news_data.source.registered | name=%s", name)
+            if reg:
+                avail_fn = reg[0]
+                # Support both sync and async availability checks
+                if asyncio.iscoroutinefunction(avail_fn):
+                    available = await avail_fn()
+                else:
+                    available = avail_fn()
+                if available:
+                    source = await reg[1]()
+                    sources.append((name, source))
+                    logger.debug("news_data.source.registered | name=%s", name)
+                else:
+                    logger.debug("news_data.source.skipped | name=%s (unavailable)", name)
             else:
-                logger.debug("news_data.source.skipped | name=%s (unavailable)", name)
+                logger.debug("news_data.source.skipped | name=%s (not in registry)", name)
 
         if not sources:
             raise RuntimeError(

@@ -294,9 +294,14 @@ async def get_news_article(article_id: str, user_id: CurrentUserId):
     cached = await _cache.get_article_by_id(article_id)
     if cached:
         cached["description"] = _effective_description(cached)
+        tag_row = await tags_db.get_article_tag(article_id)
+        if tag_row:
+            cached.setdefault("sector", tag_row.get("sector"))
+            cached.setdefault("topic", tag_row.get("topic"))
+            cached.setdefault("region", tag_row.get("region"))
+            if not cached.get("tags"):
+                cached["tags"] = tag_row.get("tags") or []
         return NewsArticle(**cached)
-
-    from src.data_client import get_news_data_provider
 
     provider = await get_news_data_provider()
     article = await provider.get_news_article(article_id, user_id=user_id)
@@ -318,11 +323,20 @@ async def get_news_article(article_id: str, user_id: CurrentUserId):
                     "tags": tagged.tags,
                 }
             )
+            article["sector"] = tagged.sector
+            article["topic"] = tagged.topic
+            article["region"] = tagged.region
+            article["tags"] = tagged.tags or []
         return NewsArticle(**article)
 
     snapshot = await tags_db.get_article_tag(article_id)
     if snapshot:
-        return NewsArticle(**_article_from_snapshot(article_id, snapshot))
+        base = _article_from_snapshot(article_id, snapshot)
+        base["sector"] = snapshot.get("sector")
+        base["topic"] = snapshot.get("topic")
+        base["region"] = snapshot.get("region")
+        base["tags"] = snapshot.get("tags") or []
+        return NewsArticle(**base)
 
     raise HTTPException(status_code=404, detail="Article not found")
 

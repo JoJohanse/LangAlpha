@@ -17,6 +17,8 @@ from src.server.services.insight_service import (
     ET,
     InsightAlreadyGeneratingError,
     InsightService,
+    _build_instruction,
+    _build_personalized_instruction,
     _extract_json_string,
     _extract_structured_output,
 )
@@ -157,6 +159,23 @@ class TestExtractWithFallback:
         assert result["headline"] == "Fallback headline"
         mock_extract.assert_called_once_with("bad raw text")
         mock_fallback.assert_awaited_once_with("bad raw text")
+
+
+class TestPromptInstructions:
+    def test_generic_brief_instructions_no_longer_force_us_market(self):
+        now_et = datetime(2026, 4, 27, 9, 0, tzinfo=ET)
+        prompt = _build_instruction("pre_market", now_et)
+
+        assert "US financial market news" not in prompt
+        assert "Use only the provided news list" in prompt
+        assert "Simplified Chinese" in prompt
+
+    def test_personalized_brief_instruction_uses_provided_news_only(self):
+        now_et = datetime(2026, 4, 27, 9, 0, tzinfo=ET)
+        prompt = _build_personalized_instruction("- AAPL (Apple) [watchlist]", now_et)
+
+        assert "Use only the provided news list as source material" in prompt
+        assert "Simplified Chinese" in prompt
 
 
 # ---------------------------------------------------------------------------

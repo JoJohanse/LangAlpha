@@ -30,6 +30,10 @@ class NewsArticle(BaseModel):
     tickers: list[str] = []
     keywords: list[str] = []
     sentiments: list[NewsSentiment] | None = None
+    sector: str | None = None
+    topic: str | None = None
+    region: str | None = None
+    tags: list[str] = []
 
 
 class NewsResponse(BaseModel):

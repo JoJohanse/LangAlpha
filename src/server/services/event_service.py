@@ -193,6 +193,7 @@ class EventService:
     ) -> tuple[str | None, str]:
         from src.llms import create_llm
         from src.llms.api_call import make_api_call
+        from src.llms.content_utils import format_llm_content
         from src.server.app import setup
 
         model_name = None
@@ -208,7 +209,7 @@ class EventService:
                 "Respond in Chinese (Simplified Chinese, 中文)."
             )
             user_prompt = f"Target type: {target_type}\nPayload: {payload}"
-            text = await asyncio.wait_for(
+            response = await asyncio.wait_for(
                 make_api_call(
                     llm=llm,
                     system_prompt=system_prompt,
@@ -217,17 +218,22 @@ class EventService:
                 ),
                 timeout=INTERPRET_TIMEOUT_SECONDS,
             )
-            if isinstance(text, str) and text.strip():
-                return model_name, text.strip()
+            # make_api_call returns raw content which may be a string or a list of
+            # content blocks (when the provider uses Responses API). Normalize via
+            # format_llm_content to always get a plain-text string.
+            text = format_llm_content(response).get("text", "").strip()
+            if text:
+                return model_name, text
         except Exception as e:
             logger.warning("[MARKET_EVENTS] interpret fallback triggered: %s", e)
 
-        symbols = ", ".join(payload.get("symbols") or []) or "the related assets"
-        summary = payload.get("summary") or payload.get("title") or "No summary available."
+        symbols = ", ".join(payload.get("symbols") or []) or "相关资产"
+        summary = payload.get("summary") or payload.get("title") or "暂无摘要信息。"
+        type_cn = "事件" if target_type == "event" else "资讯"
         fallback = (
-            f"This {target_type} is linked to {symbols}. "
-            f"Core information: {summary}. "
-            "Focus on follow-up disclosures, price/volume confirmation, and whether related sector names move in the same direction."
+            f"该{type_cn}与 {symbols} 相关。"
+            f"核心信息：{summary}。"
+            "请关注后续披露、价格与成交量确认，以及相关板块是否同向波动。"
         )
         return model_name, fallback
 

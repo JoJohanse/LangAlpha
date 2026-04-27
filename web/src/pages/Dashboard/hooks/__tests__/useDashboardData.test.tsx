@@ -66,13 +66,13 @@ describe('useDashboardData', () => {
     expect(Array.isArray(result.current.indices)).toBe(true);
   });
 
-  it('returns newsItems as an empty array when no news', async () => {
+  it('returns quickNewsItems as an empty array when no news', async () => {
     mockGetNews.mockResolvedValue({ results: [] });
 
     const { result } = renderHookWithProviders(() => useDashboardData());
 
-    await waitFor(() => expect(result.current.newsLoading).toBe(false));
-    expect(result.current.newsItems).toEqual([]);
+    await waitFor(() => expect(result.current.quickNewsLoading).toBe(false));
+    expect(result.current.quickNewsItems).toEqual([]);
   });
 
   it('transforms news results into formatted items', async () => {
@@ -93,8 +93,8 @@ describe('useDashboardData', () => {
 
     const { result } = renderHookWithProviders(() => useDashboardData());
 
-    await waitFor(() => expect(result.current.newsItems.length).toBe(1));
-    const item = result.current.newsItems[0];
+    await waitFor(() => expect(result.current.quickNewsItems.length).toBe(1));
+    const item = result.current.quickNewsItems[0];
     expect(item.id).toBe('n-1');
     expect(item.title).toBe('Markets rally');
     expect(item.source).toBe('Reuters');
