@@ -76,7 +76,7 @@ interface NewsRowProps {
   item: NewsItem;
   idx: number;
   onNewsClick?: (id: string | number, articleUrl?: string | null) => void;
-  onAskNews?: (id: string | number) => void;
+  onAskNews?: (item: NewsItem) => void;
   skipAnimation?: boolean;
 }
 
@@ -188,7 +188,7 @@ function NewsRow({ item, idx, onNewsClick, onAskNews, skipAnimation }: NewsRowPr
               style={{ color: 'var(--color-accent-light)', borderColor: 'var(--color-border-muted)' }}
               onClick={(e) => {
                 e.stopPropagation();
-                onAskNews?.(item.id as string | number);
+                onAskNews?.(item);
               }}
             >
               Ask AI
@@ -243,7 +243,7 @@ interface NewsFeedCardProps {
   quickItems?: NewsItem[];
   quickLoading?: boolean;
   onNewsClick?: (id: string | number, articleUrl?: string | null) => void;
-  onAskNews?: (id: string | number) => void;
+  onAskNews?: (item: NewsItem) => void;
   onAskEvent?: (eventId: string) => void;
   onEventClick?: (eventId: string) => void;
 }

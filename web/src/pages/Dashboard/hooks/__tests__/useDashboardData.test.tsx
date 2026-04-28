@@ -6,7 +6,6 @@ import { waitFor } from '@testing-library/react';
 
 vi.mock('../../utils/api', () => ({
   getNews: vi.fn(),
-  getHotNewsRank: vi.fn(),
   getIndices: vi.fn(),
   INDEX_SYMBOLS: ['GSPC', 'IXIC', 'DJI', 'RUT', 'VIX'],
   fallbackIndex: vi.fn((s: string) => ({
@@ -24,14 +23,13 @@ vi.mock('@/lib/marketUtils', () => ({
   fetchMarketStatus: vi.fn(),
 }));
 
-import { getNews, getHotNewsRank, getIndices } from '../../utils/api';
+import { getNews, getIndices } from '../../utils/api';
 import { getEvents, getHotEvents } from '../../utils/eventsApi';
 import { fetchMarketStatus } from '@/lib/marketUtils';
 
 const mockFetchMarketStatus = fetchMarketStatus as Mock;
 const mockGetIndices = getIndices as Mock;
 const mockGetNews = getNews as Mock;
-const mockGetHotNewsRank = getHotNewsRank as Mock;
 const mockGetEvents = getEvents as Mock;
 const mockGetHotEvents = getHotEvents as Mock;
 
@@ -46,7 +44,6 @@ describe('useDashboardData', () => {
       failedCount: 0,
     });
     mockGetNews.mockResolvedValue({ results: [], count: 0 });
-    mockGetHotNewsRank.mockResolvedValue({ results: [], count: 0, limit: 15 });
     mockGetEvents.mockResolvedValue({ results: [], count: 0, limit: 50, offset: 0 });
     mockGetHotEvents.mockResolvedValue({ results: [], count: 0, limit: 10, offset: 0 });
   });

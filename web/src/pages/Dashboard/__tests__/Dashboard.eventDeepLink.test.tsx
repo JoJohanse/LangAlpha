@@ -22,8 +22,6 @@ vi.mock('../hooks/useDashboardData', () => ({
     eventLoading: false,
     hotEvents: [],
     hotEventsLoading: false,
-    hotNewsItems: [],
-    hotNewsLoading: false,
     quickNewsItems: [],
     quickNewsLoading: false,
     marketStatus: null,

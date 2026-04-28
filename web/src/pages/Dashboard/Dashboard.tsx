@@ -88,7 +88,6 @@ function Dashboard() {
     eventLoading,
     hotEvents,
     hotEventsLoading,
-    hotNewsItems,
     quickNewsItems,
     quickNewsLoading,
     marketStatus,
@@ -306,21 +305,19 @@ function Dashboard() {
                   setSelectedNewsId(String(id));
                   setSelectedNewsFallbackUrl(articleUrl ?? null);
                 }}
-                onAskNews={(id) => {
-                  const article = [...quickNewsItems, ...hotNewsItems].find((x) => String(x.id) === String(id));
-                  if (!article) return;
+                onAskNews={(item) => {
                   setAskTarget({
                     type: 'news',
-                    id: String(article.id),
-                    title: article.title,
-                    summary: article.title,
-                    source: article.source,
-                    articleUrl: article.articleUrl,
-                    tickers: article.tickers,
-                    sector: article.sector,
-                    topic: article.topic,
-                    region: article.region,
-                    tags: article.tags,
+                    id: String(item.id),
+                    title: item.title,
+                    summary: item.title,
+                    source: item.source,
+                    articleUrl: item.articleUrl,
+                    tickers: item.tickers,
+                    sector: item.sector,
+                    topic: item.topic,
+                    region: item.region,
+                    tags: item.tags,
                   });
                 }}
                 onAskEvent={(eventId) => {

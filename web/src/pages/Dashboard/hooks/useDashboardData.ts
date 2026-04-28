@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { getNews, getHotNewsRank, getIndices, INDEX_SYMBOLS, fallbackIndex, normalizeIndexSymbol } from '../utils/api';
+import { getNews, getIndices, INDEX_SYMBOLS, fallbackIndex, normalizeIndexSymbol } from '../utils/api';
 import { getEvents, getHotEvents, type MarketEvent } from '../utils/eventsApi';
 import { fetchMarketStatus } from '@/lib/marketUtils';
 import { parseServerDate } from '@/lib/dateTime';
@@ -37,8 +37,6 @@ interface DashboardData {
   eventLoading: boolean;
   hotEvents: MarketEvent[];
   hotEventsLoading: boolean;
-  hotNewsItems: NewsItem[];
-  hotNewsLoading: boolean;
   quickNewsItems: NewsItem[];
   quickNewsLoading: boolean;
   marketStatus: MarketStatusData | null;
@@ -118,33 +116,6 @@ export function useDashboardData(): DashboardData {
     refetchIntervalInBackground: false,
   });
 
-  const { data: hotNewsItems = [], isLoading: hotNewsLoading } = useQuery<NewsItem[]>({
-    queryKey: ['dashboard', 'news', 'hot-rank'],
-    queryFn: async () => {
-      const data = await getHotNewsRank(15, 24);
-      return (data.results || []).map((r: Record<string, unknown>) => ({
-        id: r.article_id as string,
-        title: r.title as string,
-        time: formatRelativeTime(r.published_at as string | null | undefined),
-        publishedAt: (r.published_at as string) || null,
-        isHot: true,
-        source: (r.source_name as string) || '',
-        favicon: null,
-        image: null,
-        tickers: (r.tickers as string[]) || [],
-        articleUrl: (r.article_url as string) || null,
-        sector: (r.sector as string) || null,
-        topic: (r.topic as string) || null,
-        region: (r.region as string) || null,
-        tags: (r.tags as string[]) || [],
-        importanceScore: Number(r.importance_score || 0),
-      }));
-    },
-    staleTime: 60 * 1000,
-    refetchInterval: 60 * 1000,
-    refetchIntervalInBackground: false,
-  });
-
   const { data: quickNewsItems = [], isLoading: quickNewsLoading } = useQuery<NewsItem[]>({
     queryKey: ['dashboard', 'news', 'quick'],
     queryFn: async () => {
@@ -179,8 +150,6 @@ export function useDashboardData(): DashboardData {
     eventLoading,
     hotEvents,
     hotEventsLoading,
-    hotNewsItems,
-    hotNewsLoading,
     quickNewsItems,
     quickNewsLoading,
     marketStatus,
