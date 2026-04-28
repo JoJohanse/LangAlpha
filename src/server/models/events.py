@@ -69,3 +69,15 @@ class InterpretResponse(BaseModel):
     model: str | None = None
     cached: bool = False
     generated_at: datetime
+
+
+class EventAskRequest(BaseModel):
+    question: str | None = Field(default=None, description="Optional user question")
+    focus_symbol: str | None = Field(default=None, description="Optional symbol focus")
+
+
+class EventAskResponse(BaseModel):
+    event_id: str
+    thread_initial_message: str
+    fallback_message: str
+    additional_context: list[dict]

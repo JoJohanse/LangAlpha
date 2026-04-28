@@ -244,6 +244,7 @@ interface NewsFeedCardProps {
   quickLoading?: boolean;
   onNewsClick?: (id: string | number, articleUrl?: string | null) => void;
   onAskNews?: (id: string | number) => void;
+  onAskEvent?: (eventId: string) => void;
   onEventClick?: (eventId: string) => void;
 }
 
@@ -256,6 +257,7 @@ function NewsFeedCard({
   quickLoading = false,
   onNewsClick,
   onAskNews,
+  onAskEvent,
   onEventClick,
 }: NewsFeedCardProps) {
   const formatTime = useFormatTime();
@@ -462,6 +464,19 @@ function NewsFeedCard({
               )}
             </div>
           )}
+          <div className="mt-1.5">
+            <button
+              type="button"
+              className="text-[11px] px-2 py-0.5 rounded border"
+              style={{ color: 'var(--color-accent-light)', borderColor: 'var(--color-border-muted)' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAskEvent?.(item.event_id);
+              }}
+            >
+              Ask AI
+            </button>
+          </div>
         </div>
       </motion.div>
     );

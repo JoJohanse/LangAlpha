@@ -5,9 +5,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MobileBottomSheet } from '@/components/ui/mobile-bottom-sheet';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useFormatTime } from '@/hooks/useFormatTime';
+import AskAIDialog from './AskAIDialog';
+import { launchAskAIChat } from '../utils/askAi';
 import {
+  askEvent,
   getEventDetail,
   interpretEvent,
+  type AskAIResult,
   type MarketEventDetail,
   type InterpretResult,
 } from '../utils/eventsApi';
@@ -22,6 +26,8 @@ function EventDetailModal({ eventId, onClose }: EventDetailModalProps) {
   const [eventData, setEventData] = useState<MarketEventDetail | null>(null);
   const [interpretLoading, setInterpretLoading] = useState(false);
   const [interpretResult, setInterpretResult] = useState<InterpretResult | null>(null);
+  const [askLoading, setAskLoading] = useState(false);
+  const [askDialogOpen, setAskDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isMobile = useIsMobile();
   const formatTime = useFormatTime();
@@ -79,6 +85,50 @@ function EventDetailModal({ eventId, onClose }: EventDetailModalProps) {
     if (eventData.start_time) qs.set('event_time', eventData.start_time);
     navigate(`/market?${qs.toString()}`);
     onClose();
+  };
+
+  const handleAskAI = async (question: string) => {
+    if (!eventId || askLoading) return;
+    setAskLoading(true);
+    try {
+      const payload = await askEvent(eventId, { question }) as AskAIResult;
+      await launchAskAIChat({
+        navigate,
+        payload,
+        fallbackMessage: question,
+      });
+      setAskDialogOpen(false);
+      onClose();
+    } catch (e) {
+      console.error('[EventDetailModal] ask failed', e);
+      const title = eventData?.title?.trim();
+      const fallbackMessage = title
+        ? `${question}\n\nContext:\nEvent title: ${title}\nSummary: ${eventData?.short_summary || eventData?.ai_takeaway || title}`
+        : question;
+      await launchAskAIChat({
+        navigate,
+        payload: {
+          thread_initial_message: fallbackMessage,
+          fallback_message: fallbackMessage,
+          additional_context: [{
+            type: 'directive',
+            content: [
+              'Use the following event context when answering the user question.',
+              `Event title: ${eventData?.title || 'N/A'}`,
+              `Summary: ${eventData?.short_summary || eventData?.ai_takeaway || eventData?.title || 'N/A'}`,
+              `Symbols: ${(eventData?.symbols || []).join(', ') || 'N/A'}`,
+              `Primary symbol: ${eventData?.primary_symbol || 'N/A'}`,
+              `Event time: ${eventData?.start_time || 'N/A'}`,
+            ].join('\n'),
+          }],
+        },
+        fallbackMessage,
+      });
+      setAskDialogOpen(false);
+      onClose();
+    } finally {
+      setAskLoading(false);
+    }
   };
 
   const body = (
@@ -141,6 +191,14 @@ function EventDetailModal({ eventId, onClose }: EventDetailModalProps) {
               <Sparkles size={14} />
               {interpretLoading ? 'Interpreting...' : 'AI Interpret'}
             </button>
+            <button
+              onClick={() => setAskDialogOpen(true)}
+              disabled={askLoading}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium border"
+              style={{ borderColor: 'var(--color-border-muted)', color: 'var(--color-text-secondary)' }}
+            >
+              {askLoading ? 'Opening...' : 'Ask AI'}
+            </button>
           </div>
 
           {(interpretResult?.interpretation || eventData.ai_takeaway) && (
@@ -186,6 +244,14 @@ function EventDetailModal({ eventId, onClose }: EventDetailModalProps) {
           )}
         </div>
       )}
+      <AskAIDialog
+        open={askDialogOpen}
+        onClose={() => setAskDialogOpen(false)}
+        onSubmit={handleAskAI}
+        loading={askLoading}
+        title="Ask AI About This Event"
+        subjectLabel={eventData?.title || null}
+      />
     </div>
   );
 

@@ -3,6 +3,8 @@ import { X, Calendar, Hash, ExternalLink, TrendingUp, TrendingDown, Minus, Tag }
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { askNewsArticle, getNewsArticle } from '../utils/api';
+import AskAIDialog from './AskAIDialog';
+import { launchAskAIChat, type AskAIResponsePayload } from '../utils/askAi';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { MobileBottomSheet } from '@/components/ui/mobile-bottom-sheet';
 import { useFormatTime } from '@/hooks/useFormatTime';
@@ -467,6 +469,7 @@ function NewsDetailModal({ newsId, onClose, fallbackUrl }: NewsDetailModalProps)
   const [fetchFailed, setFetchFailed] = useState(false);
   const [expandedSentiment, setExpandedSentiment] = useState<number | null>(null);
   const [askLoading, setAskLoading] = useState(false);
+  const [askDialogOpen, setAskDialogOpen] = useState(false);
   const isMobile = useIsMobile();
   const navigate = useNavigate();
 
@@ -522,27 +525,47 @@ function NewsDetailModal({ newsId, onClose, fallbackUrl }: NewsDetailModalProps)
     />
   );
 
-  const handleAskAI = async () => {
+  const handleAskAI = async (question: string) => {
     if (!newsId || askLoading) return;
     setAskLoading(true);
     try {
-      const payload = await askNewsArticle(newsId) as { thread_initial_message?: string; additional_context?: Record<string, unknown>[] };
-      navigate('/chat', {
-        state: {
-          initialMessage: payload.thread_initial_message || (article?.title ? `Please analyze this market news and potential impact: ${article.title}` : ''),
-          additionalContext: payload.additional_context || null,
-        },
+      const payload = await askNewsArticle(newsId, question) as AskAIResponsePayload;
+      await launchAskAIChat({
+        navigate,
+        payload,
+        fallbackMessage: question,
       });
+      setAskDialogOpen(false);
       onClose();
     } catch {
-      if (article?.title) {
-        navigate('/chat', {
-          state: {
-            initialMessage: `Please analyze this market news and potential impact: ${article.title}`,
-          },
-        });
-        onClose();
-      }
+      const title = article?.title?.trim();
+      const fallbackMessage = title
+        ? `${question}\n\nContext:\nNews title: ${title}\nSummary: ${article?.description || title}`
+        : question;
+      await launchAskAIChat({
+        navigate,
+        payload: {
+          thread_initial_message: fallbackMessage,
+          fallback_message: fallbackMessage,
+          additional_context: [{
+            type: 'directive',
+            content: [
+              'Use the following news context when answering the user question.',
+              `Title: ${article?.title || 'N/A'}`,
+              `Summary: ${article?.description || article?.title || 'N/A'}`,
+              `Source: ${article?.source?.name || 'N/A'}`,
+              `URL: ${article?.article_url || fallbackUrl || 'N/A'}`,
+              `Tickers: ${(article?.tickers || []).join(', ') || 'N/A'}`,
+              `Sector: ${article?.sector || 'N/A'}`,
+              `Topic: ${article?.topic || 'N/A'}`,
+              `Region: ${article?.region || 'N/A'}`,
+            ].join('\n'),
+          }],
+        },
+        fallbackMessage,
+      });
+      setAskDialogOpen(false);
+      onClose();
     } finally {
       setAskLoading(false);
     }
@@ -558,7 +581,29 @@ function NewsDetailModal({ newsId, onClose, fallbackUrl }: NewsDetailModalProps)
         height="92vh"
         style={{ paddingBottom: 'calc(var(--bottom-tab-height, 0px) + 16px)' }}
       >
+        <div className="flex justify-end px-1 pt-1">
+          <button
+            type="button"
+            onClick={() => setAskDialogOpen(true)}
+            className="px-3 py-1.5 rounded-full transition-colors text-xs border"
+            style={{
+              backgroundColor: 'var(--color-bg-card)',
+              color: 'var(--color-text-primary)',
+              borderColor: 'var(--color-border-muted)',
+            }}
+          >
+            Ask AI
+          </button>
+        </div>
         {body}
+        <AskAIDialog
+          open={askDialogOpen}
+          onClose={() => setAskDialogOpen(false)}
+          onSubmit={handleAskAI}
+          loading={askLoading}
+          title="Ask AI About This News"
+          subjectLabel={article?.title || null}
+        />
       </MobileBottomSheet>
     );
   }
@@ -599,7 +644,7 @@ function NewsDetailModal({ newsId, onClose, fallbackUrl }: NewsDetailModalProps)
               <X size={20} />
             </button>
             <button
-              onClick={handleAskAI}
+              onClick={() => setAskDialogOpen(true)}
               className="absolute top-4 right-16 z-20 px-2.5 py-1.5 rounded-full transition-colors text-xs border"
               style={{
                 backgroundColor: 'rgba(0,0,0,0.45)',
@@ -614,6 +659,14 @@ function NewsDetailModal({ newsId, onClose, fallbackUrl }: NewsDetailModalProps)
             <div className="overflow-y-auto flex-1">
               {body}
             </div>
+            <AskAIDialog
+              open={askDialogOpen}
+              onClose={() => setAskDialogOpen(false)}
+              onSubmit={handleAskAI}
+              loading={askLoading}
+              title="Ask AI About This News"
+              subjectLabel={article?.title || null}
+            />
           </motion.div>
         </motion.div>
       )}

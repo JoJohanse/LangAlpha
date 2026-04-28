@@ -100,3 +100,51 @@ async def test_get_event_detail_reads_related_articles_from_db_snapshot(client):
     assert body["related_articles"][0]["article_id"] == "fcf27a12-7d0c-33c9-8909-8e8c169c5042"
     assert body["related_articles"][0]["title"] == "Google-backed AI update"
     assert body["related_articles"][0]["article_url"] == "https://example.com/news/google-ai"
+
+
+@pytest.mark.asyncio
+async def test_event_ask_returns_chat_payload(client):
+    row = {
+        "event_id": "evt-ask-1",
+        "title": "Fed signals policy pause",
+        "short_summary": "Markets are pricing a pause after the latest remarks.",
+        "importance_score": 84.0,
+        "sentiment": "neutral",
+        "start_time": datetime.now(timezone.utc),
+        "primary_symbol": "SPY",
+        "symbols": ["SPY", "QQQ"],
+        "tags": ["macro"],
+        "article_count": 2,
+        "ai_takeaway": None,
+        "status": "active",
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+    }
+    links = [
+        {
+            "article_id": "n-evt-1",
+            "title": "Fed officials lean patient",
+            "source_name": "Reuters",
+            "article_url": "https://example.com/fed-1",
+            "published_at": datetime.now(timezone.utc),
+        }
+    ]
+    with (
+        patch("src.server.app.events.market_event_db.get_event", new_callable=AsyncMock, return_value=row),
+        patch("src.server.app.events.market_event_db.list_event_article_links", new_callable=AsyncMock, return_value=links),
+    ):
+        resp = await client.post("/api/v1/events/evt-ask-1/ask", json={"question": "What matters most here?"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["event_id"] == "evt-ask-1"
+    assert body["thread_initial_message"] == "What matters most here?"
+    assert len(body["additional_context"]) == 1
+    assert body["additional_context"][0]["type"] == "directive"
+    assert "Event title:" in body["additional_context"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_event_ask_404_when_event_missing(client):
+    with patch("src.server.app.events.market_event_db.get_event", new_callable=AsyncMock, return_value=None):
+        resp = await client.post("/api/v1/events/missing/ask", json={})
+    assert resp.status_code == 404

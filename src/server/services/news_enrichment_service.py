@@ -180,6 +180,7 @@ class NewsEnrichmentService:
 
     def build_ask_payload(self, article: dict[str, Any], question: str | None = None) -> dict[str, Any]:
         title = str(article.get("title") or "").strip()
+        ai_summary = str(article.get("ai_takeaway") or "").strip()
         description = str(article.get("description") or "").strip()
         source_name = str(((article.get("source") or {}).get("name")) or "").strip()
         article_url = str(article.get("article_url") or "").strip()
@@ -187,22 +188,25 @@ class NewsEnrichmentService:
         tagged = self._tag_article(article)
         ask_message = (question or "").strip()
         if not ask_message:
-            sym_text = ", ".join(tickers[:4]) if tickers else "this news"
-            ask_message = f"Please analyze the market impact of {sym_text}: {title}"
-        additional_context = [
-            {
-                "type": "news_article",
-                "article_id": article.get("id"),
-                "title": title,
-                "summary": description,
-                "source": source_name,
-                "article_url": article_url or None,
-                "tickers": tickers,
-                "sector": tagged.sector if tagged else "general",
-                "topic": tagged.topic if tagged else "general",
-                "region": tagged.region if tagged else "US",
-            }
+            ask_message = f"Please analyze the market impact of this news"
+        additional_info = [
+            "Use the following news context when answering the user's question.",
+            f"Title: {title}",
+            f"Summary: {ai_summary or description}",
         ]
+        if source_name:
+            additional_info.append(f"Source: {source_name}")
+        if article_url:
+            additional_info.append(f"URL: {article_url}")
+        if tickers:
+            additional_info.append(f"Tickers: {', '.join(tickers)}")
+        if tagged:
+            additional_info.append(f"Sector: {tagged.sector}")
+            additional_info.append(f"Topic: {tagged.topic}")
+            additional_info.append(f"Region: {tagged.region}")
+            if tagged.tags:
+                additional_info.append(f"Tags: {', '.join(tagged.tags)}")
+        additional_context = [{"type": "directive", "content": "\n".join(additional_info)}]
         return {
             "thread_initial_message": ask_message,
             "additional_context": additional_context,

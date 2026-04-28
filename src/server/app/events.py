@@ -9,6 +9,8 @@ from fastapi import APIRouter, HTTPException, Query
 from src.server.database import market_event as market_event_db
 from src.server.models.events import (
     EventArticle,
+    EventAskRequest,
+    EventAskResponse,
     EventDetail,
     EventListResponse,
     EventListItem,
@@ -23,6 +25,79 @@ router = APIRouter(prefix="/api/v1/events", tags=["Events"])
 
 def _to_event_item(row: dict) -> EventListItem:
     return EventListItem(**row)
+
+
+def _build_event_ask_payload(
+    event_row: dict,
+    related_articles: list[dict],
+    question: str | None = None,
+    focus_symbol: str | None = None,
+) -> dict:
+    symbols = [str(s).upper() for s in (event_row.get("symbols") or []) if str(s).strip()]
+    primary_symbol = str(event_row.get("primary_symbol") or "").strip().upper() or None
+    summary = (
+        str(event_row.get("ai_takeaway") or "").strip()
+        or str(event_row.get("short_summary") or "").strip()
+        or str(event_row.get("title") or "").strip()
+    )
+    article_context = []
+    for article in related_articles[:5]:
+        article_id = str(article.get("article_id") or "").strip()
+        if not article_id:
+            continue
+        article_title = str(article.get("title") or "").strip() or article_id
+        article_source = str(article.get("source_name") or "").strip()
+        article_url = str(article.get("article_url") or "").strip()
+        published_at = (
+            article.get("published_at").isoformat()
+            if getattr(article.get("published_at"), "isoformat", None)
+            else article.get("published_at")
+        )
+        part = f"- {article_title}"
+        if article_source:
+            part += f" | source={article_source}"
+        if published_at:
+            part += f" | time={published_at}"
+        if article_url:
+            part += f" | url={article_url}"
+        article_context.append(part)
+
+    ask_message = (question or "").strip()
+    if not ask_message:
+        if focus_symbol:
+            ask_message = f"Please analyze this market event and its impact on {focus_symbol.upper()}."
+        elif primary_symbol:
+            ask_message = f"Please analyze this market event and its impact on {primary_symbol}."
+        else:
+            ask_message = "Please analyze this market event and its broader market impact."
+
+    directive_lines = [
+        "Use the following event context when answering the user's question.",
+        f"Event title: {event_row.get('title')}",
+        f"Summary: {summary or event_row.get('title')}",
+        f"Importance score: {event_row.get('importance_score') or 0}",
+        f"Primary symbol: {primary_symbol or 'N/A'}",
+        f"Symbols: {', '.join(symbols) if symbols else 'N/A'}",
+    ]
+    start_time = (
+        event_row.get("start_time").isoformat()
+        if getattr(event_row.get("start_time"), "isoformat", None)
+        else event_row.get("start_time")
+    )
+    if start_time:
+        directive_lines.append(f"Event time: {start_time}")
+    tags = event_row.get("tags") or []
+    if tags:
+        directive_lines.append(f"Tags: {', '.join([str(t) for t in tags])}")
+    if article_context:
+        directive_lines.append("Related news:")
+        directive_lines.extend(article_context)
+    additional_context = [{"type": "directive", "content": "\n".join(directive_lines)}]
+    return {
+        "thread_initial_message": ask_message,
+        "additional_context": additional_context,
+        "fallback_message": ask_message,
+    }
 
 
 @router.get("", response_model=EventListResponse)
@@ -90,6 +165,25 @@ async def get_events_by_symbol(
         limit=limit,
         offset=0,
     )
+
+
+@router.post("/{event_id}/ask", response_model=EventAskResponse)
+async def ask_about_event(
+    event_id: str,
+    payload: EventAskRequest,
+    user_id: CurrentUserId,
+) -> EventAskResponse:
+    row = await market_event_db.get_event(event_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Event not found")
+    related_articles = await market_event_db.list_event_article_links(event_id)
+    ask = _build_event_ask_payload(
+        row,
+        related_articles=related_articles,
+        question=payload.question,
+        focus_symbol=payload.focus_symbol,
+    )
+    return EventAskResponse(event_id=event_id, **ask)
 
 
 @router.post("/{event_id}/interpret", response_model=InterpretResponse)

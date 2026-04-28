@@ -37,6 +37,12 @@ export interface InterpretResult {
   generated_at: string;
 }
 
+export interface AskAIResult {
+  thread_initial_message: string;
+  fallback_message: string;
+  additional_context: Record<string, unknown>[];
+}
+
 interface EventListResponse {
   results: MarketEvent[];
   count: number;
@@ -68,6 +74,11 @@ export async function getEventsBySymbol(symbol: string, limit: number = 20): Pro
 
 export async function interpretEvent(eventId: string, payload: { focus_symbol?: string; refresh?: boolean } = {}): Promise<InterpretResult> {
   const { data } = await api.post(`/api/v1/events/${encodeURIComponent(eventId)}/interpret`, payload);
+  return data;
+}
+
+export async function askEvent(eventId: string, payload: { question?: string; focus_symbol?: string } = {}): Promise<AskAIResult> {
+  const { data } = await api.post(`/api/v1/events/${encodeURIComponent(eventId)}/ask`, payload);
   return data;
 }
 

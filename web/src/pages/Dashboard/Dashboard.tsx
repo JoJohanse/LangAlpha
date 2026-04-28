@@ -17,12 +17,16 @@ import PortfolioWatchlistCard from './components/PortfolioWatchlistCard';
 import NewsDetailModal from './components/NewsDetailModal';
 import InsightDetailModal from './components/InsightDetailModal';
 import EventDetailModal from './components/EventDetailModal';
+import AskAIDialog from './components/AskAIDialog';
 import AddWatchlistItemDialog from './components/AddWatchlistItemDialog';
 import AddPortfolioHoldingDialog from './components/AddPortfolioHoldingDialog';
 import { useWatchlistData } from './hooks/useWatchlistData';
 import { usePortfolioData, type PortfolioRow } from './hooks/usePortfolioData';
 import { useDashboardData } from './hooks/useDashboardData';
 import { useOnboarding, snoozePersonalization } from './hooks/useOnboarding';
+import { askNewsArticle } from './utils/api';
+import { askEvent } from './utils/eventsApi';
+import { launchAskAIChat, type AskAIResponsePayload } from './utils/askAi';
 import './Dashboard.css';
 
 interface DeleteConfirmState {
@@ -31,6 +35,29 @@ interface DeleteConfirmState {
   message: string;
   onConfirm: (() => Promise<void>) | null;
 }
+
+type DashboardAskTarget =
+  | {
+      type: 'news';
+      id: string;
+      title: string;
+      summary?: string | null;
+      source?: string | null;
+      articleUrl?: string | null;
+      tickers?: string[];
+      sector?: string | null;
+      topic?: string | null;
+      region?: string | null;
+      tags?: string[];
+    }
+  | {
+      type: 'event';
+      id: string;
+      title: string;
+      summary?: string | null;
+      symbols?: string[];
+      primarySymbol?: string | null;
+    };
 
 function Dashboard() {
   const { t } = useTranslation();
@@ -44,6 +71,8 @@ function Dashboard() {
   // News modal state
   const [selectedNewsId, setSelectedNewsId] = useState<string | null>(null);
   const [selectedNewsFallbackUrl, setSelectedNewsFallbackUrl] = useState<string | null>(null);
+  const [askTarget, setAskTarget] = useState<DashboardAskTarget | null>(null);
+  const [askLoading, setAskLoading] = useState(false);
 
   // Insight modal state
   const [selectedMarketInsightId, setSelectedMarketInsightId] = useState<string | null>(null);
@@ -104,6 +133,67 @@ function Dashboard() {
     if (deleteConfirm.onConfirm) await deleteConfirm.onConfirm();
     setDeleteConfirm((p) => ({ ...p, open: false }));
   }, [deleteConfirm.onConfirm]);
+
+  const handleAskAISubmit = useCallback(async (question: string) => {
+    if (!askTarget || askLoading) return;
+    setAskLoading(true);
+    try {
+      if (askTarget.type === 'news') {
+        const payload = await askNewsArticle(askTarget.id, question) as AskAIResponsePayload;
+        await launchAskAIChat({
+          navigate,
+          payload,
+          fallbackMessage: question,
+        });
+      } else {
+        const payload = await askEvent(askTarget.id, { question });
+        await launchAskAIChat({
+          navigate,
+          payload,
+          fallbackMessage: question,
+        });
+      }
+      setAskTarget(null);
+    } catch (e) {
+      console.error('[Dashboard] ask ai failed', e);
+      const fallbackMessage = askTarget.summary?.trim()
+        ? `${question}\n\nContext:\nTitle: ${askTarget.title}\nSummary: ${askTarget.summary}`
+        : `${question}\n\nContext:\nTitle: ${askTarget.title}`;
+      await launchAskAIChat({
+        navigate,
+        payload: {
+          thread_initial_message: fallbackMessage,
+          fallback_message: fallbackMessage,
+          additional_context: [{
+            type: 'directive',
+            content: askTarget.type === 'news'
+              ? [
+                  'Use the following news context when answering the user question.',
+                  `Title: ${askTarget.title}`,
+                  `Summary: ${askTarget.summary || askTarget.title}`,
+                  `Source: ${askTarget.source || 'N/A'}`,
+                  `URL: ${askTarget.articleUrl || 'N/A'}`,
+                  `Tickers: ${(askTarget.tickers || []).join(', ') || 'N/A'}`,
+                  `Sector: ${askTarget.sector || 'N/A'}`,
+                  `Topic: ${askTarget.topic || 'N/A'}`,
+                  `Region: ${askTarget.region || 'N/A'}`,
+                ].join('\n')
+              : [
+                  'Use the following event context when answering the user question.',
+                  `Event title: ${askTarget.title}`,
+                  `Summary: ${askTarget.summary || askTarget.title}`,
+                  `Symbols: ${(askTarget.symbols || []).join(', ') || 'N/A'}`,
+                  `Primary symbol: ${askTarget.primarySymbol || 'N/A'}`,
+                ].join('\n'),
+          }],
+        },
+        fallbackMessage,
+      });
+      setAskTarget(null);
+    } finally {
+      setAskLoading(false);
+    }
+  }, [askLoading, askTarget, navigate]);
 
   const portfolioWatchlistProps = {
     watchlistRows: watchlist.rows,
@@ -218,24 +308,31 @@ function Dashboard() {
                 }}
                 onAskNews={(id) => {
                   const article = [...quickNewsItems, ...hotNewsItems].find((x) => String(x.id) === String(id));
-                  const initialMessage = article?.title
-                    ? `Please analyze this market news and potential impact: ${article.title}`
-                    : 'Please analyze this market news and potential impact.';
-                  navigate('/chat', {
-                    state: {
-                      initialMessage,
-                      additionalContext: article ? [{
-                        type: 'news_article',
-                        article_id: article.id,
-                        title: article.title,
-                        source: article.source,
-                        article_url: article.articleUrl,
-                        tickers: article.tickers,
-                        sector: article.sector,
-                        topic: article.topic,
-                        region: article.region,
-                      }] : null,
-                    },
+                  if (!article) return;
+                  setAskTarget({
+                    type: 'news',
+                    id: String(article.id),
+                    title: article.title,
+                    summary: article.title,
+                    source: article.source,
+                    articleUrl: article.articleUrl,
+                    tickers: article.tickers,
+                    sector: article.sector,
+                    topic: article.topic,
+                    region: article.region,
+                    tags: article.tags,
+                  });
+                }}
+                onAskEvent={(eventId) => {
+                  const event = [...hotEvents, ...eventItems].find((x) => x.event_id === eventId);
+                  if (!event) return;
+                  setAskTarget({
+                    type: 'event',
+                    id: event.event_id,
+                    title: event.title,
+                    summary: event.short_summary || event.ai_takeaway || event.title,
+                    symbols: event.symbols,
+                    primarySymbol: event.primary_symbol,
                   });
                 }}
                 onEventClick={setSelectedEventId}
@@ -356,6 +453,15 @@ function Dashboard() {
           <EarningsCalendarCard />
         </div>
       </MobileBottomSheet>
+
+      <AskAIDialog
+        open={!!askTarget}
+        onClose={() => setAskTarget(null)}
+        onSubmit={handleAskAISubmit}
+        loading={askLoading}
+        title={askTarget?.type === 'event' ? 'Ask AI About This Event' : 'Ask AI About This News'}
+        subjectLabel={askTarget?.title || null}
+      />
     </div>
   );
 }
