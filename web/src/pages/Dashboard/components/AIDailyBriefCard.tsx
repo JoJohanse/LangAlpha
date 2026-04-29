@@ -309,6 +309,27 @@ function AIDailyBriefCard({ onReadFull }: AIDailyBriefCardProps) {
               </button>
             ))}
           </div>
+          <div className="mt-4 flex flex-col items-center gap-3">
+            <button
+              onClick={handleGeneratePersonalized}
+              disabled={generating}
+              title="Generate a personalized market brief based on your watchlist and portfolio holdings"
+              className="group/btn inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-semibold transition-colors border"
+              style={{
+                borderColor: 'var(--color-border-default)',
+                color: 'var(--color-text-secondary)',
+                opacity: generating ? 0.6 : 1,
+              }}
+            >
+              {generating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+              {generating ? 'Generating...' : 'Generate Personalized Brief'}
+            </button>
+            {generateError && (
+              <p className="text-xs" style={{ color: 'var(--color-loss, #ef4444)' }}>
+                {generateError}
+              </p>
+            )}
+          </div>
         </div>
       </div>
     );

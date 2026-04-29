@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import re
 from collections import Counter
@@ -22,6 +21,10 @@ MAX_NEWS_FETCH = 300
 TITLE_JACCARD_THRESHOLD = 0.55
 TIME_DIFF_THRESHOLD = timedelta(hours=6)
 INTERPRET_TIMEOUT_SECONDS = 45
+CONTEXT_JACCARD_THRESHOLD = 0.18
+TITLE_COVERAGE_THRESHOLD = 0.6
+CLUSTER_SIMILARITY_THRESHOLD = 0.52
+CONTEXT_TEXT_MAX_CHARS = 800
 
 _STOP_WORDS = {
     "the", "a", "an", "to", "for", "of", "and", "or", "in", "on", "with", "at",
@@ -46,12 +49,25 @@ def _title_tokens(title: str) -> set[str]:
     return {p for p in parts if p not in _STOP_WORDS and len(p) > 1}
 
 
+def _text_tokens(text: str, max_chars: int | None = None) -> set[str]:
+    if max_chars is not None:
+        text = text[:max_chars]
+    parts = re.findall(r"[a-zA-Z0-9]+", text.lower())
+    return {p for p in parts if p not in _STOP_WORDS and len(p) > 1}
+
+
 def _jaccard(a: set[str], b: set[str]) -> float:
     if not a or not b:
         return 0.0
     inter = len(a & b)
     union = len(a | b)
     return inter / union if union > 0 else 0.0
+
+
+def _coverage(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / min(len(a), len(b))
 
 
 def _normalize_score(article_count: int, unique_source_count: int, has_sentiment: bool) -> float:
@@ -100,6 +116,7 @@ class _Cluster:
     articles: list[dict[str, Any]] = field(default_factory=list)
     tickers: set[str] = field(default_factory=set)
     title_tokens: set[str] = field(default_factory=set)
+    context_tokens: set[str] = field(default_factory=set)
     first_time: datetime | None = None
     sentiments: list[str] = field(default_factory=list)
     sources: set[str] = field(default_factory=set)
@@ -280,16 +297,21 @@ class EventService:
                     sentiments.append(sent)
             source_name = str(((raw.get("source") or {}).get("name")) or "").strip()
             article_url = str(raw.get("article_url") or "").strip()
+            context_text = self._build_context_text(raw)
+            title_tokens = _title_tokens(title) | tickers
+            context_tokens = _text_tokens(context_text, max_chars=CONTEXT_TEXT_MAX_CHARS) | tickers
             articles.append(
                 {
                     "id": article_id,
                     "title": title,
+                    "context_text": context_text or None,
                     "article_url": article_url or None,
                     "published_at": published_at,
                     "tickers": sorted(tickers),
-                    # Include ticker tokens in similarity signature so wording
-                    # variants around the same symbol can still meet threshold.
-                    "title_tokens": _title_tokens(title) | tickers,
+                    # Include ticker tokens in similarity signatures so wording
+                    # variants around the same symbol can still be linked.
+                    "title_tokens": title_tokens,
+                    "context_tokens": context_tokens,
                     "sentiments": sentiments,
                     "source_name": source_name,
                 }
@@ -299,6 +321,7 @@ class EventService:
         clusters: list[_Cluster] = []
         for article in articles:
             matched: _Cluster | None = None
+            best_score = 0.0
             for cluster in clusters:
                 if not (set(article["tickers"]) & cluster.tickers):
                     continue
@@ -306,16 +329,19 @@ class EventService:
                     continue
                 if abs(cluster.first_time - article["published_at"]) > TIME_DIFF_THRESHOLD:
                     continue
-                if _jaccard(article["title_tokens"], cluster.title_tokens) < TITLE_JACCARD_THRESHOLD:
+                similarity = self._cluster_similarity(article, cluster)
+                if similarity < CLUSTER_SIMILARITY_THRESHOLD:
                     continue
-                matched = cluster
-                break
+                if similarity > best_score:
+                    matched = cluster
+                    best_score = similarity
 
             if matched is None:
                 matched = _Cluster(
                     articles=[],
                     tickers=set(),
                     title_tokens=set(article["title_tokens"]),
+                    context_tokens=set(article["context_tokens"]),
                     first_time=article["published_at"],
                     sentiments=[],
                     sources=set(),
@@ -325,6 +351,7 @@ class EventService:
             matched.articles.append(article)
             matched.tickers.update(article["tickers"])
             matched.title_tokens.update(article["title_tokens"])
+            matched.context_tokens.update(article["context_tokens"])
             matched.sentiments.extend(article["sentiments"])
             if article["source_name"]:
                 matched.sources.add(article["source_name"])
@@ -332,6 +359,36 @@ class EventService:
                 matched.first_time = article["published_at"]
 
         return clusters
+
+    def _build_context_text(self, raw_article: dict[str, Any]) -> str:
+        parts: list[str] = []
+        for key in ("description", "summary", "content", "body", "text"):
+            value = str(raw_article.get(key) or "").strip()
+            if value and value not in parts:
+                parts.append(value)
+        return "\n".join(parts)[:CONTEXT_TEXT_MAX_CHARS]
+
+    def _cluster_similarity(self, article: dict[str, Any], cluster: _Cluster) -> float:
+        title_similarity = _jaccard(article["title_tokens"], cluster.title_tokens)
+        context_similarity = _jaccard(article["context_tokens"], cluster.context_tokens)
+        title_coverage = _coverage(article["title_tokens"], cluster.title_tokens)
+        context_coverage = _coverage(article["context_tokens"], cluster.context_tokens)
+
+        if (
+            title_similarity < (TITLE_JACCARD_THRESHOLD * 0.45)
+            and title_coverage < TITLE_COVERAGE_THRESHOLD
+        ):
+            return 0.0
+        if context_similarity < CONTEXT_JACCARD_THRESHOLD and context_coverage < 0.35:
+            return 0.0
+
+        return round(
+            (title_similarity * 0.5)
+            + (title_coverage * 0.3)
+            + (context_similarity * 0.15)
+            + (context_coverage * 0.05),
+            4,
+        )
 
     async def _persist_clusters(self, clusters: list[_Cluster]) -> None:
         for cluster in clusters:
