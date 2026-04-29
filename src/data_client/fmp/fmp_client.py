@@ -19,13 +19,19 @@ class FMPClient:
     BASE_URL = "https://financialmodelingprep.com/api"
     DEFAULT_VERSION = "v3"
 
-    def __init__(self, api_key: Optional[str] = None, cache_ttl: int = 300):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        cache_ttl: int = 300,
+        timeout: float = 30.0,
+    ):
         """
         Initialize FMP API client
 
         Args:
             api_key: FMP API key (will use env var FMP_API_KEY if not provided)
             cache_ttl: Cache time-to-live in seconds (default 5 minutes)
+            timeout: HTTP request timeout in seconds (default 30)
         """
         self.api_key = api_key or os.getenv("FMP_API_KEY")
         if not self.api_key:
@@ -34,6 +40,7 @@ class FMPClient:
             )
 
         self.cache_ttl = cache_ttl
+        self._timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
         self._cache: OrderedDict[str, Any] = OrderedDict()
         self._cache_timestamps: Dict[str, datetime] = {}
@@ -43,7 +50,7 @@ class FMPClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 http2=True,
-                timeout=30.0,
+                timeout=self._timeout,
                 limits=httpx.Limits(max_keepalive_connections=10),
             )
         return self._client

@@ -6,6 +6,16 @@
 # DB_HOST, REDIS_URL to your own instances.
 
 services:
+  # sandbox:
+  #   profiles: ["infra"]
+  #   image: ${SANDBOX_IMAGE:-langalpha/sandbox:latest}
+  #   restart: unless-stopped
+  #   ports:
+  #     - "127.0.0.1:8000:8000"
+  #   volumes:
+  #     - langalpha-sandbox-data:/app
+  #   environment:
+  #     SANDBOX_PROVIDER: ${SANDBOX_PROVIDER:-docker}
   postgres:
     profiles: ["infra"]
     image: postgres:18.0

@@ -18,8 +18,8 @@ from src.server.database import market_event as market_event_db
 logger = logging.getLogger(__name__)
 
 AGG_WINDOW_HOURS = 24
-AGG_INTERVAL_SECONDS = 600
-MAX_NEWS_FETCH = 100
+AGG_INTERVAL_SECONDS = 300
+MAX_NEWS_FETCH = 50
 TITLE_JACCARD_THRESHOLD = 0.55
 TIME_DIFF_THRESHOLD = timedelta(hours=6)
 INTERPRET_TIMEOUT_SECONDS = 45

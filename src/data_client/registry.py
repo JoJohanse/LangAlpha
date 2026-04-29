@@ -49,11 +49,24 @@ def _yfinance_available() -> bool:
 
 def _pobo_proxy_available() -> bool:
     url = "http://host.docker.internal:5000/health"
-    try:
-        with request.urlopen(url, timeout=1.5) as resp:  # noqa: S310
-            return 200 <= resp.status < 300
-    except Exception:
-        return False
+    for attempt in (1, 2):
+        try:
+            with request.urlopen(url, timeout=3.0) as resp:  # noqa: S310
+                if 200 <= resp.status < 300:
+                    return True
+                logger.debug(
+                    "pobo_proxy.health_check: attempt %s returned status %s",
+                    attempt,
+                    resp.status,
+                )
+        except Exception:
+            logger.debug(
+                "pobo_proxy.health_check: attempt %s failed", attempt, exc_info=True
+            )
+    logger.warning(
+        "pobo_proxy.health_check: all attempts failed — pobo will not be registered"
+    )
+    return False
 
 
 async def _pobo_proxy_available_async() -> bool:

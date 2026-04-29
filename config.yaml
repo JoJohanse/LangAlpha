@@ -153,8 +153,8 @@ news_data:
   providers:
     - name: pobo-proxy
     # - name: ginlix-data
-    # - name: fmp
-    # - name: yfinance
+    - name: fmp
+    - name: yfinance
 
 
 # =============================================================================

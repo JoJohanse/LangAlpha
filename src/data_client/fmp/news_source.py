@@ -53,7 +53,7 @@ class FMPNewsSource:
         sort: str | None = None,
         user_id: str | None = None,
     ) -> dict[str, Any]:
-        async with FMPClient() as client:
+        async with FMPClient(timeout=10.0) as client:
             if tickers:
                 raw = await client.get_stock_news(
                     tickers=",".join(tickers),
@@ -76,7 +76,7 @@ class FMPNewsSource:
     ) -> dict[str, Any] | None:
         """Fetch recent articles and return the one matching *article_id*."""
         try:
-            async with FMPClient() as client:
+            async with FMPClient(timeout=10.0) as client:
                 raw = await client.get_general_news(limit=50)
             articles = raw if isinstance(raw, list) else []
             for a in articles:
