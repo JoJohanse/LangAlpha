@@ -1288,6 +1288,14 @@
         }
       }
     },
+    "siliconflow": {
+      "sdk": "openai",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "env_key": "SILICONFLOW_API_KEY",
+      "access_type": "api_key",
+      "use_response_api": false,
+      "display_name": "SiliconFlow"
+    },
     "deepseek": {
       "sdk": "anthropic",
       "base_url": "https://api.deepseek.com/anthropic",

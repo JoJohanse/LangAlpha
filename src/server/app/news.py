@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 
 from src.data_client import get_news_data_provider
 from src.server.database import news_article_tags as tags_db
@@ -18,13 +19,14 @@ from src.server.models.news import (
     NewsAskRequest,
     NewsAskResponse,
     NewsCompactResponse,
+    NewsDeleteRequest,
     NewsHotRankItem,
     NewsHotRankResponse,
     NewsPublisher,
 )
 from src.server.services.cache.news_cache_service import NewsCacheService
 from src.server.services.news_enrichment_service import NewsEnrichmentService
-from src.server.utils.api import CurrentUserId
+from src.server.utils.api import CurrentUserId, handle_api_exceptions, raise_not_found
 
 logger = logging.getLogger(__name__)
 
@@ -367,3 +369,19 @@ async def interpret_news_article(
         cached=False,
         generated_at=datetime.now(timezone.utc),
     )
+
+
+@router.delete("/{article_id}", status_code=204)
+@handle_api_exceptions("delete news article", logger)
+async def delete_news_article(article_id: str, user_id: CurrentUserId):
+    deleted = await tags_db.delete_news_article(article_id)
+    if not deleted:
+        raise_not_found("News article")
+    return Response(status_code=204)
+
+
+@router.delete("", status_code=204)
+@handle_api_exceptions("delete news articles", logger)
+async def delete_news_articles(payload: NewsDeleteRequest, user_id: CurrentUserId):
+    await tags_db.delete_news_articles(payload.article_ids)
+    return Response(status_code=204)

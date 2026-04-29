@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class NewsPublisher(BaseModel):
@@ -91,6 +91,10 @@ class NewsHotRankResponse(BaseModel):
     results: list[NewsHotRankItem]
     count: int
     limit: int
+
+
+class NewsDeleteRequest(BaseModel):
+    article_ids: list[str] = Field(min_length=1, max_length=200)
 
 
 class NewsAskRequest(BaseModel):

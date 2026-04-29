@@ -11,20 +11,24 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import NAMESPACE_DNS, uuid5
 
+from pydantic import BaseModel, Field
+
 from src.server.database import market_event as market_event_db
 
 logger = logging.getLogger(__name__)
 
 AGG_WINDOW_HOURS = 24
-AGG_INTERVAL_SECONDS = 300
-MAX_NEWS_FETCH = 300
+AGG_INTERVAL_SECONDS = 600
+MAX_NEWS_FETCH = 100
 TITLE_JACCARD_THRESHOLD = 0.55
 TIME_DIFF_THRESHOLD = timedelta(hours=6)
 INTERPRET_TIMEOUT_SECONDS = 45
+EVENT_PREGENERATE_TIMEOUT_SECONDS = 60
 CONTEXT_JACCARD_THRESHOLD = 0.18
 TITLE_COVERAGE_THRESHOLD = 0.6
 CLUSTER_SIMILARITY_THRESHOLD = 0.52
 CONTEXT_TEXT_MAX_CHARS = 800
+EVENT_GENERATION_MAX_CONCURRENCY = 3
 
 _STOP_WORDS = {
     "the", "a", "an", "to", "for", "of", "and", "or", "in", "on", "with", "at",
@@ -122,6 +126,22 @@ class _Cluster:
     sources: set[str] = field(default_factory=set)
 
 
+class _EventInterpretationOutput(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    takeaway: str = Field(min_length=1, max_length=1200)
+
+
+_EVENT_JSON_GUIDELINES = """
+You MUST respond with ONLY a valid JSON object.
+Do not include markdown, code fences, commentary, or extra text.
+The JSON schema is:
+{
+  "title": "简体中文事件标题，概括相关新闻共同主题，最多120字",
+  "takeaway": "简体中文事件总结，3-5句，基于已提供新闻内容，避免投资建议"
+}
+"""
+
+
 class EventService:
     _instance: "EventService | None" = None
 
@@ -175,8 +195,9 @@ class EventService:
         if event.get("ai_takeaway") and not refresh:
             return str(event["ai_takeaway"]), None, True
 
-        model_name, interpretation = await self._generate_interpretation(
-            target_type="event",
+        related_articles = await market_event_db.list_event_article_links(event_id)
+
+        model_name, generated_title, interpretation, _ = await self._generate_event_interpretation(
             payload={
                 "title": event.get("title"),
                 "summary": event.get("short_summary"),
@@ -184,9 +205,25 @@ class EventService:
                 "sentiment": event.get("sentiment"),
                 "importance_score": event.get("importance_score"),
                 "focus_symbol": focus_symbol,
+                "related_articles": [
+                    {
+                        "title": article.get("title"),
+                        "source_name": article.get("source_name"),
+                        "published_at": (
+                            article.get("published_at").isoformat()
+                            if getattr(article.get("published_at"), "isoformat", None)
+                            else article.get("published_at")
+                        ),
+                    }
+                    for article in related_articles[:6]
+                ],
             },
         )
-        await market_event_db.update_event_takeaway(event_id, interpretation)
+        await market_event_db.update_event_takeaway(
+            event_id,
+            ai_takeaway=interpretation,
+            title=generated_title,
+        )
         return interpretation, model_name, False
 
     async def interpret_article(
@@ -204,6 +241,58 @@ class EventService:
             },
         )
         return interpretation, model_name
+
+    async def _generate_event_interpretation(
+        self, payload: dict[str, Any]
+    ) -> tuple[str | None, str, str, bool]:
+        from src.llms import create_llm
+        from src.llms.api_call import make_api_call
+        from src.server.app import setup
+
+        model_name = None
+        fallback_title = str(payload.get("title") or "").strip() or "市场事件"
+        fallback_summary = str(payload.get("summary") or "").strip() or fallback_title
+        fallback_takeaway = (
+            f"该事件与 {', '.join(payload.get('symbols') or []) or '相关资产'} 相关。"
+            f"核心信息：{fallback_summary}。"
+            "请结合后续新闻进展、价格变化和成交量确认影响是否持续。"
+        )
+
+        try:
+            if not setup.agent_config or not setup.agent_config.llm:
+                raise RuntimeError("LLM not configured")
+            model_name = setup.agent_config.llm.flash
+            llm = create_llm(model_name)
+            system_prompt = (
+                "You are a financial market analyst. "
+                "Read the related news context and produce a single representative event title plus a concise factual interpretation. "
+                "The title must summarize the common event behind the related news rather than copying one article headline verbatim when a broader synthesis is possible. "
+                "Avoid investment advice and speculation. "
+                "All output must be in Simplified Chinese."
+            )
+            user_prompt = (
+                "Generate a representative market-event title and takeaway from this payload.\n"
+                f"{_EVENT_JSON_GUIDELINES}\n"
+                f"Payload: {payload}"
+            )
+            response = await asyncio.wait_for(
+                make_api_call(
+                    llm=llm,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    response_schema=_EventInterpretationOutput,
+                    max_parsing_retries=2,
+                ),
+                timeout=INTERPRET_TIMEOUT_SECONDS,
+            )
+            title = str(response.title).strip()
+            takeaway = str(response.takeaway).strip()
+            if title and takeaway:
+                return model_name, title, takeaway, True
+        except Exception as e:
+            logger.warning("[MARKET_EVENTS] event interpret fallback triggered: %s", e)
+
+        return model_name, fallback_title, fallback_takeaway, False
 
     async def _generate_interpretation(
         self, target_type: str, payload: dict[str, Any]
@@ -391,9 +480,17 @@ class EventService:
         )
 
     async def _persist_clusters(self, clusters: list[_Cluster]) -> None:
-        for cluster in clusters:
-            if not cluster.articles or not cluster.first_time:
-                continue
+        valid_clusters = [
+            cluster for cluster in clusters if cluster.articles and cluster.first_time
+        ]
+        if not valid_clusters:
+            return
+
+        generated_event_content = await self._generate_cluster_contents(valid_clusters)
+
+        for cluster, generated in zip(valid_clusters, generated_event_content, strict=False):
+            event_title = generated["title"]
+            ai_takeaway = generated["takeaway"]
 
             ticker_counter = Counter(
                 t for article in cluster.articles for t in article["tickers"]
@@ -402,7 +499,6 @@ class EventService:
                 ticker_counter.most_common(1)[0][0] if ticker_counter else "UNKNOWN"
             )
             sorted_symbols = sorted(cluster.tickers)
-            lead_article = cluster.articles[0]
             signature_tokens = sorted(cluster.title_tokens)
             event_id = _stable_event_id(
                 primary_symbol=primary_symbol,
@@ -418,7 +514,7 @@ class EventService:
             event_row = await market_event_db.upsert_market_event(
                 {
                     "event_id": event_id,
-                    "title": lead_article["title"],
+                    "title": event_title,
                     "short_summary": self._build_cluster_summary(cluster),
                     "importance_score": importance,
                     "sentiment": sentiment,
@@ -427,6 +523,7 @@ class EventService:
                     "symbols": sorted_symbols,
                     "tags": signature_tokens[:12],
                     "article_count": len(cluster.articles),
+                    "ai_takeaway": ai_takeaway or None,
                     "status": "active",
                 }
             )
@@ -457,13 +554,140 @@ class EventService:
                     "event_time": cluster.first_time,
                     "impact_direction": direction,
                     "impact_score": importance,
-                    "display_title": lead_article["title"],
+                    "display_title": event_title,
                 }
                 for symbol in sorted_symbols
             ]
             await market_event_db.replace_symbol_links(
                 event_row["event_id"], symbol_links
             )
+
+    async def _generate_cluster_contents(
+        self,
+        clusters: list[_Cluster],
+    ) -> list[dict[str, str]]:
+        semaphore = asyncio.Semaphore(EVENT_GENERATION_MAX_CONCURRENCY)
+
+        async def _generate(cluster: _Cluster) -> dict[str, str]:
+            fallback_title = self._build_cluster_title(cluster)
+            fallback_takeaway = self._build_cluster_summary(cluster)
+            try:
+                payload = self._build_cluster_generation_payload(cluster)
+                async with semaphore:
+                    _, title, takeaway, success = await asyncio.wait_for(
+                        self._generate_event_interpretation(payload),
+                        timeout=EVENT_PREGENERATE_TIMEOUT_SECONDS,
+                    )
+                return {
+                    "title": title if success and title else fallback_title,
+                    "takeaway": takeaway if success and takeaway else "",
+                }
+            except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+                logger.warning(
+                    "[MARKET_EVENTS] Cluster gen timeout, using fallback: %s", e
+                )
+            except Exception as e:
+                logger.warning(
+                    "[MARKET_EVENTS] Cluster gen failed, using fallback: %s", e
+                )
+            return {
+                "title": fallback_title,
+                "takeaway": fallback_takeaway if fallback_takeaway else "",
+            }
+
+        return await asyncio.gather(*[_generate(cluster) for cluster in clusters])
+
+    def _build_cluster_generation_payload(self, cluster: _Cluster) -> dict[str, Any]:
+        ticker_counter = Counter(
+            ticker for article in cluster.articles for ticker in article["tickers"]
+        )
+        primary_symbol = (
+            ticker_counter.most_common(1)[0][0] if ticker_counter else None
+        )
+        return {
+            "title": self._build_cluster_title(cluster),
+            "summary": self._build_cluster_summary(cluster),
+            "symbols": sorted(cluster.tickers),
+            "primary_symbol": primary_symbol,
+            "sentiment": _pick_sentiment(cluster.sentiments),
+            "importance_score": _normalize_score(
+                article_count=len(cluster.articles),
+                unique_source_count=len(cluster.sources),
+                has_sentiment=bool(cluster.sentiments),
+            ),
+            "related_articles": [
+                {
+                    "title": article.get("title"),
+                    "source_name": article.get("source_name"),
+                    "published_at": (
+                        article.get("published_at").isoformat()
+                        if getattr(article.get("published_at"), "isoformat", None)
+                        else article.get("published_at")
+                    ),
+                    "summary": article.get("context_text"),
+                    "tickers": article.get("tickers"),
+                }
+                for article in cluster.articles[:6]
+            ],
+        }
+
+    def _build_cluster_title(self, cluster: _Cluster) -> str:
+        if not cluster.articles:
+            return ""
+        if len(cluster.articles) == 1:
+            return str(cluster.articles[0]["title"])
+
+        best_article = max(
+            cluster.articles,
+            key=lambda article: (
+                self._cluster_title_score(article, cluster.articles, cluster.tickers),
+                len(set(article["tickers"]) & cluster.tickers),
+                -len(str(article.get("title") or "")),
+                article.get("published_at") or datetime.min.replace(tzinfo=timezone.utc),
+            ),
+        )
+        return str(best_article["title"])
+
+    def _cluster_title_score(
+        self,
+        candidate: dict[str, Any],
+        articles: list[dict[str, Any]],
+        cluster_tickers: set[str],
+    ) -> float:
+        if not articles:
+            return 0.0
+
+        peer_scores = [
+            self._article_pair_similarity(candidate, article)
+            for article in articles
+            if article["id"] != candidate["id"]
+        ]
+        mean_peer_score = sum(peer_scores) / len(peer_scores) if peer_scores else 1.0
+        ticker_coverage = (
+            len(set(candidate["tickers"]) & cluster_tickers) / len(cluster_tickers)
+            if cluster_tickers
+            else 0.0
+        )
+        source_bonus = 0.02 if candidate.get("source_name") else 0.0
+        return round((mean_peer_score * 0.9) + (ticker_coverage * 0.08) + source_bonus, 4)
+
+    def _article_pair_similarity(
+        self,
+        left: dict[str, Any],
+        right: dict[str, Any],
+    ) -> float:
+        title_similarity = _jaccard(left["title_tokens"], right["title_tokens"])
+        title_coverage = _coverage(left["title_tokens"], right["title_tokens"])
+        context_similarity = _jaccard(left["context_tokens"], right["context_tokens"])
+        ticker_overlap = _coverage(set(left["tickers"]), set(right["tickers"]))
+
+        return round(
+            (title_similarity * 0.55)
+            + (title_coverage * 0.25)
+            + (context_similarity * 0.12)
+            + (ticker_overlap * 0.08),
+            4,
+        )
 
     def _build_cluster_summary(self, cluster: _Cluster) -> str:
         if not cluster.articles:

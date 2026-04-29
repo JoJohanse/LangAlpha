@@ -8,6 +8,9 @@ from typing import Any, Optional
 
 import pandas as pd
 import yfinance as yf
+
+yf.set_tz_cache_location("/tmp/yfinance_cache")
+
 from mcp.server.fastmcp import FastMCP
 
 

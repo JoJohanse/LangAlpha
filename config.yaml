@@ -162,7 +162,7 @@ news_data:
 # =============================================================================
 market_insight:
   enabled: true
-  timezone: "China/Shanghai"  # Timezone for scheduling (e.g., market open/close times)
+  timezone: "Asia/Shanghai"  # Timezone for scheduling (e.g., market open/close times)
   generation_timeout: 600         # Seconds before background generation times out
   max_symbols_context: 20         # Max symbols in personalized prompt context
   dedup_window_minutes: 5         # Dedup window for per-user insights

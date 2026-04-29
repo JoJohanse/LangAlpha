@@ -391,6 +391,14 @@
       "text"
     ]
   },
+  "DeepSeek-V4-Flash": {
+    "model_id": "deepseek-ai/DeepSeek-V4-Flash",
+    "provider": "siliconflow",
+    "visible": true,
+    "input_modalities": [
+      "text"
+    ]
+  },
   "glm-5.1": {
     "model_id": "glm-5.1",
     "provider": "z-ai",

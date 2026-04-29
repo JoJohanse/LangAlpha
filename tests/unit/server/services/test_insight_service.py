@@ -629,9 +629,10 @@ class TestGenerateInsight:
         InsightService._instance = None
 
     @pytest.mark.asyncio
+    @patch("src.data_client.get_news_data_provider", new_callable=AsyncMock)
     @patch("src.server.services.insight_service._run_flash_agent", new_callable=AsyncMock)
     @patch("src.server.services.insight_service.insight_db")
-    async def test_timeout_marks_row_failed(self, mock_db, mock_agent):
+    async def test_timeout_marks_row_failed(self, mock_db, mock_agent, mock_news_provider):
         """A hung flash agent triggers timeout and marks the DB row as failed."""
         svc = InsightService()
         svc._generation_timeout = 0.1  # 100ms timeout
@@ -640,6 +641,10 @@ class TestGenerateInsight:
             return_value={"market_insight_id": "test-id", "status": "generating"}
         )
         mock_db.fail_market_insight = AsyncMock()
+
+        mock_news_provider.return_value = AsyncMock(
+            get_news=AsyncMock(return_value={"results": []})
+        )
 
         # Agent hangs forever
         async def hang_forever(*a, **kw):

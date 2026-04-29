@@ -314,15 +314,44 @@ async def get_symbol_event_markers(
             return [dict(row) for row in await cur.fetchall()]
 
 
-async def update_event_takeaway(event_id: str, ai_takeaway: str) -> bool:
+async def delete_event(event_id: str) -> bool:
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM market_events WHERE event_id = %s",
+                (event_id,),
+            )
+            return cur.rowcount > 0
+
+
+async def delete_events(event_ids: list[str]) -> int:
+    if not event_ids:
+        return 0
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM market_events WHERE event_id = ANY(%s)",
+                (event_ids,),
+            )
+            return cur.rowcount
+
+
+async def update_event_takeaway(
+    event_id: str,
+    ai_takeaway: str,
+    title: str | None = None,
+) -> bool:
     async with get_db_connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
                 UPDATE market_events
-                SET ai_takeaway = %s, updated_at = NOW()
+                SET
+                    ai_takeaway = %s,
+                    title = COALESCE(%s, title),
+                    updated_at = NOW()
                 WHERE event_id = %s
                 """,
-                (ai_takeaway, event_id),
+                (ai_takeaway, title, event_id),
             )
             return cur.rowcount > 0

@@ -71,6 +71,10 @@ class InterpretResponse(BaseModel):
     generated_at: datetime
 
 
+class EventDeleteRequest(BaseModel):
+    event_ids: list[str] = Field(min_length=1, max_length=200)
+
+
 class EventAskRequest(BaseModel):
     question: str | None = Field(default=None, description="Optional user question")
     focus_symbol: str | None = Field(default=None, description="Optional symbol focus")

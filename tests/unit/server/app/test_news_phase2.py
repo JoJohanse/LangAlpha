@@ -251,7 +251,11 @@ async def test_get_news_by_sector(client):
             "tags": ["finance", "earnings"],
         }
     ]
-    with patch("src.server.app.news.tags_db.list_articles_by_sector", AsyncMock(return_value=rows)):
+    provider = SimpleNamespace(get_news=AsyncMock(return_value={"results": []}))
+    with (
+        patch("src.server.app.news.tags_db.list_articles_by_sector", AsyncMock(return_value=rows)),
+        patch("src.server.app.news.get_news_data_provider", AsyncMock(return_value=provider)),
+    ):
         resp = await client.get("/api/v1/news/by-sector/finance")
     assert resp.status_code == 200
     body = resp.json()
@@ -275,7 +279,11 @@ async def test_get_news_by_topic(client):
             "tags": ["macro"],
         }
     ]
-    with patch("src.server.app.news.tags_db.list_articles_by_topic", AsyncMock(return_value=rows)):
+    provider = SimpleNamespace(get_news=AsyncMock(return_value={"results": []}))
+    with (
+        patch("src.server.app.news.tags_db.list_articles_by_topic", AsyncMock(return_value=rows)),
+        patch("src.server.app.news.get_news_data_provider", AsyncMock(return_value=provider)),
+    ):
         resp = await client.get("/api/v1/news/by-topic/macro")
     assert resp.status_code == 200
     body = resp.json()

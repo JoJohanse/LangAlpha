@@ -158,3 +158,25 @@ async def list_articles_by_topic(
                 (topic, limit, offset),
             )
             return [dict(row) for row in await cur.fetchall()]
+
+
+async def delete_news_article(article_id: str) -> bool:
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM news_article_tags WHERE article_id = %s",
+                (article_id,),
+            )
+            return cur.rowcount > 0
+
+
+async def delete_news_articles(article_ids: list[str]) -> int:
+    if not article_ids:
+        return 0
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM news_article_tags WHERE article_id = ANY(%s)",
+                (article_ids,),
+            )
+            return cur.rowcount

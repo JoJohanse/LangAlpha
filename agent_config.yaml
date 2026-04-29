@@ -7,14 +7,11 @@
 
 llm:
   # Model name from src/llms/manifest/models.json
-  name: "qwen3.5-plus"
-  flash: "qwen3.6-flash"
-  compaction: "qwen3.6-flash" # defaults to flash model
-  fetch: "qwen3.6-flash"         # defaults to flash model
+  name: "DeepSeek-V4-Flash"
+  flash: "DeepSeek-V4-Flash"
+  compaction: "DeepSeek-V4-Flash" # defaults to flash model
+  fetch: "DeepSeek-V4-Flash"         # defaults to flash model
   fallback:
-    - "kimi-k2.5"
-    - "minimax-m2.7"
-    - "glm-5-turbo"
 
 sandbox:
   # Provider selection: "daytona" (cloud) or "docker" (local).

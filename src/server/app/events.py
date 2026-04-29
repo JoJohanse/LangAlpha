@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 
 from src.server.database import market_event as market_event_db
 from src.server.models.events import (
     EventArticle,
     EventAskRequest,
     EventAskResponse,
+    EventDeleteRequest,
     EventDetail,
     EventListResponse,
     EventListItem,
@@ -18,9 +21,10 @@ from src.server.models.events import (
     InterpretResponse,
 )
 from src.server.services.event_service import EventService
-from src.server.utils.api import CurrentUserId
+from src.server.utils.api import CurrentUserId, handle_api_exceptions, raise_not_found
 
 router = APIRouter(prefix="/api/v1/events", tags=["Events"])
+logger = logging.getLogger(__name__)
 
 
 def _to_event_item(row: dict) -> EventListItem:
@@ -208,3 +212,19 @@ async def interpret_event(
         cached=cached,
         generated_at=datetime.now(timezone.utc),
     )
+
+
+@router.delete("/{event_id}", status_code=204)
+@handle_api_exceptions("delete event", logger)
+async def delete_event(event_id: str, user_id: CurrentUserId):
+    deleted = await market_event_db.delete_event(event_id)
+    if not deleted:
+        raise_not_found("Event")
+    return Response(status_code=204)
+
+
+@router.delete("", status_code=204)
+@handle_api_exceptions("delete events", logger)
+async def delete_events(payload: EventDeleteRequest, user_id: CurrentUserId):
+    await market_event_db.delete_events(payload.event_ids)
+    return Response(status_code=204)
