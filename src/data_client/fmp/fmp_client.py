@@ -362,7 +362,10 @@ class FMPClient:
     # Company Information
     async def get_profile(self, symbol: str) -> List[Dict]:
         """Get company profile"""
-        return await self._make_request(f"profile/{symbol}")
+        try:
+            return await self._make_request(f"profile/{symbol}")
+        except Exception:
+            return []
 
     async def get_market_cap(self, symbol: str) -> List[Dict]:
         """Get current market capitalization"""
@@ -771,7 +774,7 @@ class FMPClient:
     async def get_batch_quotes(self, symbols: List[str]) -> List[Dict]:
         """Get quotes for multiple companies"""
         symbol_str = ",".join(symbols)
-        return await self._make_request(f"quote/{symbol_str}")
+        return await self._make_request(f"quote/{symbol_str}", version="stable")
 
     async def get_batch_market_cap(self, symbols: List[str]) -> Dict:
         """Get market cap for multiple companies"""
