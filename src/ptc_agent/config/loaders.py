@@ -258,6 +258,8 @@ def load_from_dict(
         llm_config = LLMConfig(
             name=llm_name,
             flash=llm_data.get("flash"),
+            market_insight=llm_data.get("market_insight"),
+            event_interpret=llm_data.get("event_interpret"),
             compaction=llm_data.get("compaction"),
             fetch=llm_data.get("fetch"),
             fallback=llm_data.get("fallback"),
@@ -376,6 +378,8 @@ cli:
 llm:
   name: "your-model-name"       # Required: primary model from models.json
   # flash: "your-flash-model"   # Optional: model for flash agent
+  # market_insight: "your-market-insight-model"  # Optional: model for market insight generation
+  # event_interpret: "your-event-model"          # Optional: model for market event summaries/titles
   # compaction: "your-model"    # Optional: model for context compaction
   # fetch: "your-model"         # Optional: model for web content extraction
   # fallback:                   # Optional: fallback models when primary fails

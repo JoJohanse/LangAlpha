@@ -319,6 +319,47 @@ async def test_get_insight_owner_accessible(client):
 
 
 @pytest.mark.asyncio
+async def test_get_insight_expires_stale_generating(client):
+    """Polling a stale generating insight returns the refreshed failed row."""
+    stale = _insight(
+        user_id=USER_ID,
+        type="personalized",
+        status="generating",
+        headline=None,
+        summary=None,
+        content=None,
+        topics=None,
+        completed_at=None,
+    )
+    failed = _insight(
+        user_id=USER_ID,
+        type="personalized",
+        status="failed",
+        headline=None,
+        summary=None,
+        content=None,
+        topics=None,
+        completed_at=NOW,
+    )
+    mock_service = MagicMock()
+    mock_service.expire_stale_generating_insight = AsyncMock(return_value=True)
+
+    with (
+        patch(
+            f"{INSIGHT_DB}.get_market_insight",
+            new_callable=AsyncMock,
+            side_effect=[stale, failed],
+        ),
+        patch(f"{SERVICE_PATH}.get_instance", return_value=mock_service),
+    ):
+        resp = await client.get(f"/api/v1/insights/{INSIGHT_ID}")
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "failed"
+    mock_service.expire_stale_generating_insight.assert_awaited_once_with(stale)
+
+
+@pytest.mark.asyncio
 async def test_get_insight_non_owner_returns_404(client):
     """Per-user insight owned by another user returns 404 (not 403)."""
     other_insight = _insight(user_id=OTHER_USER_ID, type="personalized")

@@ -83,6 +83,13 @@ async def get_insight_detail(market_insight_id: str, user_id: CurrentUserId):
     if row.get("user_id") is not None and str(row["user_id"]) != user_id:
         raise_not_found("Market Insight")
 
+    if row.get("status") == "generating":
+        service = InsightService.get_instance()
+        if await service.expire_stale_generating_insight(row):
+            row = await market_insight_db.get_market_insight(market_insight_id)
+            if not row:
+                raise_not_found("Market Insight")
+
     return _attach_brief_session(row)
 
 

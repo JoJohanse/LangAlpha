@@ -16,6 +16,8 @@ from ._common import logger
 _MODE_MODEL_MAP = {
     "ptc": ("name", "preferred_model"),
     "flash": ("flash", "preferred_flash_model"),
+    "market_insight": ("market_insight", "market_insight_model"),
+    "event_interpret": ("event_interpret", "event_interpret_model"),
 }
 
 
@@ -292,6 +294,8 @@ async def resolve_llm_config(
         config.llm = LLMConfig(
             name=resolved_name if mode == "ptc" else "placeholder",
             flash=resolved_name if mode == "flash" else model_pref.get("preferred_flash_model"),
+            market_insight=resolved_name if mode == "market_insight" else model_pref.get("market_insight_model"),
+            event_interpret=resolved_name if mode == "event_interpret" else model_pref.get("event_interpret_model"),
             compaction=(
                 model_pref.get("compaction_model")
                 or model_pref.get("summarization_model")
@@ -328,6 +332,8 @@ async def resolve_llm_config(
         ("summarization_model", "compaction"),
         ("compaction_model", "compaction"),
         ("fetch_model", "fetch"),
+        ("market_insight_model", "market_insight"),
+        ("event_interpret_model", "event_interpret"),
     ]
     for pref_key_other, config_field in _other_model_keys:
         user_val = model_pref.get(pref_key_other)
@@ -452,7 +458,16 @@ async def resolve_llm_config(
             logger.error("[CHAT] Failed to resolve model %s, skipping", model_name, exc_info=True)
             return None
 
-    subsidiary_pairs = [(role, m) for role, m in [("compaction", config.llm.compaction), ("fetch", config.llm.fetch)] if m]
+    subsidiary_pairs = [
+        (role, m)
+        for role, m in [
+            ("compaction", config.llm.compaction),
+            ("fetch", config.llm.fetch),
+            ("market_insight", config.llm.market_insight),
+            ("event_interpret", config.llm.event_interpret),
+        ]
+        if m
+    ]
     fallback_models = config.llm.fallback or []
 
     all_models = [m for _, m in subsidiary_pairs] + list(fallback_models)

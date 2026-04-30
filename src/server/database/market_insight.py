@@ -123,17 +123,43 @@ async def complete_market_insight(
 
 async def fail_market_insight(market_insight_id: str, error_message: str) -> None:
     """Mark an insight as failed. Only transitions from 'generating'."""
+    now = datetime.now(timezone.utc)
     async with get_db_connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
                 UPDATE market_insights
-                SET status = 'failed', error_message = %s
+                SET status = 'failed', error_message = %s, completed_at = %s
                 WHERE market_insight_id = %s
                   AND status = 'generating'
                 """,
-                (error_message, market_insight_id),
+                (error_message, now, market_insight_id),
             )
+
+
+async def fail_stale_generating_insight(
+    market_insight_id: str,
+    older_than: datetime,
+    error_message: str,
+) -> bool:
+    """Mark a stale generating insight as failed.
+
+    Returns True when the row was transitioned to failed.
+    """
+    now = datetime.now(timezone.utc)
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE market_insights
+                SET status = 'failed', error_message = %s, completed_at = %s
+                WHERE market_insight_id = %s
+                  AND status = 'generating'
+                  AND created_at < %s
+                """,
+                (error_message, now, market_insight_id, older_than),
+            )
+            return cur.rowcount > 0
 
 
 async def get_market_insight(market_insight_id: str) -> Optional[dict]:

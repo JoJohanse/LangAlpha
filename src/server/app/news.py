@@ -41,6 +41,24 @@ def _build_tag_map(tagged_articles: list[Any]) -> dict[str, dict[str, Any]]:
     return {a.article_id: a.as_dict() for a in tagged_articles}
 
 
+def _merge_tag_maps(
+    persisted_tag_map: dict[str, dict[str, Any]],
+    fresh_tag_map: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    return {**persisted_tag_map, **fresh_tag_map}
+
+
+def _tagged_tickers(tags: dict[str, Any], fallback: Any) -> list[str]:
+    tagged = tags.get("tickers") if tags else None
+    if isinstance(tagged, list):
+        cleaned = [str(t).strip() for t in tagged if str(t).strip()]
+        if cleaned:
+            return cleaned
+    if isinstance(fallback, list):
+        return [str(t).strip() for t in fallback if str(t).strip()]
+    return []
+
+
 def _effective_description(article: dict[str, Any]) -> str:
     title = str(article.get("title") or "").strip()
     description = str(article.get("description") or "").strip()
@@ -98,7 +116,7 @@ def _compact(article: dict, tag_map: dict[str, dict[str, Any]] | None = None) ->
         image_url=article.get("image_url"),
         article_url=article.get("article_url"),
         source=NewsPublisher(**source),
-        tickers=article.get("tickers", []),
+        tickers=_tagged_tickers(tags, article.get("tickers", [])),
         has_sentiment=bool(sentiments and len(sentiments) > 0),
         sector=tags.get("sector"),
         topic=tags.get("topic"),
@@ -113,6 +131,7 @@ async def _ensure_tags(raw_articles: list[dict[str, Any]]) -> dict[str, dict[str
 
 
 @router.get("", response_model=NewsCompactResponse)
+@handle_api_exceptions("get news", logger)
 async def get_news(
     user_id: CurrentUserId,
     tickers: str | None = Query(None, description="Comma-separated ticker symbols"),
@@ -132,7 +151,7 @@ async def get_news(
             raw_results = cached.get("results") or []
             tag_map = await _ensure_tags(raw_results)
             persisted_tag_map = await _persisted_tag_map_from_raw(raw_results)
-            merged_tag_map = {**tag_map, **persisted_tag_map}
+            merged_tag_map = _merge_tag_maps(persisted_tag_map, tag_map)
             results = [
                 c
                 for a in raw_results
@@ -161,7 +180,7 @@ async def get_news(
     raw_results = data.get("results", []) if isinstance(data, dict) else []
     tag_map = await _ensure_tags(raw_results)
     persisted_tag_map = await _persisted_tag_map_from_raw(raw_results)
-    merged_tag_map = {**tag_map, **persisted_tag_map}
+    merged_tag_map = _merge_tag_maps(persisted_tag_map, tag_map)
     results = [
         c
         for a in raw_results
@@ -174,6 +193,7 @@ async def get_news(
 
 
 @router.get("/hot-rank", response_model=NewsHotRankResponse)
+@handle_api_exceptions("get news hot rank", logger)
 async def get_news_hot_rank(
     user_id: CurrentUserId,
     limit: int = Query(20, ge=1, le=100),
@@ -209,6 +229,7 @@ async def get_news_hot_rank(
 
 
 @router.get("/by-sector/{sector}", response_model=NewsCompactResponse)
+@handle_api_exceptions("get news by sector", logger)
 async def get_news_by_sector(
     sector: str,
     user_id: CurrentUserId,
@@ -242,6 +263,7 @@ async def get_news_by_sector(
 
 
 @router.get("/by-topic/{topic}", response_model=NewsCompactResponse)
+@handle_api_exceptions("get news by topic", logger)
 async def get_news_by_topic(
     topic: str,
     user_id: CurrentUserId,
@@ -275,6 +297,7 @@ async def get_news_by_topic(
 
 
 @router.post("/{article_id}/ask", response_model=NewsAskResponse)
+@handle_api_exceptions("ask about news article", logger)
 async def ask_about_news_article(
     article_id: str,
     payload: NewsAskRequest,
@@ -292,6 +315,7 @@ async def ask_about_news_article(
 
 
 @router.get("/{article_id}", response_model=NewsArticle)
+@handle_api_exceptions("get news article", logger)
 async def get_news_article(article_id: str, user_id: CurrentUserId):
     cached = await _cache.get_article_by_id(article_id)
     if cached:
@@ -301,6 +325,7 @@ async def get_news_article(article_id: str, user_id: CurrentUserId):
             cached.setdefault("sector", tag_row.get("sector"))
             cached.setdefault("topic", tag_row.get("topic"))
             cached.setdefault("region", tag_row.get("region"))
+            cached["tickers"] = _tagged_tickers(tag_row, cached.get("tickers", []))
             if not cached.get("tags"):
                 cached["tags"] = tag_row.get("tags") or []
         return NewsArticle(**cached)
@@ -329,6 +354,7 @@ async def get_news_article(article_id: str, user_id: CurrentUserId):
             article["topic"] = tagged.topic
             article["region"] = tagged.region
             article["tags"] = tagged.tags or []
+            article["tickers"] = tagged.tickers
         return NewsArticle(**article)
 
     snapshot = await tags_db.get_article_tag(article_id)
@@ -344,6 +370,7 @@ async def get_news_article(article_id: str, user_id: CurrentUserId):
 
 
 @router.post("/{article_id}/interpret", response_model=InterpretResponse)
+@handle_api_exceptions("interpret news article", logger)
 async def interpret_news_article(
     article_id: str, payload: InterpretRequest, user_id: CurrentUserId
 ):

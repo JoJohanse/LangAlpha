@@ -38,6 +38,17 @@ DEFAULT_GENERATION_TIMEOUT = 600
 DEFAULT_DEDUP_WINDOW_MINUTES = 5
 
 
+def _get_market_insight_model_name(config) -> str:
+    """Return the configured model dedicated to market insight generation."""
+    if config and config.llm:
+        return (
+            config.llm.market_insight
+            or config.llm.flash
+            or config.llm.name
+        )
+    return "qwen3.5-flash"
+
+
 _TAIL = (
     "Only include genuinely noteworthy stories. "
     "Report facts, not predictions or recommendations. "
@@ -64,9 +75,49 @@ Respond with ONLY the JSON object.
 """
 
 
-def _safe_parse_dt(value: str | None) -> datetime | None:
+def _message_content_to_text(content) -> str | None:
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text") or block.get("content")
+                if text:
+                    text_parts.append(str(text))
+            elif isinstance(block, str):
+                text_parts.append(block)
+        return "\n".join(text_parts) if text_parts else None
+
+    if content:
+        return str(content)
+    return None
+
+
+def _is_assistant_response_message(msg) -> bool:
+    msg_type = str(getattr(msg, "type", "") or "").lower()
+    if msg_type in {"ai", "assistant", "chat"}:
+        return True
+
+    # Some providers/adapters return a generic ChatMessage with role metadata.
+    role = str(
+        getattr(msg, "role", "")
+        or getattr(msg, "name", "")
+        or getattr(msg, "additional_kwargs", {}).get("role", "")
+        or ""
+    ).lower()
+    if role == "assistant":
+        return True
+
+    excluded_types = {"human", "user", "system", "tool", "function"}
+    return bool(getattr(msg, "content", None)) and msg_type not in excluded_types
+
+
+def _safe_parse_dt(value: str | datetime | None) -> datetime | None:
     if not value:
         return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if dt.tzinfo is None:
@@ -252,7 +303,7 @@ async def _llm_extract_fallback(raw_text: str) -> dict:
     from src.server.app import setup
 
     config = setup.agent_config
-    flash_model_name = config.llm.flash if config and config.llm else "claude-haiku-4-5-20251001"
+    flash_model_name = _get_market_insight_model_name(config)
 
     llm = create_llm(flash_model_name)
     result = await make_api_call(
@@ -293,32 +344,53 @@ async def _run_flash_agent(prompt: str, user_id: str | None = None) -> str:
         try:
             from src.server.handlers.chat.llm_config import resolve_llm_config
 
-            config = await resolve_llm_config(config, user_id, request_model=None, is_byok=True, mode="flash")
+            config = await resolve_llm_config(
+                config,
+                user_id,
+                request_model=None,
+                is_byok=True,
+                mode="market_insight",
+            )
         except Exception as exc:
             logger.warning(f"[MARKET_INSIGHT] Could not resolve user LLM, falling back to system: {exc}")
 
     if config.llm is None:
         raise ValueError("No LLM configured — set a model in agent_config.yaml or select one in Settings")
 
+    market_model_name = _get_market_insight_model_name(config)
+    config = config.model_copy(deep=False)
+    if config.llm:
+        config.llm = config.llm.model_copy()
+    config.llm.flash = market_model_name
+
     graph = build_flash_graph(config=config)
     input_state = {"messages": [HumanMessage(content=prompt)]}
     result = await graph.ainvoke(input_state)
 
-    # Extract text from the last AI message
+    # Extract text from the last assistant/chat response message.
     messages = result.get("messages", [])
     for msg in reversed(messages):
-        if hasattr(msg, "type") and msg.type == "ai" and msg.content:
-            content = msg.content
-            if isinstance(content, list):
-                text_parts = []
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text_parts.append(block["text"])
-                    elif isinstance(block, str):
-                        text_parts.append(block)
-                return "\n".join(text_parts)
-            return str(content)
+        if _is_assistant_response_message(msg):
+            text = _message_content_to_text(getattr(msg, "content", None))
+            if text:
+                return text
+            logger.warning(
+                f"[MARKET_INSIGHT] Assistant message had no usable text: "
+                f"type={getattr(msg, 'type', None)}, "
+                f"tool_calls={getattr(msg, 'tool_calls', None)}, "
+                f"additional_kwargs={getattr(msg, 'additional_kwargs', None)}"
+            )
 
+    # Log full message structure for diagnosis
+    msg_summaries = []
+    for msg in messages:
+        msg_type = getattr(msg, "type", type(msg).__name__)
+        has_content = bool(getattr(msg, "content", None))
+        msg_summaries.append(f"{msg_type}(content={has_content})")
+    logger.error(
+        f"[MARKET_INSIGHT] Flash agent returned no usable AI message. "
+        f"Total messages: {len(messages)}. Message summary: {msg_summaries}"
+    )
     raise ValueError("Flash agent returned no AI message")
 
 
@@ -343,6 +415,7 @@ class InsightService:
         self._max_symbols = DEFAULT_MAX_SYMBOLS
         self._max_news_items = DEFAULT_MAX_NEWS_ITEMS
         self._dedup_window_minutes = DEFAULT_DEDUP_WINDOW_MINUTES
+        self._personalized_tasks: set[asyncio.Task[None]] = set()
         # Schedule times (overridden by config)
         self._pre_market = datetime.strptime("04:00", "%H:%M").time()
         self._post_market = datetime.strptime("20:30", "%H:%M").time()
@@ -429,6 +502,11 @@ class InsightService:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        for task in list(self._personalized_tasks):
+            if not task.done():
+                task.cancel()
+        if self._personalized_tasks:
+            await asyncio.gather(*self._personalized_tasks, return_exceptions=True)
         logger.info("[MARKET_INSIGHT] Shutdown complete")
 
     # ------------------------------------------------------------------
@@ -476,8 +554,11 @@ class InsightService:
         )
 
         # Atomic idempotency: try to insert, handle conflict from partial unique index
+        from src.server.app import setup
+
+        model_name = _get_market_insight_model_name(setup.agent_config)
         row = await insight_db.create_market_insight_if_not_generating(
-            model="flash",
+            model=model_name,
             type="personalized",
             user_id=user_id,
             metadata={"schema_version": 3, "has_context": bool(symbols_context)},
@@ -486,6 +567,21 @@ class InsightService:
             # Another request already created a generating row
             existing = await insight_db.get_user_generating_insight(user_id)
             if existing:
+                if await self.expire_stale_generating_insight(existing):
+                    row = await insight_db.create_market_insight_if_not_generating(
+                        model=model_name,
+                        type="personalized",
+                        user_id=user_id,
+                        metadata={"schema_version": 3, "has_context": bool(symbols_context)},
+                    )
+                    if row is not None:
+                        insight_id = row["market_insight_id"]
+                        self._start_personalized_generation_task(user_id, insight_id, prompt)
+                        logger.info(
+                            f"[MARKET_INSIGHT] Replaced stale personalized generation "
+                            f"for user {user_id}: id={insight_id}"
+                        )
+                        return row
                 raise InsightAlreadyGeneratingError(existing)
             # Edge case: generating row completed between our conflict and here.
             # Check for the just-completed insight instead of returning None.
@@ -500,16 +596,81 @@ class InsightService:
         insight_id = row["market_insight_id"]
 
         # Fire background task and return immediately
-        asyncio.create_task(
-            self._run_personalized_generation(user_id, insight_id, prompt),
-            name=f"insight_gen_{insight_id}",
-        )
+        self._start_personalized_generation_task(user_id, insight_id, prompt)
 
         logger.info(
             f"[MARKET_INSIGHT] Started personalized generation for user {user_id}: "
             f"id={insight_id}"
         )
         return row
+
+    def _start_personalized_generation_task(
+        self, user_id: str, insight_id: str, prompt: str
+    ) -> None:
+        task = asyncio.create_task(
+            self._run_personalized_generation(user_id, insight_id, prompt),
+            name=f"insight_gen_{insight_id}",
+        )
+        self._personalized_tasks.add(task)
+
+        def _cleanup(done_task: asyncio.Task[None]) -> None:
+            self._personalized_tasks.discard(done_task)
+            try:
+                done_task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception(
+                    "[MARKET_INSIGHT] Personalized generation task crashed: %s",
+                    insight_id,
+                )
+
+        task.add_done_callback(_cleanup)
+
+    def _stale_generation_cutoff(self) -> datetime:
+        grace_seconds = 60
+        return datetime.now(timezone.utc) - timedelta(
+            seconds=self._generation_timeout + grace_seconds
+        )
+
+    def _is_stale_generating_row(self, row: dict) -> bool:
+        if row.get("status") != "generating":
+            return False
+
+        created_at = row.get("created_at")
+        if isinstance(created_at, datetime):
+            created_dt = created_at
+            if created_dt.tzinfo is None:
+                created_dt = created_dt.replace(tzinfo=timezone.utc)
+            created_dt = created_dt.astimezone(timezone.utc)
+        else:
+            created_dt = _safe_parse_dt(str(created_at) if created_at else None)
+
+        return bool(created_dt and created_dt < self._stale_generation_cutoff())
+
+    async def expire_stale_generating_insight(self, row: dict) -> bool:
+        """Transition an over-time generating insight to failed."""
+        if not self._is_stale_generating_row(row):
+            return False
+
+        insight_id = row.get("market_insight_id")
+        if not insight_id:
+            return False
+
+        expired = await insight_db.fail_stale_generating_insight(
+            market_insight_id=str(insight_id),
+            older_than=self._stale_generation_cutoff(),
+            error_message=(
+                "Insight generation exceeded the timeout window and was "
+                "marked failed so it can be retried."
+            ),
+        )
+        if expired:
+            logger.warning(
+                "[MARKET_INSIGHT] Expired stale generating insight: id=%s",
+                insight_id,
+            )
+        return expired
 
     async def _run_personalized_generation(
         self, user_id: str, insight_id: str, prompt: str
@@ -842,8 +1003,11 @@ class InsightService:
         from src.config.settings import HOST_MODE, LOCAL_DEV_USER_ID
         system_user_id = None if HOST_MODE == "platform" else LOCAL_DEV_USER_ID
 
+        from src.server.app import setup
+        model_name = _get_market_insight_model_name(setup.agent_config)
+
         row = await insight_db.create_market_insight(
-            model="flash",
+            model=model_name,
             type=job_type,
             metadata={
                 "instruction": instruction,

@@ -153,8 +153,8 @@ news_data:
   providers:
     - name: pobo-proxy
     # - name: ginlix-data
-    - name: fmp
-    - name: yfinance
+    # - name: fmp
+    # - name: yfinance
 
 
 # =============================================================================
@@ -179,7 +179,7 @@ market_insight:
 # =============================================================================
 # GitHub bot for agent self-improvement (issue reporting, PR proposals)
 github:
-  enabled: true
+  enabled: false
   bot_name: "langalpha-bot"
   bot_email: "bot@ginlix.ai"
   token_env: "GITHUB_BOT_TOKEN"  # env var name holding the bot PAT (resolved from .env)

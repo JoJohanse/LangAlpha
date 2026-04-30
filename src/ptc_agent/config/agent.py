@@ -175,6 +175,8 @@ class LLMConfig(BaseModel):
 
     name: str  # Name/alias from src/llms/manifest/models.json
     flash: str | None = None  # LLM for flash agent, defaults to main llm if None
+    market_insight: str | None = None  # LLM for scheduled/on-demand market insights
+    event_interpret: str | None = None  # LLM for market event title/takeaway generation
     compaction: str | None = None  # LLM for context compaction (summarization step)
     fetch: str | None = None  # LLM for web content extraction (fetch tool)
     fallback: list[str] | None = None  # Fallback model names for retry exhaustion

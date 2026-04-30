@@ -26,8 +26,8 @@ def test_cluster_merges_similar_news_into_one_event():
     svc = EventService.get_instance()
     now = datetime.now(timezone.utc)
     data = [
-        _article("a1", "Apple launches new AI iPhone strategy", ["AAPL"], now),
-        _article("a2", "Apple unveils AI strategy for iPhone lineup", ["AAPL"], now - timedelta(minutes=40)),
+        _article("a1", "Crude oil price surges on OPEC decision", ["CL"], now),
+        _article("a2", "Crude oil price climbs as OPEC signals production cuts", ["CL"], now - timedelta(minutes=40)),
     ]
 
     clusters = svc._cluster_articles(data)  # noqa: SLF001 - unit-test private behavior
@@ -39,8 +39,8 @@ def test_cluster_splits_different_events():
     svc = EventService.get_instance()
     now = datetime.now(timezone.utc)
     data = [
-        _article("a1", "Apple launches new AI iPhone strategy", ["AAPL"], now),
-        _article("a2", "Tesla recalls vehicles after brake report", ["TSLA"], now - timedelta(minutes=10)),
+        _article("a1", "Crude oil price rises on supply concerns", ["CL"], now),
+        _article("a2", "Gold futures fall as dollar strengthens", ["GC"], now - timedelta(minutes=10)),
     ]
 
     clusters = svc._cluster_articles(data)  # noqa: SLF001
@@ -52,20 +52,24 @@ async def test_persist_clusters_generates_title_and_takeaway_before_upsert():
     svc = EventService.get_instance()
     now = datetime.now(timezone.utc)
     data = [
-        _article("a1", "Apple launches new AI iPhone strategy", ["AAPL"], now),
-        _article("a2", "Apple unveils AI strategy for iPhone lineup", ["AAPL"], now - timedelta(minutes=40)),
+        _article("a1", "Crude oil price surges on OPEC decision", ["CL"], now),
+        _article("a2", "Crude oil price climbs as OPEC signals production cuts", ["CL"], now - timedelta(minutes=40)),
     ]
     clusters = svc._cluster_articles(data)  # noqa: SLF001
 
-    generated = (
-        None,
-        "Apple AI handset strategy expansion",
-        "Apple kept releasing AI handset updates, and the market is watching the read-through for hardware demand and suppliers.",
+    mock_result = (
+        "gpt-4o-mini",
+        "Oil price surges on OPEC production cut decision",
+        "OPEC's decision to cut production drove crude oil prices higher, with markets anticipating tighter supply ahead.",
         True,
     )
 
     with (
-        patch.object(svc, "_generate_event_interpretation", new=AsyncMock(return_value=generated)),
+        patch(
+            "src.server.services.event_service.EventService._generate_event_interpretation",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ),
         patch(
             "src.server.services.event_service.market_event_db.upsert_market_event",
             new_callable=AsyncMock,
@@ -77,10 +81,9 @@ async def test_persist_clusters_generates_title_and_takeaway_before_upsert():
         await svc._persist_clusters(clusters)  # noqa: SLF001
 
     payload = upsert_mock.await_args.args[0]
-    assert payload["title"] == "Apple AI handset strategy expansion"
+    assert payload["title"] == "Oil price surges on OPEC production cut decision"
     assert payload["ai_takeaway"] == (
-        "Apple kept releasing AI handset updates, and the market is watching "
-        "the read-through for hardware demand and suppliers."
+        "OPEC's decision to cut production drove crude oil prices higher, with markets anticipating tighter supply ahead."
     )
 
 
@@ -89,20 +92,24 @@ async def test_persist_clusters_does_not_cache_fallback_takeaway_when_generation
     svc = EventService.get_instance()
     now = datetime.now(timezone.utc)
     data = [
-        _article("a1", "Apple launches new AI iPhone strategy", ["AAPL"], now),
-        _article("a2", "Apple unveils AI strategy for iPhone lineup", ["AAPL"], now - timedelta(minutes=40)),
+        _article("a1", "Crude oil price surges on OPEC decision", ["CL"], now),
+        _article("a2", "Crude oil price climbs as OPEC signals production cuts", ["CL"], now - timedelta(minutes=40)),
     ]
     clusters = svc._cluster_articles(data)  # noqa: SLF001
 
-    generated = (
-        None,
-        "Apple launches new AI iPhone strategy",
+    mock_result = (
+        "gpt-4o-mini",
+        "Crude oil price surges on OPEC decision",
         "fallback text that should not be cached",
         False,
     )
 
     with (
-        patch.object(svc, "_generate_event_interpretation", new=AsyncMock(return_value=generated)),
+        patch(
+            "src.server.services.event_service.EventService._generate_event_interpretation",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ),
         patch(
             "src.server.services.event_service.market_event_db.upsert_market_event",
             new_callable=AsyncMock,
@@ -114,5 +121,5 @@ async def test_persist_clusters_does_not_cache_fallback_takeaway_when_generation
         await svc._persist_clusters(clusters)  # noqa: SLF001
 
     payload = upsert_mock.await_args.args[0]
-    assert payload["title"] == "Apple launches new AI iPhone strategy"
+    assert payload["title"] == "Crude oil price surges on OPEC decision"
     assert payload["ai_takeaway"] is None

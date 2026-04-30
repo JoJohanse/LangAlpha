@@ -214,9 +214,31 @@ async def test_fail_market_insight(mi_mock_db, mock_cursor):
     assert "UPDATE market_insights" in sql
     assert "status = 'failed'" in sql
     assert "error_message = %s" in sql
+    assert "completed_at = %s" in sql
     params = mock_cursor.execute.call_args[0][1]
     assert params[0] == "LLM timeout"
-    assert params[1] == "ins-1"
+    assert params[2] == "ins-1"
+
+
+@pytest.mark.asyncio
+async def test_fail_stale_generating_insight(mi_mock_db, mock_cursor):
+    """fail_stale_generating_insight only fails rows older than the cutoff."""
+    from src.server.database.market_insight import fail_stale_generating_insight
+
+    mock_cursor.rowcount = 1
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=11)
+
+    result = await fail_stale_generating_insight("ins-1", cutoff, "stale")
+
+    assert result is True
+    sql = mock_cursor.execute.call_args[0][0]
+    assert "UPDATE market_insights" in sql
+    assert "status = 'failed'" in sql
+    assert "created_at < %s" in sql
+    params = mock_cursor.execute.call_args[0][1]
+    assert params[0] == "stale"
+    assert params[2] == "ins-1"
+    assert params[3] == cutoff
 
 
 # ===========================================================================

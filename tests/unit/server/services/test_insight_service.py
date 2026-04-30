@@ -8,7 +8,8 @@ user context building, and schedule computation.
 import asyncio
 import json
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 
@@ -21,6 +22,7 @@ from src.server.services.insight_service import (
     _build_personalized_instruction,
     _extract_json_string,
     _extract_structured_output,
+    _run_flash_agent,
 )
 
 
@@ -179,6 +181,36 @@ class TestPromptInstructions:
 
 
 # ---------------------------------------------------------------------------
+# _run_flash_agent
+# ---------------------------------------------------------------------------
+
+class TestRunFlashAgent:
+    @pytest.mark.asyncio
+    @patch("src.ptc_agent.agent.flash.graph.build_flash_graph")
+    async def test_extracts_chat_message_content(self, mock_build_graph):
+        """Some Flash providers return ChatMessage(type='chat') instead of AIMessage."""
+        graph = SimpleNamespace(
+            ainvoke=AsyncMock(
+                return_value={
+                    "messages": [
+                        SimpleNamespace(type="human", content="prompt"),
+                        SimpleNamespace(type="chat", content=_valid_json_str()),
+                    ]
+                }
+            )
+        )
+        mock_build_graph.return_value = graph
+
+        llm_config = SimpleNamespace(flash="DeepSeek-V4-Flash", market_insight=None, name=None)
+        config = SimpleNamespace(llm=llm_config, model_copy=lambda **kwargs: SimpleNamespace(llm=llm_config))
+        with patch("src.server.app.setup.agent_config", config):
+            result = await _run_flash_agent("prompt")
+
+        assert result == _valid_json_str()
+        graph.ainvoke.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
 # generate_for_user
 # ---------------------------------------------------------------------------
 
@@ -247,7 +279,11 @@ class TestGenerateForUser:
     @patch("src.server.services.insight_service.insight_db")
     async def test_existing_generating_raises(self, mock_db):
         """In-progress insight raises InsightAlreadyGeneratingError."""
-        existing = {"market_insight_id": "ins-existing", "status": "generating"}
+        existing = {
+            "market_insight_id": "ins-existing",
+            "status": "generating",
+            "created_at": datetime.now(timezone.utc),
+        }
         mock_db.get_user_recent_completed_insight = AsyncMock(return_value=None)
         # Atomic insert returns None (conflict from partial unique index)
         mock_db.create_market_insight_if_not_generating = AsyncMock(return_value=None)
@@ -261,6 +297,40 @@ class TestGenerateForUser:
                 await svc.generate_for_user("user-789")
 
         assert exc_info.value.existing_insight is existing
+
+    @pytest.mark.asyncio
+    @patch("src.server.services.insight_service.insight_db")
+    async def test_stale_generating_is_failed_and_recreated(self, mock_db):
+        """Stale in-progress rows are failed so users can retry generation."""
+        old_created_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+        existing = {
+            "market_insight_id": "ins-stale",
+            "status": "generating",
+            "created_at": old_created_at,
+        }
+        new_row = {
+            "market_insight_id": "ins-new",
+            "created_at": datetime.now(timezone.utc),
+            "status": "generating",
+            "type": "personalized",
+        }
+        mock_db.get_user_recent_completed_insight = AsyncMock(return_value=None)
+        mock_db.create_market_insight_if_not_generating = AsyncMock(
+            side_effect=[None, new_row]
+        )
+        mock_db.get_user_generating_insight = AsyncMock(return_value=existing)
+        mock_db.fail_stale_generating_insight = AsyncMock(return_value=True)
+
+        svc = InsightService()
+        svc._generation_timeout = 60
+
+        with patch.object(svc, "_build_user_context", new_callable=AsyncMock, return_value=""), \
+             patch.object(svc, "_start_personalized_generation_task") as mock_start:
+            result = await svc.generate_for_user("user-stale")
+
+        assert result is new_row
+        mock_db.fail_stale_generating_insight.assert_awaited_once()
+        mock_start.assert_called_once_with("user-stale", "ins-new", ANY)
 
     @pytest.mark.asyncio
     @patch("src.server.services.insight_service.insight_db")

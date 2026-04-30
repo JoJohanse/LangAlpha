@@ -14,6 +14,7 @@ from uuid import NAMESPACE_DNS, uuid5
 from pydantic import BaseModel, Field
 
 from src.server.database import market_event as market_event_db
+from src.server.services.commodity_mapping import map_article_to_commodities
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,17 @@ _STOP_WORDS = {
     "the", "a", "an", "to", "for", "of", "and", "or", "in", "on", "with", "at",
     "by", "from", "is", "are", "was", "were", "be", "as", "its", "it", "this", "that",
 }
+
+
+def _get_event_interpret_model_name(config) -> str:
+    """Return the configured model dedicated to event title/takeaway generation."""
+    if config and config.llm:
+        return (
+            config.llm.event_interpret
+            or config.llm.flash
+            or config.llm.name
+        )
+    return "DeepSeek-V4-Flash"
 
 
 def _safe_parse_dt(value: str | None) -> datetime | None:
@@ -261,7 +273,7 @@ class EventService:
         try:
             if not setup.agent_config or not setup.agent_config.llm:
                 raise RuntimeError("LLM not configured")
-            model_name = setup.agent_config.llm.flash
+            model_name = _get_event_interpret_model_name(setup.agent_config)
             llm = create_llm(model_name)
             system_prompt = (
                 "You are a financial market analyst. "
@@ -306,7 +318,7 @@ class EventService:
         try:
             if not setup.agent_config or not setup.agent_config.llm:
                 raise RuntimeError("LLM not configured")
-            model_name = setup.agent_config.llm.flash
+            model_name = _get_event_interpret_model_name(setup.agent_config)
             llm = create_llm(model_name)
             system_prompt = (
                 "You are a financial market analyst. "
@@ -376,9 +388,20 @@ class EventService:
             published_at = _safe_parse_dt(raw.get("published_at"))
             if published_at is None:
                 continue
-            tickers = {str(t).upper() for t in (raw.get("tickers") or []) if t}
-            if not tickers:
+            raw_tickers = [str(t).upper() for t in (raw.get("tickers") or []) if t]
+            description = str(raw.get("description") or "").strip()
+            content = str(
+                raw.get("content") or raw.get("body") or raw.get("summary") or ""
+            ).strip()
+            mapped = map_article_to_commodities(
+                title=title,
+                description=description,
+                content=content,
+                tickers=raw_tickers,
+            )
+            if not mapped:
                 continue
+            tickers = set(mapped)
             sentiments = []
             for s in (raw.get("sentiments") or []):
                 sent = str((s or {}).get("sentiment") or "").lower()

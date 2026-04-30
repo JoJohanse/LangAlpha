@@ -552,6 +552,19 @@
       "pdf"
     ]
   },
+  "qwen3.5-flash": {
+    "model_id": "qwen3.5-flash",
+    "provider": "dashscope",
+    "visible": true,
+    "input_modalities": [
+      "text",
+      "image",
+      "pdf"
+    ],
+    "extra_body": {
+      "enable_thinking": true
+    }
+  },
   "qwen3.6-flash": {
     "model_id": "qwen3.6-flash",
     "provider": "dashscope",

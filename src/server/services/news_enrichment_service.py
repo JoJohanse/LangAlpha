@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from src.server.database import news_article_tags as tags_db
+from src.server.services.commodity_mapping import map_article_to_commodities
 
 _TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
     "ai": ("ai", "artificial intelligence", "llm", "semiconductor", "chip"),
@@ -121,7 +122,15 @@ class NewsEnrichmentService:
         description = str(article.get("description") or "").strip()
         source_name = str(((article.get("source") or {}).get("name")) or "").strip() or None
         text = _norm_text([title, description, source_name or ""])
-        tickers = sorted({str(t).upper() for t in (article.get("tickers") or []) if t})
+        raw_tickers = [str(t).upper() for t in (article.get("tickers") or []) if t]
+        tickers = map_article_to_commodities(
+            title=title,
+            description=description,
+            content=str(article.get("content") or article.get("body") or "").strip(),
+            tickers=raw_tickers,
+        )
+        if not tickers:
+            return None
         sentiments = []
         for s in (article.get("sentiments") or []):
             sent = str((s or {}).get("sentiment") or "").lower()
@@ -184,8 +193,9 @@ class NewsEnrichmentService:
         description = str(article.get("description") or "").strip()
         source_name = str(((article.get("source") or {}).get("name")) or "").strip()
         article_url = str(article.get("article_url") or "").strip()
-        tickers = [str(t).upper() for t in (article.get("tickers") or []) if t]
         tagged = self._tag_article(article)
+        raw_tickers = [str(t).upper() for t in (article.get("tickers") or []) if t]
+        tickers = tagged.tickers if tagged else raw_tickers
         ask_message = (question or "").strip()
         if not ask_message:
             ask_message = f"Please analyze the market impact of this news"
